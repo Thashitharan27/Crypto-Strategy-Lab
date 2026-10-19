@@ -197,3 +197,18 @@ approval, request completion, or ownership reconciliation.
 Keep the read-only claim inspection from #832 authoritative for surviving
 request/worker claims. Treat ambiguous native state as RECOVERY_UNVERIFIED,
 preserve evidence, never replay automatically and never clear stale locks.
+
+
+## B4 Windows blocking recovery/audit regression gate (2026-10-19)
+
+The existing Windows CI safety job now also runs the real guarded HTTP,
+native completed-manifest recovery, candidate composition, bounded audit
+writer/verifier and read-only claim-reconciliation pytest modules. This
+exercises Windows file and path semantics, exclusive audit creation, missing
+or linked evidence, audit-admission refusal before mutations and preservation
+of stale native worker/request claims using **temporary fixtures only**.
+
+This is not new original-workstation parity certification or permission to
+release the guarded server. The normal production launcher remains read-only;
+physical interruption, power-loss durability and request-to-run provenance
+limitations remain qualified. Do not automatically reclaim native locks.

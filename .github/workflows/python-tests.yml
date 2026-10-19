@@ -370,6 +370,12 @@ jobs:
           tests/test_browser_http.py
           tests/test_browser_http_completed_run.py
           tests/test_browser_http_config.py
+          tests/test_browser_guarded_http.py
+          tests/test_browser_guarded_recovery_verify.py
+          tests/test_browser_release_composition.py
+          tests/test_browser_release_audit.py
+          tests/test_browser_release_audit_verify.py
+          tests/test_browser_release_reconciliation.py
           tests/test_stage16_hidden_pair_management_gui_removed.py
           tests/test_freeze_browser_parity_catalog_inputs.py
           tests/test_verify_browser_parity_provenance.py
