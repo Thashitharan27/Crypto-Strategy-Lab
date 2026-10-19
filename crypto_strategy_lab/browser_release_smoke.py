@@ -179,6 +179,7 @@ def run_readonly_release_smoke() -> dict[str, object]:
                 ("POST", "/api/v1/guarded/jobs/interrupted/cancel"),
             ):
                 assert client.request(method, endpoint, headers=new_auth).status_code == 404
+        checked += 6
         assert retained.read_bytes() == b"retain native ownership"
         assert claim.is_dir() and worker.is_dir()
         assert protected.read_bytes() == b"must-stay-original"
