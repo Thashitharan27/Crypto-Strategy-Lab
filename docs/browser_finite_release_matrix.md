@@ -609,3 +609,24 @@ server side and a conditional production UI, include fail-closed authorization,
 audit/security gates and an isolated clean-checkout release smoke, then seek
 fresh explicit user permission **before activation**. Keep #501 held and PySide6
 fallback supported.
+
+
+## B4 Phase 4: clean-checkout read-only release smoke (2026-10-19)
+
+Run `python -m crypto_strategy_lab.browser_release_smoke` from an
+**actual clean Git checkout** with optional FastAPI/TestClient dependencies
+installed. The smoke rejects a dirty or untracked worktree before any HTTP
+composition. It creates only disposable isolated fixture roots, assembles the
+real production read-only FastAPI app through the reviewed Phase 3 composition,
+and checks token denial, loopback Host restriction, read-only health, five
+unavailable guarded write/job/status/progress/cancel routes and unchanged
+fixture bytes. It prints the actual commit and bounded non-sensitive results.
+This is an isolated application smoke, **not** the certified original Windows
+data/browser-versus-PySide6 replay or a claim of hardened production activation.
+Missing optional dependencies are errors for the operator smoke (while fixture
+pytest tests may skip optional FastAPI-only coverage).
+
+Any future production guarded server/UI composition remains a **separate**
+reviewed implementation requiring explicit release owner approval, trusted
+isolated writable roots, dedicated audit and a genuine Windows browser smoke.
+No ordinary browser write or execution capability is enabled by this phase.
