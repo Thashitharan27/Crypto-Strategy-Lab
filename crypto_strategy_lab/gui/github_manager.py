@@ -393,6 +393,8 @@ class GitHubIntegrationWidget(QWidget):
         self.manager = GitManager()
         self.active_work = active_work or (lambda: False)
         self.pool = QThreadPool.globalInstance()
+        # Retain asynchronous signal owners until the queued GUI callback runs.
+        self._pending_tasks = set()
         self.current = None
         self.activity = []
         self._build()
@@ -488,8 +490,22 @@ class GitHubIntegrationWidget(QWidget):
     def _async(self, fn, done, description, *, error_handler=None):
         self._log(description)
         task = _Task(fn)
-        task.signals.done.connect(done)
-        task.signals.failed.connect(error_handler or self._error)
+        self._pending_tasks.add(task)
+
+        def on_done(result):
+            try:
+                done(result)
+            finally:
+                self._pending_tasks.discard(task)
+
+        def on_failed(message):
+            try:
+                (error_handler or self._error)(message)
+            finally:
+                self._pending_tasks.discard(task)
+
+        task.signals.done.connect(on_done)
+        task.signals.failed.connect(on_failed)
         self.pool.start(task)
 
     def _status_error(self, message):
