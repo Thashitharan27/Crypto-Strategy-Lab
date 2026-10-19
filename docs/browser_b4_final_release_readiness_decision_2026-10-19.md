@@ -95,9 +95,12 @@ ownership evidence). Read `browser_b4_activation_proposal_2026-10-19.md` for
 the actual results, proposed identity/access matrix and uncertain-work policy.
 The earlier implementation baseline above remains historical evidence.
 
-The current account's inherited source-write access has not been removed and
-no dedicated deployment identity is provisioned. Original ACL changes remain
-outside current authorization. The implementing agent's review is not a separate
-independent sign-off. Provisioning choice/approval, independent acceptance and
-an exact reviewed activation change still precede any activation decision.
-The HOLD and all preservation/rollback rules above remain unchanged.
+The earlier unprovisioned status is superseded by
+`browser_b4_windows_provisioning_certification_2026-10-19.md`: the user separately
+approved account-specific source restrictions; the dedicated identity, scoped
+source boundary and isolated read-only runtime passed actual Windows account
+checks. The staged canonical cache remains a bounded reference subset. The
+implementing agent's review is not a separate independent sign-off. Independent
+acceptance, an exact reviewed activation change and separate explicit activation
+approval still precede any guarded deployment. The HOLD and preservation/rollback
+rules above remain unchanged.

@@ -1,6 +1,9 @@
 # B4 security review and production activation proposal — 2026-10-19
 
 **Decision: preparation completed within the scope below; RELEASE HELD.**
+Later approved Windows provisioning and account-level runtime results are recorded
+in `browser_b4_windows_provisioning_certification_2026-10-19.md`; that report
+supersedes this proposal's historical unprovisioned status, not its release hold.
 This is a reviewable deployment proposal, not approval, an activation switch or
 an independent reviewer sign-off. The implementing agent performed this review.
 Production browser execution/configuration editing remain OFF; PR #501 remains

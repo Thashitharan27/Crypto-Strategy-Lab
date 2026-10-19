@@ -1,5 +1,9 @@
 # B4 Windows operational readiness — 2026-10-19
 
+Later approved dedicated-account provisioning and read-only runtime results are
+recorded in `browser_b4_windows_provisioning_certification_2026-10-19.md`.
+That report supersedes the historical unprovisioned identity observation below.
+
 **Decision: RELEASE HELD.** The remaining finite local operational checks below
 passed. They do not authorize browser execution/configuration editing or clear
 the separate production-activation decisions. PR #501 stays OPEN/DRAFT and held.
