@@ -16,6 +16,28 @@ new Function("module", "exports", "require", bundle.outputFiles[0].text)(
 const api = generated.exports;
 const TOKEN = "test-only-token";
 
+test("ordinary client can authenticate the release capability read", async () => {
+  const compiled = await build({entryPoints: [resolve("src/api.ts")], platform: "node",
+    format: "cjs", bundle: true, write: false, logLevel: "silent"});
+  const module = {exports: {}};
+  new Function("module", "exports", compiled.outputFiles[0].text)(module, module.exports);
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (path, options) => {
+    calls.push({path, options});
+    return {ok: true, json: async () => ({execution: false, configuration_editing: false})};
+  };
+  try {
+    assert.deepEqual(await module.exports.getReadOnly("/api/v1/release/capabilities", TOKEN),
+      {execution: false, configuration_editing: false});
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.method, "GET");
+    assert.equal(calls[0].options.headers.Authorization, `Bearer ${TOKEN}`);
+    await assert.rejects(module.exports.getReadOnly("/api/v1/release/activate", TOKEN), /Unsupported API path/);
+    assert.equal(calls.length, 1);
+  } finally { globalThis.fetch = original; }
+});
+
 test("all guarded operations deny before network access", async () => {
   const original = globalThis.fetch;
   let calls = 0;
