@@ -264,6 +264,7 @@ def test_b4_explicit_production_guarded_request_denied_before_composition(tmp_pa
 
 def test_b4_environment_cannot_activate_guarded_production_routes(tmp_path):
     """Feature-like environment toggles have no authority in production."""
+    pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
     static_root = _static_dist(tmp_path / "dist")
