@@ -35,7 +35,7 @@ fsync cases. Final scoped preservation recheck: **6,550 protected files and
 present. Newly isolated pytest settings are separate fixture additions.
 
 Dependency review references: [Vite Windows path handling advisory](https://github.com/vitejs/vite/security/advisories/GHSA-fx2h-pf6j-xcff),
-[Vite/launch-editor advisory](https://github.com/vitejs/vite/security/advisories/GHSA-v6wh-96g9-6wx3)
+[Vite/launch-editor advisory](https://github.com/vitejs/launch-editor/security/advisories/GHSA-v6wh-96g9-6wx3)
 and [esbuild development-server advisory](https://github.com/evanw/esbuild/security/advisories/GHSA-67mh-4wv8-2f99).
 Zero audit findings describe the captured fresh dependency resolution, not a
 permanent absence of future vulnerabilities or the untouched old local lockfile.
