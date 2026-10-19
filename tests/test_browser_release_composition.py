@@ -190,3 +190,36 @@ def test_candidate_factory_does_not_override_normal_readonly_launcher(tmp_path):
                 environ={**env, "CRYPTO_STRATEGY_LAB_BROWSER_RELEASE_APPROVED": "true"},
             )
     preflight.assert_not_called()
+
+
+def test_guarded_candidate_audit_events_persist_without_sensitive_data(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from crypto_strategy_lab.browser_release_audit import B4AuditJournal
+    from crypto_strategy_lab.browser_release_composition import compose_b4_guarded_candidate
+
+    paths, env = _roots(tmp_path)
+    audit_root = tmp_path / "audit"
+    audit_root.mkdir()
+    native = Mock()
+    token = "journal-secret-" + "x" * 48
+    with B4AuditJournal(audit_root, "session-1") as journal:
+        candidate = compose_b4_guarded_candidate(
+            native_application=native, configuration=paths["future-config"],
+            execution=paths["future-runs"], static_root=paths["static"],
+            environ=env, token=token, audit_callback=journal,
+            approval_granted=True,
+        )
+        try:
+            with TestClient(candidate.app, base_url="http://127.0.0.1:8767") as client:
+                url = "/api/v1/guarded/jobs/not-found"
+                assert client.get(url).status_code == 401
+                assert client.get(url, headers={"Authorization": "Bearer " + token}).status_code == 404
+        finally:
+            candidate.close()
+    assert journal.path.read_bytes() == (
+        b'{"operation":"AUTH","outcome":"DENIED"}\n'
+        b'{"operation":"STATUS","outcome":"NOT_FOUND"}\n'
+    )
+    assert token.encode() not in journal.path.read_bytes()
+    native.run.assert_not_called()
