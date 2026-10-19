@@ -570,7 +570,21 @@ def test_b4_job_submit_outcome_audit_loss_preserves_uncertain_claim(monkeypatch)
 
     config = Mock(spec=native.ResearchRunConfig)
     monkeypatch.setattr(native, "normalize_data_lake_config", lambda _: config)
-    integration = Mock()
+    class ClaimedIntegration:
+        def __init__(self):
+            self.claimed = set()
+            self.submit_calls = 0
+            self.cancel_calls = 0
+
+        def submit(self, request_id, request, config):
+            self.submit_calls += 1
+            self.claimed.add(request_id)
+
+        def cancel(self, request_id):
+            self.cancel_calls += 1
+            self.claimed.discard(request_id)
+
+    integration = ClaimedIntegration()
     events = []
 
     def audit(event):
@@ -601,7 +615,9 @@ def test_b4_job_submit_outcome_audit_loss_preserves_uncertain_claim(monkeypatch)
     assert first.json() == {"detail": "Guarded outcome unverified"}
     assert second.status_code == 503
     assert second.json() == {"detail": "Guarded audit unavailable"}
-    integration.submit.assert_called_once()
+    assert integration.submit_calls == 1
+    assert integration.cancel_calls == 0
+    assert integration.claimed == {"claim-uncertain"}
     assert events == [
         {"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"},
         {"operation": "JOB_SUBMIT", "outcome": "SUCCESS"},
