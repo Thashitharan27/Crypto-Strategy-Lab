@@ -121,11 +121,44 @@ def run_readonly_release_smoke() -> dict[str, object]:
             ):
                 assert client.request(method, path, headers=auth).status_code == 404
                 checked += 1
+        # Read-only rollback evidence smoke: an interrupted mutation and surviving
+        # native ownership must remain release-held with no evidence modified.
+        from crypto_strategy_lab.browser_release_audit import B4AuditJournal
+        from crypto_strategy_lab.browser_release_rollback_review import inspect_b4_rollback_readiness
+        audit_dir = base / "audit"
+        audit_dir.mkdir()
+        claim = dirs["future-runs"] / ".guarded-request-interrupted.claim"
+        worker = dirs["future-runs"] / ".guarded-native-worker.lock"
+        claim.mkdir()
+        worker.mkdir()
+        retained = claim / "retained.bin"
+        retained.write_bytes(b"retain native ownership")
+        with B4AuditJournal(audit_dir, "rollback-smoke") as journal:
+            journal({"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"})
+            journal({"operation": "STATUS", "outcome": "SUCCESS"})
+        before_audit = journal.path.read_bytes()
+        evidence = inspect_b4_rollback_readiness(
+            audit_root=audit_dir, session_id="rollback-smoke",
+            execution_root=dirs["future-runs"], request_id="interrupted",
+        )
+        assert evidence["status"] == "RELEASE_HELD"
+        assert evidence["safe_to_replay"] is False
+        assert evidence["safe_to_clear_locks"] is False
+        assert evidence["production_activation_authorized"] is False
+        assert {"MUTATION_ATTEMPT_REQUIRES_REVIEW",
+                "REQUEST_CLAIM_REQUIRES_REVIEW",
+                "WORKER_LOCK_REQUIRES_REVIEW"} <= set(evidence["issues"])
+        assert journal.path.read_bytes() == before_audit
+        assert retained.read_bytes() == b"retain native ownership"
+        assert claim.is_dir() and worker.is_dir()
         assert protected.read_bytes() == b"must-stay-original"
         assert not list(dirs["future-config"].iterdir())
-        assert not list(dirs["future-runs"].iterdir())
+        assert sorted(p.name for p in dirs["future-runs"].iterdir()) == [
+            ".guarded-native-worker.lock", ".guarded-request-interrupted.claim",
+        ]
         return {"status": "PASS_READ_ONLY", "http_checks": checked,
-                "guarded_routes_available": False, "originals_unchanged": True}
+                "guarded_routes_available": False, "originals_unchanged": True,
+                "rollback_evidence": "RELEASE_HELD"}
 
 
 def main() -> None:
