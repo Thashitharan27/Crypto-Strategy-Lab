@@ -45,6 +45,15 @@ def inspect_b4_audit(root: Path, session_id: str) -> dict[str, str | int | bool 
                 return result
             with os.fdopen(fd, "rb", closefd=False) as stream:
                 data = stream.read(_MAX_BYTES + 1)
+            # Audit evidence may be concurrently appended or replaced. Never
+            # certify a read that raced a change to the opened file.
+            after_stat = os.fstat(fd)
+            if (after_stat.st_dev != file_stat.st_dev
+                    or after_stat.st_ino != file_stat.st_ino
+                    or after_stat.st_size != file_stat.st_size
+                    or after_stat.st_mtime_ns != file_stat.st_mtime_ns
+                    or after_stat.st_ctime_ns != file_stat.st_ctime_ns):
+                return result
             if len(data) != file_stat.st_size or not data.endswith(b"\n"):
                 return result
             lines = data.splitlines()
