@@ -256,6 +256,7 @@ def test_commands_never_construct_force_push(repo, monkeypatch):
 
 
 def test_background_refresh_failure_is_inline_and_does_not_open_modal(qtbot, monkeypatch):
+    from PySide6.QtCore import QThreadPool
     from PySide6.QtWidgets import QMessageBox
     from crypto_strategy_lab.gui import github_manager
     warnings = []
@@ -271,7 +272,12 @@ def test_background_refresh_failure_is_inline_and_does_not_open_modal(qtbot, mon
     monkeypatch.setattr(manager, "status", unavailable)
     monkeypatch.setattr(github_manager, "GitManager", lambda: manager)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
-    widget = GitHubIntegrationWidget()
+    # Earlier GUI windows can still occupy the shared pool with real Git work.
+    # Isolate scheduling, while retaining the actual QRunnable/queued signal path.
+    pool = QThreadPool()
+    with monkeypatch.context() as construction:
+        construction.setattr(github_manager.QThreadPool, "globalInstance", lambda: pool)
+        widget = GitHubIntegrationWidget()
     qtbot.addWidget(widget)
     # Drive the real QThreadPool -> queued Qt signal path, not a synchronous
     # replacement of _async. This was the event-loop hang seen in raw CI.
@@ -284,6 +290,7 @@ def test_background_refresh_failure_is_inline_and_does_not_open_modal(qtbot, mon
 
 
 def test_explicit_operation_failure_keeps_error_dialog(qtbot, monkeypatch):
+    from PySide6.QtCore import QThreadPool
     from PySide6.QtWidgets import QMessageBox
     from crypto_strategy_lab.gui import github_manager
     warnings = []
@@ -291,7 +298,10 @@ def test_explicit_operation_failure_keeps_error_dialog(qtbot, monkeypatch):
     monkeypatch.setattr(manager, "status", lambda fetch=False: GitStatus("main", "origin", ()))
     monkeypatch.setattr(github_manager, "GitManager", lambda: manager)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
-    widget = GitHubIntegrationWidget()
+    pool = QThreadPool()
+    with monkeypatch.context() as construction:
+        construction.setattr(github_manager.QThreadPool, "globalInstance", lambda: pool)
+        widget = GitHubIntegrationWidget()
     qtbot.addWidget(widget)
 
     def unavailable():
