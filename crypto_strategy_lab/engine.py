@@ -1045,7 +1045,7 @@ class BacktestEngine(DILadderExecutionMixin):
         dynamic_stop = (
             risk_mode == "SR_STRUCTURE"
             or str(getattr(self, "signal_strategy_mode", "")).upper()
-            in {"EMA_9_20_PULLBACK", "FAIR_VALUE_GAP"}
+            in {"EMA_9_20_PULLBACK", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR"}
         )
         if enabled and not dynamic_stop:
             multiple = float(

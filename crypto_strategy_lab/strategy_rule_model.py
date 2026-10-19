@@ -38,7 +38,7 @@ from crypto_strategy_lab.volume_profile import VOLUME_PROFILE_RULE_INDICATORS
 # selection but adds a deliberately simple, non-optimized trend confirmation
 # baseline at compile time. LONG/SHORT eligibility still belongs to the market
 # permission grid below.
-SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "FAIR_VALUE_GAP", FIB_RETRACEMENT_MODE, MTF_SR_REACTION_MODE)
+SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", FIB_RETRACEMENT_MODE, MTF_SR_REACTION_MODE)
 # Backward-compatible internal name retained while the UI moves to "Signal Strategy".
 DIRECTION_MODES = SIGNAL_STRATEGIES
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
@@ -938,13 +938,13 @@ def _ema_320_close_cross_native_rules() -> tuple[dict, ...]:
     },)
 
 
-def _fair_value_gap_native_rules() -> tuple[dict, ...]:
+def _fair_value_gap_native_rules(mode="FAIR_VALUE_GAP") -> tuple[dict, ...]:
     """Store the signal selection in a no-op native rule for GUI round trips."""
     return ({
         "action": "REJECT", "indicator": "ATR_PCT", "condition": "OUTSIDE",
         "minimum": LOW, "maximum": HIGH,
         f"{_META_PREFIX}kind": "REQUIRED",
-        _DMI_TREND_MODE_MARKER: "FAIR_VALUE_GAP",
+        _DMI_TREND_MODE_MARKER: mode,
         _DMI_TREND_RULE_MARKER: "FAIR_VALUE_GAP_SIGNAL",
     },)
 
@@ -1099,8 +1099,8 @@ def compile_profiles(
             native_rules = list(_ema_9_20_pullback_native_rules())
         elif mode == "EMA_320_CLOSE_CROSS":
             native_rules = list(_ema_320_close_cross_native_rules())
-        elif mode == "FAIR_VALUE_GAP":
-            native_rules = list(_fair_value_gap_native_rules())
+        elif mode in {"FAIR_VALUE_GAP", "FVG_SIX_FACTOR"}:
+            native_rules = list(_fair_value_gap_native_rules(mode))
         elif mode == FIB_RETRACEMENT_MODE:
             native_rules = list(_fib_retracement_native_rules())
         elif mode == MTF_SR_REACTION_MODE:

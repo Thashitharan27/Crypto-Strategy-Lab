@@ -63,6 +63,12 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #chart-wrap{position:relative;min-height:0}
 #chart{position:absolute;inset:0;z-index:1}
 #fib-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
+#fvg-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+#fvg-review{padding:8px 16px;background:#122a31;border-bottom:1px solid #2d5862;font-size:12px;line-height:1.6}
+#fvg-review[hidden]{display:none}
+.fvg-zone{position:absolute;background:#22d3ee20;border:1px solid #22d3ee}
+.fvg-note{position:absolute;font-size:11px;background:#12313d;color:#b6f6ff;padding:2px 5px;white-space:nowrap}
+.fvg-level{position:absolute;height:1px;border-top:1px dashed #eab308}
 #trade-box-layer{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}
 .fib-band{position:absolute;box-sizing:border-box;border-top:1px solid rgba(255,255,255,.18)}
 .fib-level-label{position:absolute;transform:translateY(-50%);padding:2px 5px;border-radius:3px;font:10px/1.2 Segoe UI,Arial,sans-serif;font-weight:700;white-space:nowrap;color:#f8fafc;background:rgba(15,23,32,.90);border:1px solid rgba(148,163,184,.44);box-shadow:0 1px 3px rgba(0,0,0,.32)}
@@ -146,6 +152,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   <div id="chart-wrap">
     <div id="chart"></div>
     <div id="fib-layer"></div>
+    <div id="fvg-layer"></div>
     <div id="trade-box-layer"></div>
   </div>
 </div>
@@ -252,6 +259,12 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   const chartWrap = $('chart-wrap');
   const fibLayer = $('fib-layer');
   const tradeBoxLayer = $('trade-box-layer');
+  const fvgLayer = $('fvg-layer');
+  const fvgReview = document.createElement('div');
+  fvgReview.id = 'fvg-review';
+  fvgReview.hidden = true;
+  $('reviewbar').appendChild(fvgReview);
+  fvgReview.style.flexBasis = '100%';
   let payload = null;
   let currentTimeframe = boot.run.timeframe;
   let loadGeneration = 0;
@@ -357,7 +370,48 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 
   function redrawOverlays() {
     drawFibOverlay();
+    drawFvgOverlay();
     drawTradeBox();
+  }
+
+  function drawFvgOverlay() {
+    fvgLayer.replaceChildren();
+    const fvg = payload?.fvgDerivation;
+    if (!chart || !candles || fvg?.status !== 'AVAILABLE') return;
+    const paneHeight = chart.panes()[0].getHeight();
+    fvgLayer.style.height = paneHeight + 'px';
+    const right = Math.max(0,chartWrap.clientWidth-76);
+    const chartBars = payload.candles || [];
+    function xAt(time, fallback) {
+      // Floor to the displayed candle, so HTF charts retain the saved timestamps.
+      let timeOnChart = null;
+      for (const bar of chartBars) { if (bar.time > time) break; timeOnChart = bar.time; }
+      if (timeOnChart == null) return fallback;
+      return chart.timeScale().timeToCoordinate(timeOnChart) ?? fallback;
+    }
+    const left = Math.max(0,Math.min(right,xAt(fvg.formedTime,0)));
+    const end = Math.max(left,Math.min(right,xAt(fvg.signalTime,right)));
+    const top = candles.priceToCoordinate(fvg.top), bottom = candles.priceToCoordinate(fvg.bottom);
+    if (top != null && bottom != null) {
+      const zone = document.createElement('div'); zone.className = 'fvg-zone';
+      Object.assign(zone.style,{left:left+'px',width:Math.max(3,end-left)+'px',top:Math.max(0,Math.min(top,bottom))+'px',height:Math.max(2,Math.min(paneHeight,Math.max(top,bottom))-Math.max(0,Math.min(top,bottom)))+'px'});
+      fvgLayer.appendChild(zone);
+    }
+    const levels = new Map();
+    for (const [price,name] of [[fvg.impulseOrigin,'Swing origin'],[fvg.midpoint,'Swing 50%'],[fvg.impulseExtreme,'Swing extreme'],[fvg.structureLevel,'Structure break'],[fvg.confluenceLevel,'S/R confluence']]) {
+      levels.set(price,levels.has(price) ? levels.get(price)+' / '+name : name);
+    }
+    for (const [price,name] of levels) {
+      const y = candles.priceToCoordinate(price);
+      if (y == null || y < 0 || y >= paneHeight) continue;
+      const line = document.createElement('div'); line.className='fvg-level';
+      const levelLeft = name.startsWith('Swing') ? Math.max(0,xAt(fvg.impulseStartTime,0)) : left;
+      Object.assign(line.style,{left:levelLeft+'px',width:Math.max(3,end-levelLeft)+'px',top:y+'px'});
+      const label = document.createElement('span'); label.className='fvg-note';
+      label.textContent=name+' '+Number(price).toFixed(2);
+      Object.assign(label.style,{left:Math.min(left+4,Math.max(0,right-180))+'px',top:Math.max(0,y-17)+'px'});
+      fvgLayer.append(line,label);
+    }
   }
 
   function renderDiagnostics() {
@@ -391,6 +445,12 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
       'Fib: ' + String(payload.fibDerivation?.status || 'NOT_AVAILABLE'),
     ];
     diag.textContent = lines.join('\\n');
+    const fvg = payload.fvgDerivation;
+    fvgReview.hidden = fvg?.status !== 'AVAILABLE';
+    if (!fvgReview.hidden) {
+      const checks = Object.entries(fvg.checks || {}).map(([name,pass]) => (pass ? '✓ ' : '✕ ') + name);
+      fvgReview.textContent = 'FVG six-factor v1 · ' + fvg.side + ' · Gap ' + Number(fvg.bottom).toFixed(2) + '–' + Number(fvg.top).toFixed(2) + ' · ' + checks.join(' · ');
+    }
   }
 
   function addTradeLabel(x,y,className,text) {

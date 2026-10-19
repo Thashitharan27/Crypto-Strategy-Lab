@@ -43,7 +43,7 @@ def test_v2_html_is_minimal_and_diagnostic():
     assert "selectedEmas.has(Number(overlay.period))" in html
     assert 'value="9"' in html
     assert 'value="100"' in html
-    assert "S/R" not in html
+    assert "fvgDerivation" in html
 
 
 def test_v2_server_uses_minimal_payload_path():

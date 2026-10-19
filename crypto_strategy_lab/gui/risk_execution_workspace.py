@@ -506,7 +506,12 @@ class RiskExecutionWorkspace(QWidget):
 
     def refresh_visibility(self, *_args) -> None:
         ema_920 = self._ema_920_selected()
-        fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
+        fvg = self._signal_strategy_mode() in {"FAIR_VALUE_GAP", "FVG_SIX_FACTOR"}
+        self.fvg_stop_method.setText(
+            "Displacement Candle Boundary - Automatic"
+            if self._signal_strategy_mode() == "FVG_SIX_FACTOR"
+            else "FVG Box Boundary - Automatic"
+        )
         fib = self._signal_strategy_mode() == "FIB_RETRACEMENT"
         for card in self.fib_stage_cards:
             card.setVisible(fib)
@@ -811,7 +816,7 @@ class RiskExecutionWorkspace(QWidget):
         risk_dollars = float(execution.initial_equity) * effective_risk
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
         ema_920 = self._ema_920_selected()
-        fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
+        fvg = self._signal_strategy_mode() in {"FAIR_VALUE_GAP", "FVG_SIX_FACTOR"}
         fib = self._signal_strategy_mode() == "FIB_RETRACEMENT"
         cross_mode = {
             "EMA_20_100_CROSS": "LONG",
@@ -990,7 +995,9 @@ class RiskExecutionWorkspace(QWidget):
             )
         elif fvg:
             stop_description = (
-                "Stop: beyond the selected FVG box (below bullish / above bearish), "
+                ("Stop: beyond the displacement candle (middle candle of the gap), "
+                 if self._signal_strategy_mode() == "FVG_SIX_FACTOR"
+                 else "Stop: beyond the selected FVG box (below bullish / above bearish), ") +
                 "with a 0.05× signal ATR buffer; size from the full stop distance. "
             )
         elif fib:
