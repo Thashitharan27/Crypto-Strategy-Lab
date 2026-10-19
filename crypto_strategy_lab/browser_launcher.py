@@ -14,6 +14,9 @@ import secrets
 from typing import Any
 
 from crypto_strategy_lab.browser_http import create_browser_app
+from crypto_strategy_lab.browser_release_preflight import (
+    GuardedReleaseRoots, prepare_guarded_release_roots,
+)
 from crypto_strategy_lab.browser_visualizer_coordinator import BrowserVisualizerCoordinator
 from crypto_strategy_lab.browser_readonly_service import build_browser_readonly_service
 from crypto_strategy_lab.paths import (
@@ -48,6 +51,40 @@ def _path_from_env(
 ) -> Path:
     value = str(environ.get(name, "")).strip()
     return Path(value).expanduser() if value else Path(default)
+
+
+def preflight_browser_guarded_release(
+    *,
+    configuration: Path,
+    execution: Path,
+    environ: Mapping[str, str] | None = None,
+    static_root: Path | None = None,
+    output_root: Path | None = None,
+    config_root: Path | None = None,
+) -> GuardedReleaseRoots:
+    """Validate future isolated roots without constructing a writable server.
+
+    Both existing desktop/browser saved roots, canonical Data Lake raw/cache
+    and the served browser assets remain protected. Validation never grants
+    release authorization; only the separately reviewed activation path can.
+    """
+    source = os.environ if environ is None else environ
+    lake = resolve_data_lake_runtime_paths(source)
+    assets = Path(static_root) if static_root is not None else PROJECT_ROOT / "browser_ui" / "dist"
+    original_output = Path(output_root) if output_root is not None else _path_from_env(
+        source, "CRYPTO_STRATEGY_LAB_OUTPUT_DIR", OUTPUT_DIR / "data_lake_v2",
+    )
+    original_config = Path(config_root) if config_root is not None else _path_from_env(
+        source, "CRYPTO_STRATEGY_LAB_CONFIG_DIR", CONFIG_DIR / "data_lake",
+    )
+    return prepare_guarded_release_roots(
+        configuration=configuration,
+        execution=execution,
+        protected_roots=(
+            lake.raw_root, lake.cache_root, assets,
+            OUTPUT_DIR, CONFIG_DIR, original_output, original_config,
+        ),
+    )
 
 
 def build_browser_readonly_runtime(
