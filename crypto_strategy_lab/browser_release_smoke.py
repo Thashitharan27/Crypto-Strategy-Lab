@@ -23,7 +23,9 @@ def verify_clean_checkout(repo: Path) -> str:
             ["git", "-C", str(root), *args], check=True,
             capture_output=True, text=True, timeout=15,
         ).stdout.strip()
-    # Git for Windows reports forward-slash paths even when pathlib uses\n    # backslashes. Compare canonical paths, not platform-specific text.\n    if Path(git("rev-parse", "--show-toplevel")).resolve(strict=True) != root:
+    # Git for Windows reports forward-slash paths even when pathlib uses
+    # backslashes. Compare canonical paths, not platform-specific text.
+    if Path(git("rev-parse", "--show-toplevel")).resolve(strict=True) != root:
         raise ValueError("Smoke requires the repository checkout root")
     commit = git("rev-parse", "HEAD")
     if len(commit) != 40 or any(c not in "0123456789abcdef" for c in commit.lower()):
