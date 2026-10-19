@@ -48,3 +48,13 @@ The safe rollback review is complete only when the operator has recorded verifie
 A future *guarded* production release requires **separate** independent security/reliability review of authorization, audit-admission and post-commit failure semantics, persistent ownership/restart uncertainty, root ACLs, final clean production build/launch smoke, and the documented finite parity limitations. Then seek a new explicit release-owner activation approval for that specific change.
 
 **No command in this runbook enables browser execution or configuration editing. PR #501 remains held.**
+
+## Review continuation: bounded journals and unknown ownership objects
+
+See `browser_b4_activation_proposal_2026-10-19.md` for the proposed deployment
+identity, access matrix and unresolved decisions. Audit sessions stop accepting
+appends at 8 MiB or 100,000 records; preserve exhausted sessions rather than
+rotating/restarting them to bypass a failure. Outcome capacity can fail after
+native effects, so uncertain-work review remains required. A regular file at a
+native request/worker ownership path now means UNKNOWN, not absent: retain it,
+keep replay/lock clearing denied and investigate without repairing evidence.

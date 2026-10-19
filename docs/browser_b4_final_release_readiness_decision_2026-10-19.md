@@ -85,3 +85,19 @@ Do not repeat completed finite acceptance solely to increase test counts.
 
 **Final status: RELEASE HELD; production browser execution OFF; configuration
 editing OFF; PR #501 HELD.**
+
+## Continued review and deployment proposal (2026-10-19)
+
+Combined preparation baseline `8d6952bb50ff9dfc8d330fcceda2547a7f411e81`
+includes verified PRs #852 (audit writer/inspector contract), #853 (patched
+build tooling and blocking dependency audit) and #854 (unknown malformed
+ownership evidence). Read `browser_b4_activation_proposal_2026-10-19.md` for
+the actual results, proposed identity/access matrix and uncertain-work policy.
+The earlier implementation baseline above remains historical evidence.
+
+The current account's inherited source-write access has not been removed and
+no dedicated deployment identity is provisioned. Original ACL changes remain
+outside current authorization. The implementing agent's review is not a separate
+independent sign-off. Provisioning choice/approval, independent acceptance and
+an exact reviewed activation change still precede any activation decision.
+The HOLD and all preservation/rollback rules above remain unchanged.
