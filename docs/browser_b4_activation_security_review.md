@@ -159,3 +159,23 @@ proof of rollback; preserve request/worker claims and verify native artifacts
 before any manual resolution. Subsequent mutation requests fail closed.
 Auditor filesystem durability, concurrency with in-flight work, host power loss
 and restart reconciliation still require an independent final release review.
+
+
+## B4 read-only request recovery evidence (2026-10-19)
+
+`inspect_b4_recovery` reads a canonical isolated native execution root and
+reports the presence/unknown state of the persistent request claim and native
+worker lock. It **never** deletes locks, rewrites claims, replays a request,
+resumes work, or labels the persisted request COMPLETED. When the operator
+explicitly supplies a separate native saved-run folder ID, it calls the
+existing native manifest/artifact hash verifier; even an
+`ARTIFACTS_VERIFIED` result does **not** establish that the saved run belongs
+to the named request. The association remains `UNVERIFIED`, and the request
+remains `RECOVERY_UNVERIFIED`.
+
+Inaccessible or unsafe roots/claims fail closed to unknown rather than
+implicitly absent. This is read-only investigative evidence, **not** an
+automated recovery API or permission to clear stale worker ownership. Audit
+records deliberately omit request IDs, so they also cannot independently
+establish request-to-run mapping. Keep rollback manual and fail closed until
+independent native artifact reconciliation can supply stronger provenance.
