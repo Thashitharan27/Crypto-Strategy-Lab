@@ -12,7 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_production_react_app_does_not_mount_guarded_controls():
     source = (ROOT / "browser_ui" / "src" / "main.tsx").read_text(encoding="utf-8")
-    assert "GuardedRunControls" not in source
+    assert 'getReadOnly<ReleaseCapabilities>("/api/v1/release/capabilities", token)' in source
+    assert "releaseCapabilities?.execution === true" in source
+    assert "releaseCapabilities?.configuration_editing === true" in source
+    assert "<GuardedRunControls enabled={true} token={token}/>" in source
+    assert "setReleaseCapabilities(null)" in source
     assert "saveGuardedConfig" not in source
     assert "submitGuardedRun" not in source
     assert "/api/v1/guarded/" not in source
@@ -80,7 +84,8 @@ def test_certification_browser_entry_is_separate_and_unarmed_by_default():
         encoding="utf-8"
     )
     manifest = json.loads((ui / "package.json").read_text(encoding="utf-8"))
-    assert "GuardedRunControls" not in production
+    assert "releaseCapabilities?.execution === true" in production
+    assert "releaseCapabilities?.configuration_editing === true" in production
     assert "GuardedRunControls" in certification
     assert "React.useState(false)" in certification
     assert "enabled={armed && token.length > 0}" in certification
