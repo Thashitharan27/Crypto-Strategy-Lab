@@ -113,3 +113,76 @@ def test_unverified_journal_attempt_state_is_unknown(tmp_path):
     damaged = inspect_b4_audit(tmp_path, "damaged")
     assert damaged["status"] == "AUDIT_UNVERIFIED"
     assert damaged["any_mutation_attempt"] is None
+
+
+
+def test_audit_snapshot_raced_inode_metadata_fails_closed(tmp_path, monkeypatch):
+    import os
+    from crypto_strategy_lab import browser_release_audit_verify as verifier
+
+    with B4AuditJournal(tmp_path, "raced") as journal:
+        journal({"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"})
+    untouched = journal.path.read_bytes()
+    real_fstat = os.fstat
+    calls = 0
+
+    def changed_metadata(fd):
+        nonlocal calls
+        calls += 1
+        info = real_fstat(fd)
+        if calls == 2:
+            # Simulate an appended/rewritten journal racing the snapshot.
+            class ChangedStat:
+                st_dev = info.st_dev
+                st_ino = info.st_ino
+                st_size = info.st_size
+                st_mtime_ns = info.st_mtime_ns + 1
+                st_ctime_ns = info.st_ctime_ns
+                st_mode = info.st_mode
+            return ChangedStat()
+        return info
+
+    monkeypatch.setattr(verifier.os, "fstat", changed_metadata)
+    result = verifier.inspect_b4_audit(tmp_path, "raced")
+    assert result["status"] == "AUDIT_UNVERIFIED"
+    assert result["any_mutation_attempt"] is None
+    assert calls >= 2
+    assert journal.path.read_bytes() == untouched
+
+
+def test_replaced_named_journal_is_unverified(tmp_path, monkeypatch):
+    import os
+    from crypto_strategy_lab import browser_release_audit_verify as verifier
+
+    with B4AuditJournal(tmp_path, "swap") as journal:
+        journal({"operation": "AUTH", "outcome": "DENIED"})
+    path = journal.path
+    original_open = os.open
+    swapped = False
+
+    def replace_before_path_recheck(target, flags, *args, **kwargs):
+        nonlocal swapped
+        if str(target) == str(path) and not swapped:
+            swapped = True
+            replacement = tmp_path / "replacement.jsonl"
+            replacement.write_bytes(
+                b'{"operation":"JOB_SUBMIT","outcome":"ATTEMPT"}\\n'
+            )
+            os.replace(replacement, path)
+        return original_open(target, flags, *args, **kwargs)
+
+    # Swap only on the SECOND open, after the first descriptor is secured.
+    opens = 0
+    def open_with_swap(target, flags, *args, **kwargs):
+        nonlocal opens
+        if str(target) == str(path):
+            opens += 1
+            if opens == 2:
+                return replace_before_path_recheck(target, flags, *args, **kwargs)
+        return original_open(target, flags, *args, **kwargs)
+
+    monkeypatch.setattr(verifier.os, "open", open_with_swap)
+    result = verifier.inspect_b4_audit(tmp_path, "swap")
+    assert swapped
+    assert result["status"] == "AUDIT_UNVERIFIED"
+    assert result["any_mutation_attempt"] is None

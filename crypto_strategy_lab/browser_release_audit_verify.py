@@ -45,6 +45,27 @@ def inspect_b4_audit(root: Path, session_id: str) -> dict[str, str | int | bool 
                 return result
             with os.fdopen(fd, "rb", closefd=False) as stream:
                 data = stream.read(_MAX_BYTES + 1)
+            # Audit evidence may be concurrently appended or replaced. Never
+            # certify a read that raced a change to the opened file.
+            after_stat = os.fstat(fd)
+            if (after_stat.st_dev != file_stat.st_dev
+                    or after_stat.st_ino != file_stat.st_ino
+                    or after_stat.st_size != file_stat.st_size
+                    or after_stat.st_mtime_ns != file_stat.st_mtime_ns
+                    or after_stat.st_ctime_ns != file_stat.st_ctime_ns):
+                return result
+            # An atomic rename can replace the named path while the old
+            # descriptor stays valid. Re-open the directory entry without
+            # following links and require identical file identity.
+            named_fd = os.open(path, flags)
+            try:
+                named_stat = os.fstat(named_fd)
+                if (not stat.S_ISREG(named_stat.st_mode)
+                        or named_stat.st_dev != after_stat.st_dev
+                        or named_stat.st_ino != after_stat.st_ino):
+                    return result
+            finally:
+                os.close(named_fd)
             if len(data) != file_stat.st_size or not data.endswith(b"\n"):
                 return result
             lines = data.splitlines()

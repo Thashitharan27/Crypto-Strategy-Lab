@@ -224,3 +224,16 @@ that an earlier mutation attempt completed or was undone. The existing
 reconciliation decision. A malformed, absent or truncated journal reports
 unknown/unverified evidence with `any_mutation_attempt: null`, never an inferred safe completion. This adds
 no production route, automatic replay, claim cleanup or release authorization.
+
+
+## B4 audit inspection snapshot race guard (2026-10-19)
+
+Read-only audit inspection now checks the opened journal's device, inode,
+size, modification time and change time again after its bounded read. If
+metadata changed during inspection or the journal path now refers to a
+replacement inode, the result remains AUDIT_UNVERIFIED and
+mutation-attempt state remains unknown. This reduces false certainty from
+concurrent appends or replacement; it does not create an atomic filesystem
+snapshot or protect against metadata-preserving tampering, host power loss,
+or unrecorded native effects. No journal repair, request replay, release
+activation or mutation routing is introduced.
