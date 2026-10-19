@@ -1,8 +1,9 @@
 # B4 actual-account approved-session and rollback certification — 2026-10-19
 
 The dedicated non-administrator Windows account completed a temporary approved
-browser session and returned to read-only mode. Production remains OFF. This
-certifies the bounded operational test below, not a persistent production launch.
+browser session and returned to read-only mode. The temporary test left production OFF. The separate manual activation
+subsequently passed as recorded below; the initial test alone did not certify
+a persistent production launch.
 
 Tested source: `d5c3f32e39de9c74fee4dbf199f09a8cb8347dc0` (PR #859), including
 main `ff23814d734025011372b78b0bbbc139493b5222` and patched runtime dependencies.
@@ -47,6 +48,33 @@ trading bot remain unchanged. The owner accepts AI-led review; no external
 independent human sign-off is claimed.
 
 This temporary test installed no persistent listener, service or autostart.
-After required CI and merge, a separate exact deployment receipt/bootstrap and
-operator-controlled rollback handoff are still needed for production. PR #501
-remains OPEN/DRAFT and held. The spent acceptance receipt must not be reused.
+PR #501 remains OPEN/DRAFT and held. The spent acceptance receipt must not be
+reused.
+
+## Separate manual activation: PASS
+
+The reviewed source was released at
+`28967a407386dc6461cf4fc1e0b845e7203940d8`. The manual deployment pins **18,055
+code files**, the existing patched dependencies, exact identity/roots and
+per-session approval. Six private launcher-monitor unit cases and operator
+control fixtures passed; both staged profiles refused the wrong account before
+side effects. These are deployment tests, not historical certification.
+
+Under the actual CSLBrowser account, the new launcher first passed a separate
+guarded-to-fresh-token-read-only replacement and complete process-stop test.
+Only then did the operator workflow publish the pre-reviewed production receipt
+and start the production process. Independent read-only inspection confirmed the
+listener was owned by that account, bound only to `127.0.0.1:8931`, and
+authenticated health/capabilities agreed on guarded mode with execution/editing
+enabled. No additional production job was submitted by that inspection.
+
+**Current scoped status: approved isolated production session ACTIVE.** New
+configuration/execution/audit state uses separate runtime roots; original source
+protection, native claims/audits and PySide6 remain preserved. Rollback revokes
+the pinned receipt, waits for admitted native work, and replaces the listener
+with a fresh-token read-only session. Approval expires within 24 hours and then
+returns to read-only; no automatic approval rotation, service or autostart was
+installed. No passwords or token bytes are committed. Detailed startup, private
+operator controls, conditional approval publication and rollback evidence remain
+local. This is a finite manual release, not unrestricted historical or host
+power-loss certification.

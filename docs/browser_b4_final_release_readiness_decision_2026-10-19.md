@@ -123,6 +123,11 @@ See `browser_b4_actual_account_rollback_certification_2026-10-19.md`: the dedica
 Windows account passed the temporary isolated native-operation and same-port
 read-only rollback test, with original-file preservation and retained claims.
 PR #859 passed all required CI and merged. This supersedes the missing actual
-account rollback evidence, while production remains OFF pending the separate
-exact deployment bootstrap/receipt and operator handoff. The finite recovery
-limits, owner-authorized AI-led review and PR #501 hold continue.
+account rollback evidence. The subsequently reviewed manual bootstrap passed its
+actual-account rollback/full-stop gate before publishing production approval.
+The approved isolated session is now ACTIVE at the pinned PR #859 merge commit;
+its listener and authenticated capability state were independently inspected.
+The report records expiry, operator rollback, retained evidence and the absence
+of service/autostart. Earlier HOLD/OFF statements remain historical checkpoints.
+The finite recovery limits, owner-authorized AI-led review and PR #501 hold
+continue; no automatic recovery or approval renewal is authorized.
