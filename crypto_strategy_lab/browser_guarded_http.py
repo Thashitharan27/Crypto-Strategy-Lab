@@ -24,24 +24,35 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A browser bearer token is required")
 
+    audit_broken = False
+
     def audit(operation: str, outcome: str) -> None:
+        nonlocal audit_broken
         # Never log IDs, payloads, tokens, result data or native exception text.
         if audit_callback is not None:
             try:
                 audit_callback({"operation": operation, "outcome": outcome})
             except Exception:
-                pass
+                # An operation may already have committed; never claim that it
+                # was rolled back. Deny all subsequent mutations in this app.
+                if require_audit_admission is True:
+                    audit_broken = True
+
 
     def admit_mutation(operation: str) -> None:
         # A durable ATTEMPT record must precede any native mutation in the B4
         # candidate. Do not treat later audit failures as rollback evidence.
         if require_audit_admission is not True:
             return
+        if audit_broken:
+            raise HTTPException(status_code=503, detail="Guarded audit unavailable")
         try:
             if not callable(audit_callback):
                 raise RuntimeError("B4 audit callback missing")
             audit_callback({"operation": operation, "outcome": "ATTEMPT"})
         except Exception:
+            nonlocal audit_broken
+            audit_broken = True
             # Never leak filesystem, credentials or native error text.
             raise HTTPException(status_code=503, detail="Guarded audit unavailable")
 
