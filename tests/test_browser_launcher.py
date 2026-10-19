@@ -244,8 +244,8 @@ def test_launcher_portfolio_endpoint_uses_configured_root_and_auth(tmp_path):
     service.portfolio_candidates.assert_called_once_with(output_root.resolve())
 
 
-@pytest.mark.parametrize("request", [True, 1, "true", None])
-def test_b4_explicit_production_guarded_request_denied_before_composition(tmp_path, request):
+@pytest.mark.parametrize("release_request", [True, 1, "true", None])
+def test_b4_explicit_production_guarded_request_denied_before_composition(tmp_path, release_request):
     """A release proposal is not a server-side release authorization."""
     with (
         patch("crypto_strategy_lab.browser_launcher.build_browser_readonly_service") as service,
@@ -256,7 +256,7 @@ def test_b4_explicit_production_guarded_request_denied_before_composition(tmp_pa
                 environ={},
                 token="g" * 48,
                 static_root=tmp_path,
-                guarded_release_requested=request,
+                guarded_release_requested=release_request,
             )
     service.assert_not_called()
     factory.assert_not_called()
