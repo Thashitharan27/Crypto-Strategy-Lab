@@ -94,3 +94,26 @@ def test_claim_access_failure_returns_unknown_not_false(tmp_path):
         report = inspect_b4_recovery(tmp_path, "safe")
     assert report["claim_present"] is None
     assert report["worker_lock_present"] is None
+
+
+@pytest.mark.parametrize("label,field", [
+    (".guarded-request-safe.claim", "claim_present"),
+    (".guarded-native-worker.lock", "worker_lock_present"),
+])
+def test_regular_file_at_native_claim_path_is_unknown_and_preserved(tmp_path, label, field):
+    from crypto_strategy_lab.browser_release_rollback_review import inspect_b4_rollback_readiness
+    path = tmp_path / label
+    path.write_bytes(b"unexpected retained claim evidence")
+    report = inspect_b4_recovery(tmp_path, "safe")
+    assert report[field] is None
+    assert report["request_status"] == "RECOVERY_UNVERIFIED"
+    audit_root = tmp_path / "audit"
+    audit_root.mkdir()
+    review = inspect_b4_rollback_readiness(
+        audit_root=audit_root, session_id="missing", execution_root=tmp_path, request_id="safe",
+    )
+    assert ("REQUEST_CLAIM_REQUIRES_REVIEW" if field == "claim_present"
+            else "WORKER_LOCK_REQUIRES_REVIEW") in review["issues"]
+    assert review["safe_to_replay"] is False
+    assert review["safe_to_clear_locks"] is False
+    assert path.read_bytes() == b"unexpected retained claim evidence"
