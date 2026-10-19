@@ -87,6 +87,25 @@ def run_readonly_release_smoke() -> dict[str, object]:
                 "/api/v1/health", headers={**auth, "Host": "remote.example"},
             ).status_code == 403
             checked += 1
+            # Cross-origin requests cannot borrow a local bearer session.
+            # A non-local web origin is forbidden everywhere. A different
+            # loopback port is permitted on read-only GETs by existing policy,
+            # but must be forbidden at the guarded mutation boundary.
+            assert client.get(
+                "/api/v1/health",
+                headers={**auth, "Origin": "http://malicious.example:8767"},
+            ).status_code == 403
+            checked += 1
+            assert client.get(
+                "/api/v1/health",
+                headers={**auth, "Origin": "http://127.0.0.1:9999"},
+            ).status_code == 200
+            checked += 1
+            assert client.get(
+                "/api/v1/guarded/jobs/smoke",
+                headers={**auth, "Origin": "http://127.0.0.1:9999"},
+            ).status_code == 403
+            checked += 1
             for method, path in (
                 ("POST", "/api/v1/guarded/jobs"),
                 ("PUT", "/api/v1/guarded/configs/smoke"),
