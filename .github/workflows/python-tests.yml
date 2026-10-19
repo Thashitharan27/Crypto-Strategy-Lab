@@ -350,9 +350,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-qt
-          pip install -r browser_ui/requirements.txt
+          pip install -r browser_ui/requirements.txt httpx
       - name: Compile source
         run: python -m compileall -q crypto_strategy_lab mcp_server tools app.py
+      - name: Run blocking Windows clean-checkout B4 HTTP release smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m crypto_strategy_lab.browser_release_smoke
       - name: Run Windows smoke tests
         env:
           QT_QPA_PLATFORM: offscreen
