@@ -624,3 +624,31 @@ def test_b4_job_submit_outcome_audit_loss_preserves_uncertain_claim(monkeypatch)
     ]
     # A submitted native request can remain claimed or running after 503.
     # Do not infer rollback, cancel, or automatic retry from the HTTP result.
+
+
+def test_b4_readonly_status_audit_failure_latches_future_mutations():
+    integration = Mock()
+    integration.status.return_value = {"status": "RUNNING"}
+    events = []
+
+    def audit(event):
+        events.append(event)
+        if event == {"operation": "STATUS", "outcome": "SUCCESS"}:
+            raise OSError("private audit log unavailable")
+
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=audit, require_audit_admission=True,
+    ))
+    auth = {"Authorization": "Bearer " + TOKEN}
+    with TestClient(app) as client:
+        status = client.get("/api/v1/guarded/jobs/existing", headers=auth)
+        rejected = client.put("/api/v1/guarded/configs/new", json={}, headers=auth)
+    assert status.status_code == 503
+    assert status.json() == {"detail": "Guarded outcome unverified"}
+    assert rejected.status_code == 503
+    assert rejected.json() == {"detail": "Guarded audit unavailable"}
+    integration.status.assert_called_once_with("existing")
+    integration.save_config.assert_not_called()
+    assert events == [{"operation": "STATUS", "outcome": "SUCCESS"}]
