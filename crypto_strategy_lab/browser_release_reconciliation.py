@@ -83,12 +83,17 @@ def inspect_b4_recovery(
     root = _safe_root(execution_root)
     if root is None:
         return result
-    result["claim_present"] = _claimed_directory(
-        root, ".guarded-request-" + request_id + ".claim"
-    )
-    result["worker_lock_present"] = _claimed_directory(
-        root, ".guarded-native-worker.lock"
-    )
+    try:
+        result["claim_present"] = _claimed_directory(
+            root, ".guarded-request-" + request_id + ".claim"
+        )
+        result["worker_lock_present"] = _claimed_directory(
+            root, ".guarded-native-worker.lock"
+        )
+    except (OSError, ValueError, RuntimeError):
+        # An inaccessible claim is never evidence of its absence.
+        result["claim_present"] = None
+        result["worker_lock_present"] = None
     if run_folder_id is not None:
         result["saved_artifacts_status"] = verify_recovered_run(
             root, run_folder_id
