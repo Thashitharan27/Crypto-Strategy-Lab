@@ -105,13 +105,22 @@ dialog::backdrop{background:#020617a8}
 .dialog-body{padding:18px 22px;overflow:auto;max-height:calc(85vh - 78px)}
 #indicator-search{width:100%;padding:11px 12px;border:1px solid #475569;border-radius:6px;background:#0c1420;color:#e6edf3;margin:14px 0}
 .indicator-heading{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#93a9c6;margin:16px 0 7px}
-#ema-menu>summary{display:none}
+#ema-menu>summary{display:block}
 #ema-menu .ema-options{position:static;display:grid;grid-template-columns:1fr 1fr;gap:6px;box-shadow:none;background:none;border:0;padding:0}
 .indicator-option,.ema-options label{display:flex;align-items:center;gap:9px;padding:10px;border-radius:6px;background:#192638;font-size:14px;cursor:pointer}
 input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 .indicator-option[hidden],.ema-options label[hidden]{display:none!important}
 .panel-settings{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid #344155;margin-top:18px;padding-top:14px}
 @media(max-width:700px){.toolbar-spacer{display:none}.brand small{display:none}#trade{max-width:100%;width:100%}#reviewbar>label{width:100%}#ema-menu .ema-options{grid-template-columns:1fr}}
+.indicator-group{padding:16px;margin:12px 0;border:1px solid #344155;border-radius:8px;background:#172334}
+.indicator-group h3{margin:0 0 6px;font-size:16px}
+.indicator-group p{font-size:12px;color:#93a9c6;margin:0 0 12px}
+.period-picker>summary{cursor:pointer;padding:10px;border:1px solid #475569;border-radius:6px;background:#0c1420;list-style:none;font-size:14px}
+.period-picker[open]>summary{margin-bottom:8px}
+.period-picker .ema-options,.period-options{display:flex!important;flex-wrap:wrap;gap:6px}
+.period-options label,.ema-options label{padding:8px 10px;min-width:66px;justify-content:center}
+.rsi-method{font-size:12px;color:#b8c2cc;margin:12px 0 6px}
+.indicator-group[hidden]{display:none}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
@@ -145,8 +154,9 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   <div class="dialog-body">
     <p class="muted">EMA and Wilder RSI use Crypto Strategy Lab calculations for the selected chart timeframe.</p>
     <input id="indicator-search" type="search" placeholder="Search indicators…" aria-label="Search indicators">
-    <div class="indicator-heading">Price overlays · EMA</div>
-    <details id="ema-menu" class="ema-menu" open><summary>EMA ▾</summary>
+    <section class="indicator-group" data-search="ema exponential moving average price overlays">
+    <h3>EMA</h3><p>Exponential moving average · select one or more periods (bars).</p>
+    <details id="ema-menu" class="ema-menu period-picker"><summary>Periods <span id="ema-period-summary"></span> ▾</summary>
       <div class="ema-options" role="group" aria-label="Visible EMA periods">
         <label><input type="checkbox" class="ema-period" value="9"> EMA 9</label>
         <label><input type="checkbox" class="ema-period" value="20" checked> EMA 20</label>
@@ -157,11 +167,21 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
         <label><input type="checkbox" class="ema-period" value="1600" checked> EMA 1600</label>
       </div>
     </details>
-    <div class="indicator-heading">Oscillators</div>
-    <label class="indicator-option"><input type="checkbox" id="show-rsi" checked> RSI 14 + EMA RSI 224 / 1120</label>
+    </section>
+    <section class="indicator-group" data-search="rsi relative strength index wilder ema research oscillator">
+    <h3>RSI</h3><p>Relative strength index · select periods by smoothing method.</p>
+    <label class="indicator-option" title="RSI 14 + EMA RSI 224 / 1120"><input type="checkbox" id="show-rsi" checked> Show RSI panel</label>
+    <details class="period-picker" id="rsi-period-picker"><summary>Periods <span id="rsi-period-summary"></span> ▾</summary>
+    <div class="rsi-method">Wilder · CSL strategy calculation</div>
+    <div class="period-options">
     <label class="indicator-option"><input type="checkbox" class="rsi-line" value="rsi:14" checked> Wilder RSI 14 (CSL)</label>
+    </div>
+    <div class="rsi-method">EMA smoothing · research calculation</div>
+    <div class="period-options">
     <label class="indicator-option"><input type="checkbox" class="rsi-line" value="ema_rsi:224" checked> EMA RSI 224 (research)</label>
     <label class="indicator-option"><input type="checkbox" class="rsi-line" value="ema_rsi:1120" checked> EMA RSI 1120 (research)</label>
+    </div></details>
+    </section>
     <p id="indicator-empty" class="muted" hidden>No matching indicators.</p>
     <div class="panel-settings"><label for="rsi-height">RSI panel height</label><input id="rsi-height" type="range" min="120" max="420" value="260" step="10" title="Adjust RSI panel height">
     <button id="reset-rsi">Reset RSI zoom</button>
@@ -175,15 +195,30 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   $('chart-symbol').textContent = boot.run.symbol;
   const indicatorDialog = $('indicator-dialog');
   const indicatorInputs = [...document.querySelectorAll('.ema-period, .rsi-line, #show-rsi')];
+  function indicatorName(input) {
+    if (input.classList.contains('ema-period')) return 'EMA ' + input.value;
+    return (input.value.startsWith('ema_rsi:') ? 'EMA RSI ' : 'Wilder RSI ') + input.value.split(':')[1];
+  }
+  // Family names stay on the cards; the selectors show only their periods.
+  for (const input of indicatorInputs.filter(input => input.id !== 'show-rsi')) {
+    const label = input.closest('label');
+    label.title = indicatorName(input);
+    input.setAttribute('aria-label', indicatorName(input));
+    for (const node of [...label.childNodes]) if (node.nodeType === Node.TEXT_NODE) node.remove();
+    label.appendChild(document.createTextNode(' ' + input.value.split(':').pop()));
+  }
   function updateIndicatorSummary() {
+    $('ema-period-summary').textContent = [...document.querySelectorAll('.ema-period:checked')].map(input => input.value).join(', ') || 'None';
+    const rsiPeriods = [...document.querySelectorAll('.rsi-line:checked')];
+    $('rsi-period-summary').textContent = rsiPeriods.map(input => input.value.split(':')[1] + (input.value.startsWith('ema_rsi:') ? ' EMA' : ' Wilder')).join(', ') || 'None';
     const active = indicatorInputs.filter(input => input.checked && (input.classList.contains('ema-period') || (input.classList.contains('rsi-line') && $('show-rsi').checked)));
     $('indicator-count').textContent = '(' + active.length + ')';
     $('active-indicators').replaceChildren();
     for (const input of active) {
       const chip = document.createElement('button');
       chip.className = 'indicator-chip';
-      chip.textContent = input.closest('label').textContent.trim() + ' ×';
-      chip.title = 'Remove ' + input.closest('label').textContent.trim();
+      chip.textContent = indicatorName(input) + ' ×';
+      chip.title = 'Remove ' + indicatorName(input);
       chip.addEventListener('click', () => {
         input.checked = false;
         input.dispatchEvent(new Event('change'));
@@ -203,9 +238,12 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   });
   $('indicator-search').addEventListener('input', event => {
     const query = event.target.value.trim().toLowerCase();
-    const rows = [...document.querySelectorAll('.ema-options label, .indicator-option')];
-    for (const row of rows) row.hidden = !row.textContent.toLowerCase().includes(query);
-    $('indicator-empty').hidden = rows.some(row => !row.hidden);
+    const groups = [...document.querySelectorAll('.indicator-group')];
+    for (const group of groups) {
+      group.hidden = !(group.dataset.search + ' ' + group.textContent).toLowerCase().includes(query);
+      if (query && !group.hidden) group.querySelector('details').open = true;
+    }
+    $('indicator-empty').hidden = groups.some(group => !group.hidden);
   });
   indicatorInputs.forEach(input => input.addEventListener('change', updateIndicatorSummary));
   updateIndicatorSummary();
