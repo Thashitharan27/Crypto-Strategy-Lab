@@ -563,3 +563,64 @@ def test_b4_cancel_post_operation_audit_loss_is_uncertain_and_latched():
         {"operation": "CANCEL", "outcome": "ATTEMPT"},
         {"operation": "CANCEL", "outcome": "SUCCESS"},
     ]
+
+
+def test_b4_job_submit_outcome_audit_loss_preserves_uncertain_claim(monkeypatch):
+    import crypto_strategy_lab.data_lake_config as native
+
+    config = Mock(spec=native.ResearchRunConfig)
+    monkeypatch.setattr(native, "normalize_data_lake_config", lambda _: config)
+    class ClaimedIntegration:
+        def __init__(self):
+            self.claimed = set()
+            self.submit_calls = 0
+            self.cancel_calls = 0
+
+        def submit(self, request_id, request, config):
+            self.submit_calls += 1
+            self.claimed.add(request_id)
+
+        def cancel(self, request_id):
+            self.cancel_calls += 1
+            self.claimed.discard(request_id)
+
+    integration = ClaimedIntegration()
+    events = []
+
+    def audit(event):
+        events.append(event)
+        if event == {"operation": "JOB_SUBMIT", "outcome": "SUCCESS"}:
+            raise OSError("private audit persistence error")
+
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=audit, require_audit_admission=True,
+    ))
+    payload = {
+        "request_id": "claim-uncertain",
+        "request": {
+            "exchange": "binance", "market": "futures_um", "symbol": "BTCUSDT",
+            "period_start": "2025-01-01T00:00:00Z",
+            "period_end": "2025-01-02T00:00:00Z",
+            "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+        },
+        "config": {},
+    }
+    with TestClient(app) as client:
+        auth = {"Authorization": "Bearer " + TOKEN}
+        first = client.post("/api/v1/guarded/jobs", json=payload, headers=auth)
+        second = client.post("/api/v1/guarded/jobs", json=payload, headers=auth)
+    assert first.status_code == 503
+    assert first.json() == {"detail": "Guarded outcome unverified"}
+    assert second.status_code == 503
+    assert second.json() == {"detail": "Guarded audit unavailable"}
+    assert integration.submit_calls == 1
+    assert integration.cancel_calls == 0
+    assert integration.claimed == {"claim-uncertain"}
+    assert events == [
+        {"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"},
+        {"operation": "JOB_SUBMIT", "outcome": "SUCCESS"},
+    ]
+    # A submitted native request can remain claimed or running after 503.
+    # Do not infer rollback, cancel, or automatic retry from the HTTP result.
