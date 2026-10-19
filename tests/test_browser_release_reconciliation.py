@@ -91,5 +91,6 @@ def test_claim_access_failure_returns_unknown_not_false(tmp_path):
     with patch("crypto_strategy_lab.browser_release_reconciliation._claimed_directory",
                side_effect=OSError("private inaccessible")):
         # Native OS errors must be bounded and never erase the evidence.
-        with pytest.raises(OSError):
-            inspect_b4_recovery(tmp_path, "safe")
+        report = inspect_b4_recovery(tmp_path, "safe")
+    assert report["claim_present"] is None
+    assert report["worker_lock_present"] is None
