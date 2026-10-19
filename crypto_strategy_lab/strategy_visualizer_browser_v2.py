@@ -52,13 +52,13 @@ def build_browser_visualizer_v2_html(
 <title>Strategy Visualizer V2 · Diagnostic</title>
 <style>
 html,body{height:100%;margin:0;background:#0b121a;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}
-#app{height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr)}
+#app{height:100%;display:grid;grid-template-rows:auto auto auto minmax(0,1fr)}
 #diagnostics{background:#0f1720;border-bottom:1px solid #2b3948}
 #diagnostics summary{cursor:pointer;padding:5px 10px;font:12px Segoe UI,Arial,sans-serif;color:#b8c2cc}
 #diagnostics:not([open]) #diag{display:none}
 #toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;background:#101923;border-bottom:1px solid #2b3948}
 button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-radius:5px;padding:5px 8px}
-#trade{min-width:460px;max-width:62vw}
+#trade{width:380px;min-width:140px;max-width:55vw}
 #diag{font:12px/1.45 Consolas,monospace;padding:7px 10px;background:#0f1720;border-bottom:1px solid #2b3948;white-space:pre-wrap}
 #chart-wrap{position:relative;min-height:0}
 #chart{position:absolute;inset:0;z-index:1}
@@ -81,21 +81,72 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 .ema-options{position:absolute;z-index:30;top:calc(100% + 5px);left:0;display:flex;flex-direction:column;gap:7px;min-width:110px;padding:11px;background:#17232f;border:1px solid #475569;border-radius:6px;box-shadow:0 6px 18px #0009}
 .ema-options label{display:block;white-space:nowrap;cursor:pointer}
 .bad{color:#f08a8a}.good{color:#6fd3a4}.muted{color:#91a0b2}
+*{box-sizing:border-box}
+body{font-size:14px}
+button,select,input{font:inherit}
+button,select{min-height:34px;padding:6px 11px;cursor:pointer}
+button:hover{background:#25364b;border-color:#6884aa}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #60a5fa;outline-offset:2px}
+#toolbar{gap:10px;padding:10px 16px;background:#131c2b}
+.brand{font-size:15px;letter-spacing:.2px;white-space:nowrap}
+.brand small{font-size:11px;color:#91a0b2;margin-left:6px}
+.symbol{font-weight:700;color:#f0f6ff;border-left:1px solid #344155;padding-left:16px}
+#indicators-btn{background:#2962ff;border-color:#477aff;font-weight:600;min-width:140px}
+.toolbar-spacer{flex:1}
+#reviewbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 16px;border-bottom:1px solid #2b3948;background:#101722}
+#timeframe-note{font-size:12px}
+#active-indicators{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.indicator-chip{font-size:12px;padding:3px 8px;min-height:26px;border-radius:14px;background:#182940;border-color:#334c6d}
+#diagnostics summary{padding:7px 16px}
+dialog{width:min(660px,calc(100vw - 32px));max-height:85vh;padding:0;border:1px solid #3b4d66;border-radius:12px;background:#131d2b;color:#e6edf3;box-shadow:0 24px 90px #000b}
+dialog::backdrop{background:#020617a8}
+.dialog-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #2b3948}
+.dialog-header h2{font-size:20px;margin:0}
+.dialog-body{padding:18px 22px;overflow:auto;max-height:calc(85vh - 78px)}
+#indicator-search{width:100%;padding:11px 12px;border:1px solid #475569;border-radius:6px;background:#0c1420;color:#e6edf3;margin:14px 0}
+.indicator-heading{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#93a9c6;margin:16px 0 7px}
+#ema-menu>summary{display:none}
+#ema-menu .ema-options{position:static;display:grid;grid-template-columns:1fr 1fr;gap:6px;box-shadow:none;background:none;border:0;padding:0}
+.indicator-option,.ema-options label{display:flex;align-items:center;gap:9px;padding:10px;border-radius:6px;background:#192638;font-size:14px;cursor:pointer}
+input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
+.indicator-option[hidden],.ema-options label[hidden]{display:none!important}
+.panel-settings{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid #344155;margin-top:18px;padding-top:14px}
+@media(max-width:700px){.toolbar-spacer{display:none}.brand small{display:none}#trade{max-width:100%;width:100%}#reviewbar>label{width:100%}#ema-menu .ema-options{grid-template-columns:1fr}}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
 <body>
 <div id="app">
   <div id="toolbar">
-    <strong>Strategy Visualizer V2 · Diagnostic</strong>
+    <strong class="brand">CSL <small>Strategy Visualizer V2 · Diagnostic</small></strong>
+    <span id="chart-symbol" class="symbol"></span>
     <label for="chart-timeframe">Chart timeframe</label>
     <select id="chart-timeframe" aria-label="Chart timeframe"></select>
-    <span id="timeframe-note" class="muted" role="status"></span>
-    <select id="trade"></select>
-    <button id="center">Center selected</button>
+    <button id="indicators-btn" aria-haspopup="dialog">ƒx Indicators <span id="indicator-count"></span></button>
+    <span class="toolbar-spacer"></span>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
-    <details id="ema-menu" class="ema-menu"><summary>EMA ▾</summary>
+  </div>
+  <div id="reviewbar">
+    <label for="trade">Review trade</label><select id="trade"></select>
+    <button id="center">Center selected</button>
+    <div id="active-indicators" aria-label="Active indicators"></div>
+    <span id="timeframe-note" class="muted" role="status"></span>
+  </div>
+  <details id="diagnostics"><summary>Trade diagnostics (expand)</summary><div id="diag">Loading…</div></details>
+  <div id="chart-wrap">
+    <div id="chart"></div>
+    <div id="fib-layer"></div>
+    <div id="trade-box-layer"></div>
+  </div>
+</div>
+<dialog id="indicator-dialog" aria-labelledby="indicator-title">
+  <div class="dialog-header"><h2 id="indicator-title">Indicators</h2><button id="close-indicators" aria-label="Close indicators">✕</button></div>
+  <div class="dialog-body">
+    <p class="muted">EMA and Wilder RSI use Crypto Strategy Lab calculations for the selected chart timeframe.</p>
+    <input id="indicator-search" type="search" placeholder="Search indicators…" aria-label="Search indicators">
+    <div class="indicator-heading">Price overlays · EMA</div>
+    <details id="ema-menu" class="ema-menu" open><summary>EMA ▾</summary>
       <div class="ema-options" role="group" aria-label="Visible EMA periods">
         <label><input type="checkbox" class="ema-period" value="9"> EMA 9</label>
         <label><input type="checkbox" class="ema-period" value="20" checked> EMA 20</label>
@@ -106,24 +157,58 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
         <label><input type="checkbox" class="ema-period" value="1600" checked> EMA 1600</label>
       </div>
     </details>
-    <label><input type="checkbox" id="show-rsi" checked> RSI 14 + EMA RSI 224 / 1120</label>
-    <label><input type="checkbox" class="rsi-line" value="rsi:14" checked> Wilder RSI 14 (CSL)</label>
-    <label><input type="checkbox" class="rsi-line" value="ema_rsi:224" checked> EMA RSI 224 (research)</label>
-    <label><input type="checkbox" class="rsi-line" value="ema_rsi:1120" checked> EMA RSI 1120 (research)</label>
-    <label for="rsi-height">RSI size</label><input id="rsi-height" type="range" min="120" max="420" value="260" step="10" title="Adjust RSI panel height">
+    <div class="indicator-heading">Oscillators</div>
+    <label class="indicator-option"><input type="checkbox" id="show-rsi" checked> RSI 14 + EMA RSI 224 / 1120</label>
+    <label class="indicator-option"><input type="checkbox" class="rsi-line" value="rsi:14" checked> Wilder RSI 14 (CSL)</label>
+    <label class="indicator-option"><input type="checkbox" class="rsi-line" value="ema_rsi:224" checked> EMA RSI 224 (research)</label>
+    <label class="indicator-option"><input type="checkbox" class="rsi-line" value="ema_rsi:1120" checked> EMA RSI 1120 (research)</label>
+    <p id="indicator-empty" class="muted" hidden>No matching indicators.</p>
+    <div class="panel-settings"><label for="rsi-height">RSI panel height</label><input id="rsi-height" type="range" min="120" max="420" value="260" step="10" title="Adjust RSI panel height">
     <button id="reset-rsi">Reset RSI zoom</button>
+    </div>
   </div>
-  <details id="diagnostics"><summary>Trade diagnostics (expand)</summary><div id="diag">Loading…</div></details>
-  <div id="chart-wrap">
-    <div id="chart"></div>
-    <div id="fib-layer"></div>
-    <div id="trade-box-layer"></div>
-  </div>
-</div>
+</dialog>
 <script>
 (() => {
   const boot = __BOOTSTRAP__;
   const $ = id => document.getElementById(id);
+  $('chart-symbol').textContent = boot.run.symbol;
+  const indicatorDialog = $('indicator-dialog');
+  const indicatorInputs = [...document.querySelectorAll('.ema-period, .rsi-line, #show-rsi')];
+  function updateIndicatorSummary() {
+    const active = indicatorInputs.filter(input => input.checked && (input.classList.contains('ema-period') || (input.classList.contains('rsi-line') && $('show-rsi').checked)));
+    $('indicator-count').textContent = '(' + active.length + ')';
+    $('active-indicators').replaceChildren();
+    for (const input of active) {
+      const chip = document.createElement('button');
+      chip.className = 'indicator-chip';
+      chip.textContent = input.closest('label').textContent.trim() + ' ×';
+      chip.title = 'Remove ' + input.closest('label').textContent.trim();
+      chip.addEventListener('click', () => {
+        input.checked = false;
+        input.dispatchEvent(new Event('change'));
+      });
+      $('active-indicators').appendChild(chip);
+    }
+  }
+  $('indicators-btn').addEventListener('click', () => {
+    indicatorDialog.showModal();
+    $('indicator-search').focus();
+  });
+  $('close-indicators').addEventListener('click', () => indicatorDialog.close());
+  indicatorDialog.addEventListener('click', event => {
+    if (event.target !== indicatorDialog) return;
+    const rect = indicatorDialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) indicatorDialog.close();
+  });
+  $('indicator-search').addEventListener('input', event => {
+    const query = event.target.value.trim().toLowerCase();
+    const rows = [...document.querySelectorAll('.ema-options label, .indicator-option')];
+    for (const row of rows) row.hidden = !row.textContent.toLowerCase().includes(query);
+    $('indicator-empty').hidden = rows.some(row => !row.hidden);
+  });
+  indicatorInputs.forEach(input => input.addEventListener('change', updateIndicatorSummary));
+  updateIndicatorSummary();
   const tradeSelect = $('trade');
   const diag = $('diag');
   const chartWrap = $('chart-wrap');
