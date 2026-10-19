@@ -333,3 +333,19 @@ request and worker claims remain intact, and rollback review stays
 RELEASE_HELD without replay or cleanup. This tests evidence handling after
 an abrupt process exit, not a live native worker kill, hardware power loss,
 filesystem ACL/durability guarantees, or production guarded activation.
+
+## Audit writer/inspector contract alignment (2026-10-19)
+
+The writer and read-only inspector now share the existing **8 MiB / 100,000
+record** session bounds and mutation-only ATTEMPT schema. The writer refuses
+the next append before exceeding either bound and latches failed, preserving
+the prior journal rather than rotating, truncating or repairing it. Strict
+candidate admission consequently denies native mutation when audit capacity
+is unavailable. Regression fixtures cover byte/record boundaries, unsupported
+ATTEMPT operations and actual HTTP admission refusal with no native call.
+
+Capacity exhaustion during an outcome can still occur **after** native effects;
+the existing uncertain-outcome response and release hold remain authoritative.
+There is no automatic rotation, session restart, ownership cleanup or claim of
+hardware durability. A separately approved deployment must plan capacity and
+review unresolved work before issuing a new session. Production remains read-only.

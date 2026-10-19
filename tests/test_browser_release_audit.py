@@ -138,3 +138,35 @@ def test_partial_audit_write_failure_preserves_bytes_and_latches(tmp_path):
             audit({"operation": "JOB_SUBMIT", "outcome": "SUCCESS"})
         assert audit.path.read_bytes() == partial
     # Torn evidence is retained rather than repaired or falsely certified.
+
+
+@pytest.mark.parametrize("operation", ["AUTH", "STATUS", "PROGRESS"])
+def test_writer_rejects_attempts_that_its_inspector_cannot_validate(tmp_path, operation):
+    from crypto_strategy_lab.browser_release_audit_verify import inspect_b4_audit
+    with B4AuditJournal(tmp_path, "schema") as audit:
+        audit({"operation": "STATUS", "outcome": "SUCCESS"})
+        before = audit.path.read_bytes()
+        with pytest.raises(ValueError, match="mutation"):
+            audit({"operation": operation, "outcome": "ATTEMPT"})
+        assert audit.path.read_bytes() == before
+    assert inspect_b4_audit(tmp_path, "schema")["status"] == "AUDIT_VERIFIED"
+
+
+@pytest.mark.parametrize("limit", ["bytes", "records"])
+def test_capacity_refusal_preserves_verifiable_evidence_and_latches(tmp_path, monkeypatch, limit):
+    from crypto_strategy_lab import browser_release_audit as audit_module
+    from crypto_strategy_lab.browser_release_audit_verify import inspect_b4_audit
+    event = {"operation": "STATUS", "outcome": "SUCCESS"}
+    with B4AuditJournal(tmp_path, "capacity") as audit:
+        audit(event)
+        before = audit.path.read_bytes()
+        # Small capacity fixture exercises the same boundary without 100,000
+        # synchronous disk flushes. It does not certify disk-full durability.
+        monkeypatch.setattr(audit_module, "_MAX_BYTES" if limit == "bytes" else "_MAX_RECORDS",
+                            len(before) if limit == "bytes" else 1, raising=False)
+        with pytest.raises(OSError, match="capacity"):
+            audit({"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"})
+        assert audit.path.read_bytes() == before
+        with pytest.raises(OSError, match="previously failed"):
+            audit(event)
+        assert inspect_b4_audit(tmp_path, "capacity")["status"] == "AUDIT_VERIFIED"

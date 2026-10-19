@@ -11,12 +11,12 @@ from pathlib import Path
 import re
 import stat
 
-from crypto_strategy_lab.browser_release_audit import _OPERATIONS, _OUTCOMES
+from crypto_strategy_lab.browser_release_audit import (
+    _OPERATIONS, _OUTCOMES, _MUTATION_OPERATIONS, _MAX_BYTES, _MAX_RECORDS,
+)
 from crypto_strategy_lab.browser_release_preflight import _nonlink_canonical_directory
 
 _SESSION = re.compile(r"[A-Za-z0-9_-]{1,64}\Z", re.ASCII)
-_MAX_BYTES = 8 * 1024 * 1024
-_MAX_RECORDS = 100_000
 
 
 def inspect_b4_audit(root: Path, session_id: str) -> dict[str, str | int | bool | None]:
@@ -88,7 +88,7 @@ def inspect_b4_audit(root: Path, session_id: str) -> dict[str, str | int | bool 
                 if line != canonical:
                     return result
                 if outcome == "ATTEMPT":
-                    if operation not in {"CONFIG_SAVE", "JOB_SUBMIT", "CANCEL"}:
+                    if operation not in _MUTATION_OPERATIONS:
                         return result
                     attempts += 1
             result["status"] = "AUDIT_VERIFIED"
