@@ -981,6 +981,14 @@ class CompletedRunVisualizer:
                     return {"status": "NOT_AVAILABLE"}
             for key in ("formedTime", "signalTime", "impulseStartTime"):
                 value[key] = _unix_seconds(_utc(value[key]))
+            for key in ("structurePivotTime", "structureBreakTime"):
+                if value.get(key) is not None:
+                    value[key] = _unix_seconds(_utc(value[key]))
+            if "formationCandles" in value:
+                value["formationCandles"] = [
+                    {**candle, "time": _unix_seconds(_utc(candle["time"]))}
+                    for candle in value["formationCandles"]
+                ]
             return {**value, "status": "AVAILABLE"}
         except (ValueError, TypeError, KeyError):
             return {"status": "NOT_AVAILABLE"}

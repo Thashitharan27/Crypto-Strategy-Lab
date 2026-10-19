@@ -78,10 +78,10 @@ def test_v2_trade_box_shows_opposite_boundary_without_floating_markers():
     assert "OPEN/EXIT markers" not in html
     assert "createSeriesMarkers" not in html
     assert "trade['Exit Reason']" in html
-    assert "exitedAtStop" in html
-    assert "exitedAtTarget" in html
-    assert "'TP '+String(trade.Target ?? trade.target ?? '')" in html
-    assert "'SL '+String(trade.Stop ?? trade.stop ?? '')" in html
+    assert "'Exit ('+String(trade['Exit Reason']" in html
+    assert "layoutOverlayLabels" in html
+    assert "'Target '+formatPrice(trade.Target ?? trade.target)" in html
+    assert "'Stop '+formatPrice(trade.Stop ?? trade.stop)" in html
 
 
 def test_v2_fib_overlay_has_structure_only_no_trade_specific_fib_labels():
@@ -93,7 +93,7 @@ def test_v2_fib_overlay_has_structure_only_no_trade_specific_fib_labels():
     assert "fib.impulseEndPrice" in html
     assert "item.selected ? '  ENTRY'" not in html
     assert "item.stopBoundary ? '  STOP'" not in html
-    assert "TP" in html  # trade box remains responsible for TP/SL labels
+    assert "Target" in html  # trade box remains responsible for target/stop labels
 
 
 def test_v2_supports_price_zoom_and_vertical_pan():

@@ -66,9 +66,22 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #fvg-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
 #fvg-review{padding:8px 16px;background:#122a31;border-bottom:1px solid #2d5862;font-size:12px;line-height:1.6}
 #fvg-review[hidden]{display:none}
-.fvg-zone{position:absolute;background:#22d3ee20;border:1px solid #22d3ee}
+.fvg-zone{position:absolute;background:#22d3ee35;border:2px solid #22d3ee}
 .fvg-note{position:absolute;font-size:11px;background:#12313d;color:#b6f6ff;padding:2px 5px;white-space:nowrap}
 .fvg-level{position:absolute;height:1px;border-top:1px dashed #eab308}
+#workspace{display:flex;min-height:0}
+#chart-wrap{flex:1;min-width:0}
+#setup-panel{width:278px;flex-shrink:0;padding:18px;background:#111e2c;border-left:1px solid #344155;overflow:auto;font-size:13px}
+#setup-panel[hidden]{display:none}
+#setup-panel h3{margin:0 0 14px;font-size:17px}
+.setup-check{padding:8px 0;border-bottom:1px solid #273747;line-height:1.5}
+.setup-facts{color:#aac0d5;line-height:1.8;margin-top:16px}
+.fvg-note{font-size:12px;font-weight:600;border-radius:4px;padding:4px 7px}
+.fvg-band{position:absolute;border-top:1px dashed #8597a950}
+.formation-candle{position:absolute;border:2px solid #e2e8f0;border-radius:3px;background:#e2e8f018}
+.trade-label{font-size:12px;padding:4px 7px;line-height:1.2}
+#review-setup[aria-pressed=true]{background:#195d76;border-color:#22d3ee}
+@media(max-width:900px){#setup-panel{width:215px;padding:10px}}
 #trade-box-layer{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}
 .fib-band{position:absolute;box-sizing:border-box;border-top:1px solid rgba(255,255,255,.18)}
 .fib-level-label{position:absolute;transform:translateY(-50%);padding:2px 5px;border-radius:3px;font:10px/1.2 Segoe UI,Arial,sans-serif;font-weight:700;white-space:nowrap;color:#f8fafc;background:rgba(15,23,32,.90);border:1px solid rgba(148,163,184,.44);box-shadow:0 1px 3px rgba(0,0,0,.32)}
@@ -145,16 +158,17 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   <div id="reviewbar">
     <label for="trade">Review trade</label><select id="trade"></select>
     <button id="center">Center selected</button>
+    <button id="review-setup" aria-pressed="false" hidden>Review setup</button>
     <div id="active-indicators" aria-label="Active indicators"></div>
     <span id="timeframe-note" class="muted" role="status"></span>
   </div>
   <details id="diagnostics"><summary>Trade diagnostics (expand)</summary><div id="diag">Loading…</div></details>
-  <div id="chart-wrap">
+  <div id="workspace"><div id="chart-wrap">
     <div id="chart"></div>
     <div id="fib-layer"></div>
     <div id="fvg-layer"></div>
     <div id="trade-box-layer"></div>
-  </div>
+  </div><aside id="setup-panel" aria-label="FVG setup explanation" hidden></aside></div>
 </div>
 <dialog id="indicator-dialog" aria-labelledby="indicator-title">
   <div class="dialog-header"><h2 id="indicator-title">Indicators</h2><button id="close-indicators" aria-label="Close indicators">✕</button></div>
@@ -266,12 +280,14 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   $('reviewbar').appendChild(fvgReview);
   fvgReview.style.flexBasis = '100%';
   let payload = null;
+  let reviewMode = false;
   let currentTimeframe = boot.run.timeframe;
   let loadGeneration = 0;
   const timeframeSelect = $('chart-timeframe');
   timeframeSelect.add(new Option(currentTimeframe + ' (strategy)', currentTimeframe));
   let currentTrade = 0;
   let chart = null;
+  let chartResizeObserver = null;
   let candles = null;
   let trendEmaLines = [];
   let rsiSeries = null;
@@ -326,8 +342,9 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 
   function computeSelectedPriceRange() {
     const items=payload?.candles || [];
-    const start=Number(payload?.selectedTradeViewStart);
-    const end=Number(payload?.selectedTradeViewEnd);
+    const bounds=reviewMode ? setupBounds() : null;
+    const start=Number(bounds?.from ?? payload?.selectedTradeViewStart);
+    const end=Number(bounds?.to ?? payload?.selectedTradeViewEnd);
     let low=Infinity, high=-Infinity;
     for (const bar of items) {
       const time=Number(bar?.time);
@@ -349,6 +366,11 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
       const price=Number(item?.price);
       if (Number.isFinite(price)) { low=Math.min(low,price); high=Math.max(high,price); }
     }
+    const fvg=payload?.fvgDerivation;
+    if (fvg?.status==='AVAILABLE') {
+      low=Math.min(low,fvg.impulseOrigin,fvg.impulseExtreme,fvg.bottom);
+      high=Math.max(high,fvg.impulseOrigin,fvg.impulseExtreme,fvg.top);
+    }
     if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) return null;
     const span=high-low;
     const pad=Math.max(span*.08,Math.abs(high)*.0005);
@@ -363,8 +385,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     requestAnimationFrame(() => {
       chart?.priceScale('right').applyOptions({autoScale:true});
       candles?.applyOptions({});
-      drawFibOverlay();
-      drawTradeBox();
+      redrawOverlays();
     });
   }
 
@@ -372,46 +393,108 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     drawFibOverlay();
     drawFvgOverlay();
     drawTradeBox();
+    layoutOverlayLabels();
+  }
+
+  function formatPrice(value) {
+    if (value == null || !Number.isFinite(Number(value))) return 'n/a';
+    const price=Number(value);
+    const precision=Math.max(2,Math.min(8,2-Math.floor(Math.log10(Math.abs(price)||1))));
+    return price.toLocaleString('en-US',{minimumFractionDigits:precision,maximumFractionDigits:precision});
+  }
+
+  function layoutOverlayLabels() {
+    const boxes=[];
+    const height=chart?.panes()[0]?.getHeight() || chartWrap.clientHeight;
+    const width=Math.max(1,chartWrap.clientWidth-80);
+    for (const label of chartWrap.querySelectorAll('.fvg-note,.trade-label')) {
+      const w=label.offsetWidth, h=label.offsetHeight;
+      const x=Math.max(2,Math.min(width-w,parseFloat(label.style.left)||0));
+      const preferred=Math.max(2,Math.min(height-h-2,parseFloat(label.style.top)||0));
+      let y=preferred;
+      for (let step=0;step<80;step++) {
+        const candidate=preferred+(step%2 ? 1 : -1)*Math.ceil(step/2)*(h+4);
+        if (candidate<2 || candidate+h>height-2) continue;
+        if (!boxes.some(box=>x<box.x+box.w+4 && x+w+4>box.x && candidate<box.y+box.h+3 && candidate+h+3>box.y)) { y=candidate; break; }
+      }
+      Object.assign(label.style,{left:x+'px',top:y+'px'});
+      boxes.push({x,y,w,h});
+    }
   }
 
   function drawFvgOverlay() {
     fvgLayer.replaceChildren();
-    const fvg = payload?.fvgDerivation;
+    const fvg=payload?.fvgDerivation;
     if (!chart || !candles || fvg?.status !== 'AVAILABLE') return;
-    const paneHeight = chart.panes()[0].getHeight();
-    fvgLayer.style.height = paneHeight + 'px';
-    const right = Math.max(0,chartWrap.clientWidth-76);
-    const chartBars = payload.candles || [];
-    function xAt(time, fallback) {
-      // Floor to the displayed candle, so HTF charts retain the saved timestamps.
-      let timeOnChart = null;
-      for (const bar of chartBars) { if (bar.time > time) break; timeOnChart = bar.time; }
-      if (timeOnChart == null) return fallback;
-      return chart.timeScale().timeToCoordinate(timeOnChart) ?? fallback;
+    const paneHeight=chart.panes()[0].getHeight();
+    fvgLayer.style.height=paneHeight+'px';
+    const right=Math.max(0,chartWrap.clientWidth-76);
+    const bars=payload.candles || [];
+    const intervalMatch=String(boot.run.timeframe).match(/^([0-9]+)([mhdw])$/);
+    const strategySeconds=intervalMatch ? Number(intervalMatch[1])*({m:60,h:3600,d:86400,w:604800}[intervalMatch[2]]) : 900;
+    function xAt(time,fallback) {
+      let found=null;
+      for (const bar of bars) { if (bar.time>time) break; found=bar.time; }
+      return found == null ? fallback : (chart.timeScale().timeToCoordinate(found) ?? fallback);
     }
-    const left = Math.max(0,Math.min(right,xAt(fvg.formedTime,0)));
-    const end = Math.max(left,Math.min(right,xAt(fvg.signalTime,right)));
-    const top = candles.priceToCoordinate(fvg.top), bottom = candles.priceToCoordinate(fvg.bottom);
-    if (top != null && bottom != null) {
-      const zone = document.createElement('div'); zone.className = 'fvg-zone';
-      Object.assign(zone.style,{left:left+'px',width:Math.max(3,end-left)+'px',top:Math.max(0,Math.min(top,bottom))+'px',height:Math.max(2,Math.min(paneHeight,Math.max(top,bottom))-Math.max(0,Math.min(top,bottom)))+'px'});
-      fvgLayer.appendChild(zone);
+    const left=Math.max(0,Math.min(right,xAt(fvg.formedTime,0)));
+    const end=Math.max(left,Math.min(right,xAt(fvg.signalTime,right)));
+    const originX=Math.max(0,Math.min(right,xAt(fvg.impulseStartTime,0)));
+    const yAt=price=>candles.priceToCoordinate(Number(price));
+    function note(text,x,y,color='#b6f6ff') {
+      if (y == null || y<0 || y>paneHeight) return;
+      const label=document.createElement('span'); label.className='fvg-note';
+      label.textContent=text;
+      Object.assign(label.style,{left:x+'px',top:Math.max(2,y-24)+'px',color});
+      fvgLayer.appendChild(label);
     }
-    const levels = new Map();
-    for (const [price,name] of [[fvg.impulseOrigin,'Swing origin'],[fvg.midpoint,'Swing 50%'],[fvg.impulseExtreme,'Swing extreme'],[fvg.structureLevel,'Structure break'],[fvg.confluenceLevel,'S/R confluence']]) {
-      levels.set(price,levels.has(price) ? levels.get(price)+' / '+name : name);
+    function band(low,high,x1,x2,color,className='fvg-band') {
+      const a=yAt(high), b=yAt(low);
+      if (a==null || b==null) return;
+      const top=Math.max(0,Math.min(a,b)), bottom=Math.min(paneHeight,Math.max(a,b));
+      if (bottom<=top) return;
+      const el=document.createElement('div'); el.className=className;
+      Object.assign(el.style,{left:x1+'px',top:top+'px',width:Math.max(3,x2-x1)+'px',height:Math.max(2,bottom-top)+'px',background:color});
+      fvgLayer.appendChild(el);
     }
-    for (const [price,name] of levels) {
-      const y = candles.priceToCoordinate(price);
-      if (y == null || y < 0 || y >= paneHeight) continue;
-      const line = document.createElement('div'); line.className='fvg-level';
-      const levelLeft = name.startsWith('Swing') ? Math.max(0,xAt(fvg.impulseStartTime,0)) : left;
-      Object.assign(line.style,{left:levelLeft+'px',width:Math.max(3,end-levelLeft)+'px',top:y+'px'});
-      const label = document.createElement('span'); label.className='fvg-note';
-      label.textContent=name+' '+Number(price).toFixed(2);
-      Object.assign(label.style,{left:Math.min(left+4,Math.max(0,right-180))+'px',top:Math.max(0,y-17)+'px'});
-      fvgLayer.append(line,label);
+    const swingLow=Math.min(fvg.impulseOrigin,fvg.impulseExtreme);
+    const swingHigh=Math.max(fvg.impulseOrigin,fvg.impulseExtreme);
+    band(fvg.midpoint,swingHigh,originX,end,'#f871710c');
+    band(swingLow,fvg.midpoint,originX,end,'#34d3990c');
+    note('Premium',originX+5,yAt(swingHigh),'#fda4af');
+    note('Discount',originX+5,yAt(fvg.midpoint),'#6ee7b7');
+    band(fvg.bottom,fvg.top,left,end,'#22d3ee35','fvg-zone');
+    note((fvg.side==='LONG'?'Bullish':'Bearish')+' FVG',left+5,yAt(fvg.top));
+    for (const [price,name] of [[fvg.impulseOrigin,'Swing origin'],[fvg.midpoint,'50% equilibrium'],[fvg.impulseExtreme,'Swing extreme'],[fvg.confluenceLevel,'S/R confluence']]) {
+      const y=yAt(price); if(y==null || y<0 || y>=paneHeight) continue;
+      const line=document.createElement('div'); line.className='fvg-level';
+      Object.assign(line.style,{left:originX+'px',width:Math.max(3,end-originX)+'px',top:y+'px',borderColor:name==='S/R confluence'?'#c084fc':'#d6ad49'});
+      fvgLayer.appendChild(line); note(name+' '+formatPrice(price),originX+5,y);
     }
+    // Exact pivot/break anchors are saved for new runs. Old snapshots retain
+    // their levels without inventing a break candle or pivot timestamp.
+    if (fvg.structurePivotTime && fvg.structureBreakTime) {
+      const bx=xAt(fvg.structureBreakTime,end), px=xAt(fvg.structurePivotTime,originX), y=yAt(fvg.structureLevel);
+      if(y!=null && y>=0 && y<paneHeight) {
+        const line=document.createElement('div'); line.className='fvg-level';
+        Object.assign(line.style,{left:Math.max(0,px)+'px',width:Math.max(3,bx-Math.max(0,px))+'px',top:y+'px',borderTop:'2px solid #fb923c'});
+        fvgLayer.appendChild(line); note('BOS',bx+5,y,'#fdba74');
+      }
+    } else note('BOS level '+formatPrice(fvg.structureLevel),left+5,yAt(fvg.structureLevel),'#fdba74');
+    const formation=fvg.formationCandles || [2,1,0].map(offset=>bars.find(bar=>bar.time===fvg.formedTime-offset*strategySeconds)).filter(Boolean);
+    const onStrategy=(payload.chartTimeframe || boot.run.timeframe)===boot.run.timeframe;
+    formation.forEach((bar,index)=>{
+      if (!bars.length || bar.time<bars[0].time || bar.time>bars[bars.length-1].time) return;
+      const x=xAt(bar.time,left), hi=yAt(bar.high), lo=yAt(bar.low);
+      if(x<0 || x>right || hi==null || lo==null) return;
+      // On aggregated charts the three original candles may occupy one bar.
+      const half=Math.max(3,Math.min(25,chart.timeScale().options().barSpacing*.4));
+      if(onStrategy) band(bar.low,bar.high,x-half,x+half,index===1?'#fbbf2435':'#e2e8f015','formation-candle');
+      note(onStrategy ? String(index+1)+(index===1?' Displacement':'') : 'Formation '+String(index+1),x-6,Math.min(hi,lo)-8,'#f8fafc');
+    });
+    const confirmation=bars.find(bar=>bar.time<=fvg.signalTime && bar.time+strategySeconds>fvg.signalTime) || bars.find(bar=>bar.time===fvg.signalTime);
+    const signalY=yAt(confirmation?.close ?? (fvg.bottom+fvg.top)/2);
+    note('First revisit / confirmation',end+8,signalY,'#67e8f9');
   }
 
   function renderDiagnostics() {
@@ -447,9 +530,23 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     diag.textContent = lines.join('\\n');
     const fvg = payload.fvgDerivation;
     fvgReview.hidden = fvg?.status !== 'AVAILABLE';
+    $('setup-panel').hidden = fvgReview.hidden;
+    $('review-setup').hidden = fvgReview.hidden;
+    if (fvgReview.hidden) reviewMode=false;
+    $('review-setup').setAttribute('aria-pressed',String(reviewMode));
     if (!fvgReview.hidden) {
-      const checks = Object.entries(fvg.checks || {}).map(([name,pass]) => (pass ? '✓ ' : '✕ ') + name);
-      fvgReview.textContent = 'FVG six-factor v1 · ' + fvg.side + ' · Gap ' + Number(fvg.bottom).toFixed(2) + '–' + Number(fvg.top).toFixed(2) + ' · ' + checks.join(' · ');
+      fvgReview.textContent = reviewMode ? 'Setup review · EMAs temporarily hidden · original indicator selections retained' : 'FVG six-factor v1 · '+fvg.side+' · Setup details →';
+      const panel=$('setup-panel'); panel.replaceChildren();
+      const heading=document.createElement('h3'); heading.textContent=(fvg.side==='LONG'?'Bullish':'Bearish')+' FVG setup'; panel.appendChild(heading);
+      for (const [name,pass] of Object.entries(fvg.checks || {})) {
+        const row=document.createElement('div'); row.className='setup-check'; row.textContent=(pass?'✓ ':'✕ ')+name; panel.appendChild(row);
+      }
+      const facts=document.createElement('div'); facts.className='setup-facts';
+      facts.textContent='Gap: '+formatPrice(fvg.bottom)+' – '+formatPrice(fvg.top)+'\\nConfirmation: '+fmtTime(fvg.signalTime)+'\\nEntry: '+String(trade['Entry Time'] || trade.entryTime || 'n/a')+'\\nFormation candles: 1 / 2 displacement / 3\\nOrange: BOS · Purple: S/R\\nRed half: premium · Green half: discount';
+      facts.style.whiteSpace='pre-line'; panel.appendChild(facts);
+      if (!fvg.structureBreakTime) {
+        const note=document.createElement('p'); note.className='muted'; note.textContent='Older run: exact BOS candle was not saved. The saved level is shown. New runs include exact anchors.'; panel.appendChild(note);
+      }
     }
   }
 
@@ -457,6 +554,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     if (![x,y].every(v => v != null && Number.isFinite(Number(v)))) return;
     const label=document.createElement('div');
     label.className='trade-label '+className;
+    label.title=text;
     label.style.left=Math.max(2,Number(x))+'px';
     label.style.top=Math.max(2,Number(y)-10)+'px';
     label.textContent=text;
@@ -636,29 +734,20 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     }
     rect(entryY,stopY,'risk');
     rect(entryY,targetY,'reward');
-    addTradeLabel(left+4,entryY,'entry','OPEN '+String(trade.Entry ?? trade.entry ?? ''));
+    addTradeLabel(left+4,entryY,'entry','Entry '+formatPrice(trade.Entry ?? trade.entry));
     if (exit && Number.isFinite(exitPrice))
-      addTradeLabel(Math.max(left+4,right-90),exitY,'exit','EXIT '+String(trade.Exit ?? trade.exit ?? ''));
+      addTradeLabel(Math.max(left+4,right-90),exitY,'exit','Exit ('+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
 
-    const exitReason=String(trade['Exit Reason'] ?? trade.exitReason ?? '').trim().toUpperCase();
-    const exitedAtStop=exitReason === 'SL' || exitReason.includes('STOP');
-    const exitedAtTarget=exitReason === 'TP' || exitReason.includes('TAKE') || exitReason.includes('TARGET');
     const boundaryX=right+6;
-    if (exitedAtStop) {
-      if (Number.isFinite(target))
-        addTradeLabel(boundaryX,targetY,'tp','TP '+String(trade.Target ?? trade.target ?? ''));
-    } else if (exitedAtTarget) {
-      if (Number.isFinite(stop))
-        addTradeLabel(boundaryX,stopY,'sl','SL '+String(trade.Stop ?? trade.stop ?? ''));
-    } else {
-      if (Number.isFinite(target))
-        addTradeLabel(boundaryX,targetY,'tp','TP '+String(trade.Target ?? trade.target ?? ''));
-      if (Number.isFinite(stop))
-        addTradeLabel(boundaryX,stopY,'sl','SL '+String(trade.Stop ?? trade.stop ?? ''));
-    }
+    if (Number.isFinite(target))
+      addTradeLabel(boundaryX,targetY,'tp','Target '+formatPrice(trade.Target ?? trade.target));
+    if (Number.isFinite(stop))
+      addTradeLabel(boundaryX,stopY,'sl','Stop '+formatPrice(trade.Stop ?? trade.stop));
+
   }
 
   function buildChart() {
+    chartResizeObserver?.disconnect();
     if (chart) chart.remove();
     trendEmaLines = [];
     rsiSeries = null;
@@ -692,7 +781,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     });
     candles.setData(payload.candles || []);
     const selectedEmas = new Set([...document.querySelectorAll('.ema-period:checked')].map(input => Number(input.value)));
-    if (selectedEmas.size) {
+    if (selectedEmas.size && !reviewMode) {
       for (const overlay of (payload.overlays || [])) {
         if (overlay.kind !== 'ema' || !selectedEmas.has(Number(overlay.period))) continue;
         const emaColors = {9:'#60a5fa',20:'#4ade80',50:'#fb923c',100:'#a78bfa',200:'#e879f9',320:'#facc15',1600:'#fb7185'};
@@ -740,7 +829,10 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     }
     const redraw=redrawOverlays;
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
-    if (window.ResizeObserver) new ResizeObserver(redraw).observe($('chart-wrap'));
+    if (window.ResizeObserver) {
+      chartResizeObserver=new ResizeObserver(redraw);
+      chartResizeObserver.observe($('chart-wrap'));
+    }
     requestAnimationFrame(() => {
       redraw();
       setTimeout(redraw, 40);
@@ -773,10 +865,22 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
   }));
 
+  function setupBounds() {
+    const fvg=payload?.fvgDerivation;
+    if (fvg?.status!=='AVAILABLE') return null;
+    const bars=payload.candles || [];
+    const step=bars.length>1 ? bars[1].time-bars[0].time : 900;
+    const trade=payload.selectedTrade || {};
+    const exit=Date.parse(trade['Exit Time'] || trade.exitTime || '')/1000;
+    const entry=Number(payload.selectedTradeChartCandleTime || fvg.signalTime);
+    return {from:Math.min(fvg.impulseStartTime,fvg.formedTime)-step*6,to:Math.max(entry,fvg.signalTime,Number.isFinite(exit)?exit:entry)+step*8};
+  }
+
   function centerSelected() {
     if (!payload || !chart) return;
-    const start = Number(payload.selectedTradeViewStart);
-    const end = Number(payload.selectedTradeViewEnd);
+    const bounds=reviewMode ? setupBounds() : null;
+    const start = Number(bounds?.from ?? payload.selectedTradeViewStart);
+    const end = Number(bounds?.to ?? payload.selectedTradeViewEnd);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
     chart.timeScale().setVisibleRange({from:start,to:end});
     defaultPriceRange=computeSelectedPriceRange();
@@ -785,9 +889,8 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     chart.priceScale('right').applyOptions({autoScale:false});
     requestAnimationFrame(() => chart.priceScale('right').applyOptions({autoScale:true}));
     requestAnimationFrame(() => {
-      drawFibOverlay();
-      drawTradeBox();
-      setTimeout(() => { drawFibOverlay(); drawTradeBox(); }, 40);
+      redrawOverlays();
+      setTimeout(redrawOverlays, 40);
     });
   }
 
@@ -892,8 +995,8 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
       $('timeframe-note').textContent = requestedTimeframe === boot.run.timeframe
         ? 'CSL indicators · strategy timeframe'
         : 'CSL indicators · chart timeframe ' + requestedTimeframe + ' · trades from ' + boot.run.timeframe;
-      buildChart();
       renderDiagnostics();
+      buildChart();
       requestAnimationFrame(centerSelected);
     } catch (error) {
       if (generation !== loadGeneration) return;
@@ -914,6 +1017,12 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     load();
   });
   $('center').addEventListener('click',centerSelected);
+  $('review-setup').addEventListener('click',() => {
+    if(payload?.fvgDerivation?.status!=='AVAILABLE') return;
+    reviewMode=!reviewMode;
+    renderDiagnostics(); buildChart();
+    requestAnimationFrame(centerSelected);
+  });
   $('fit').addEventListener('click',() => {
     chart?.timeScale().fitContent();
     defaultPriceRange=null;

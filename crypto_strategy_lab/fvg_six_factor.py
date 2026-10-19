@@ -45,7 +45,7 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
                 continue
             crossed = close[i] > pivot[1] >= close[i-1] if side == "LONG" else close[i] < pivot[1] <= close[i-1]
             if crossed:
-                breaks[side] = {"index": i, "level": pivot[1], "origin": pivots[origin_name][1], "origin_index": pivots[origin_name][0]}
+                breaks[side] = {"index": i, "pivot_index": pivot[0], "level": pivot[1], "origin": pivots[origin_name][1], "origin_index": pivots[origin_name][0]}
                 breaks["SHORT" if side == "LONG" else "LONG"] = None
 
         accepted = []
@@ -102,6 +102,9 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
             reviews[i] = {
                 "version": 1, "side": side, "bottom": zone["bottom"], "top": zone["top"],
                 "formedTime": stamp(formed), "signalTime": stamp(i),
+                "formationCandles": [dict(time=stamp(j), high=float(high[j]), low=float(low[j])) for j in range(formed-2, formed+1)],
+                "structurePivotTime": stamp(zone["structure_pivot_index"]),
+                "structureBreakTime": stamp(zone["break_index"]),
                 "impulseStartTime": stamp(zone["origin_index"]),
                 "impulseOrigin": zone["origin"], "impulseExtreme": zone["extreme"],
                 "midpoint": midpoint, "structureLevel": zone["structure_level"],
@@ -125,7 +128,7 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
             origin_i = event["origin_index"]
             extreme = float(np.max(high[origin_i:i+1]) if side == "LONG" else np.min(low[origin_i:i+1]))
             active.append({"side": side, "bottom": float(bottom), "top": float(top), "formed": i,
-                           "break_index": event["index"], "structure_level": event["level"],
+                           "break_index": event["index"], "structure_level": event["level"], "structure_pivot_index": event["pivot_index"],
                            "origin": event["origin"], "origin_index": origin_i, "extreme": extreme,
                            "stop": float(low[i-1] if side == "LONG" else high[i-1]),
                            "sr_aligned": bool(levels), "sr_level": float(levels[0]) if levels else None})

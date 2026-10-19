@@ -49,5 +49,17 @@ and checklist alongside the normal entry/exit and risk/reward boxes. Switching
 chart timeframe retains these saved decisions; annotations are not recalculated.
 The overlay describes the selected accepted trade; rejected gaps are not shown.
 
+Use **Review setup** to frame the swing, formation and trade, temporarily hide
+EMAs, and inspect the six checks in the side panel. Click it again to restore
+the normal view and selected EMAs. Formation candles are numbered 1–2–3, with
+the middle displacement candle emphasized. Premium/discount shading separates
+the swing halves. The first revisit/confirmation and actual entry have distinct
+labels; entry, stop, target and exit use readable rounded display prices.
+
+New runs also save all three formation candles and exact structure pivot/break
+timestamps. Older runs still display their saved levels and show a compatibility
+note; an exact BOS candle is not inferred for those runs. On other chart
+timeframes, labels project the saved events onto the containing displayed bars.
+
 Feedback should identify the run and trade number, expected gap, expected swing
 anchors, and which confirmation or entry/stop rule should behave differently.

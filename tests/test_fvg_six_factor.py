@@ -37,6 +37,10 @@ def test_six_factors_are_causal_with_saved_long_and_short_decisions():
         review = reviews[i]
         assert len(review["checks"]) == 6 and all(review["checks"].values())
         assert pd.Timestamp(review["formedTime"]) < pd.Timestamp(review["signalTime"])
+        assert len(review["formationCandles"]) == 3
+        assert review["formationCandles"][-1]["time"] == review["formedTime"]
+        assert pd.Timestamp(review["structurePivotTime"]) < pd.Timestamp(review["structureBreakTime"])
+        assert pd.Timestamp(review["structureBreakTime"]) <= pd.Timestamp(review["formedTime"])
         key = (review["side"], review["formedTime"])
         assert key not in formed
         formed.add(key)
@@ -91,6 +95,11 @@ def test_saved_trade_context_round_trips_to_visualizer_without_recalculation():
     assert payload["bottom"] == review["bottom"]
     assert payload["checks"] == review["checks"]
     assert payload["signalTime"] == int(pd.Timestamp(review["signalTime"]).timestamp())
+    assert payload["formationCandles"][-1]["time"] == payload["formedTime"]
+    # Earlier completed runs lack the additional anchors and remain readable.
+    legacy = {k: v for k, v in review.items() if k not in {"formationCandles", "structurePivotTime", "structureBreakTime"}}
+    model.trades = pd.DataFrame([{"fvg_six_factor_context": json.dumps(legacy)}])
+    assert model.fvg_six_factor_derivation(0)["status"] == "AVAILABLE"
     model.trades = pd.DataFrame([{"fvg_six_factor_context": "bad-json"}])
     assert model.fvg_six_factor_derivation(0)["status"] == "NOT_AVAILABLE"
 
