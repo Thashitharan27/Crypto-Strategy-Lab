@@ -85,3 +85,12 @@ followed only then by a separate explicit activation-approval decision for an
 exact proposed deployment. Both production capabilities remain OFF. Preserve
 PySide6 and PR #501's hold. Do not repeat completed historical certification
 solely to increase coverage counts.
+
+## Continued security preparation
+
+See `browser_b4_activation_proposal_2026-10-19.md` for reviewed fixes #852–#854,
+the fresh dependency build/audit remediation, combined Windows verification
+and proposed deployment access/audit policy. The earlier audit findings above
+remain a record of the original resolution; they are resolved in the new fresh
+build, not erased from history. Original source ACLs are unchanged and the
+production provisioning/independent acceptance gates remain unsatisfied.
