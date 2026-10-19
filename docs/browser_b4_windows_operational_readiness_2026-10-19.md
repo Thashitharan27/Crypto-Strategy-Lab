@@ -51,6 +51,13 @@ than credential bytes. All task-owned listeners were stopped after verification.
 - Symlink privilege skips remain skips. Administrator tampering, alternative
   service identities, full disk/rotation, physical power loss and all possible
   deployment/proxy routes are not certified by these finite checks.
+- Read-only ACL inspection of the actual canonical raw/cache and original
+  config/output roots found inherited **Authenticated Users Modify** access.
+  Hash preservation and HTTP route denial passed, but the current Windows
+  identity is not filesystem-confined to read-only originals. Those original
+  ACLs were deliberately left unchanged. A reviewed future deployment identity
+  and least-privilege source access remain an explicit production blocker;
+  hardening the new candidate roots does not fix original-source ACLs.
 
 ## Remaining release blockers and next checkpoint
 
