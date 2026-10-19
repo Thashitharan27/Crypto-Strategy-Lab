@@ -56,7 +56,7 @@ html,body{height:100%;margin:0;background:#0b121a;color:#e6edf3;font-family:Sego
 #diagnostics{background:#0f1720;border-bottom:1px solid #2b3948}
 #diagnostics summary{cursor:pointer;padding:5px 10px;font:12px Segoe UI,Arial,sans-serif;color:#b8c2cc}
 #diagnostics:not([open]) #diag{display:none}
-#toolbar{display:flex;gap:8px;align-items:center;padding:8px;background:#101923;border-bottom:1px solid #2b3948}
+#toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;background:#101923;border-bottom:1px solid #2b3948}
 button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-radius:5px;padding:5px 8px}
 #trade{min-width:460px;max-width:62vw}
 #diag{font:12px/1.45 Consolas,monospace;padding:7px 10px;background:#0f1720;border-bottom:1px solid #2b3948;white-space:pre-wrap}
@@ -88,6 +88,9 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 <div id="app">
   <div id="toolbar">
     <strong>Strategy Visualizer V2 · Diagnostic</strong>
+    <label for="chart-timeframe">Chart timeframe</label>
+    <select id="chart-timeframe" aria-label="Chart timeframe"></select>
+    <span id="timeframe-note" class="muted" role="status"></span>
     <select id="trade"></select>
     <button id="center">Center selected</button>
     <button id="fit">Fit full run</button>
@@ -96,12 +99,17 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       <div class="ema-options" role="group" aria-label="Visible EMA periods">
         <label><input type="checkbox" class="ema-period" value="9"> EMA 9</label>
         <label><input type="checkbox" class="ema-period" value="20" checked> EMA 20</label>
+        <label><input type="checkbox" class="ema-period" value="50"> EMA 50</label>
         <label><input type="checkbox" class="ema-period" value="100"> EMA 100</label>
+        <label><input type="checkbox" class="ema-period" value="200"> EMA 200</label>
         <label><input type="checkbox" class="ema-period" value="320" checked> EMA 320</label>
         <label><input type="checkbox" class="ema-period" value="1600" checked> EMA 1600</label>
       </div>
     </details>
     <label><input type="checkbox" id="show-rsi" checked> RSI 14 + EMA RSI 224 / 1120</label>
+    <label><input type="checkbox" class="rsi-line" value="rsi:14" checked> Wilder RSI 14 (CSL)</label>
+    <label><input type="checkbox" class="rsi-line" value="ema_rsi:224" checked> EMA RSI 224 (research)</label>
+    <label><input type="checkbox" class="rsi-line" value="ema_rsi:1120" checked> EMA RSI 1120 (research)</label>
     <label for="rsi-height">RSI size</label><input id="rsi-height" type="range" min="120" max="420" value="260" step="10" title="Adjust RSI panel height">
     <button id="reset-rsi">Reset RSI zoom</button>
   </div>
@@ -122,6 +130,10 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   const fibLayer = $('fib-layer');
   const tradeBoxLayer = $('trade-box-layer');
   let payload = null;
+  let currentTimeframe = boot.run.timeframe;
+  let loadGeneration = 0;
+  const timeframeSelect = $('chart-timeframe');
+  timeframeSelect.add(new Option(currentTimeframe + ' (strategy)', currentTimeframe));
   let currentTrade = 0;
   let chart = null;
   let candles = null;
@@ -500,7 +512,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     if (selectedEmas.size) {
       for (const overlay of (payload.overlays || [])) {
         if (overlay.kind !== 'ema' || !selectedEmas.has(Number(overlay.period))) continue;
-        const emaColors = {9:'#60a5fa',20:'#4ade80',100:'#a78bfa',320:'#facc15',1600:'#fb7185'};
+        const emaColors = {9:'#60a5fa',20:'#4ade80',50:'#fb923c',100:'#a78bfa',200:'#e879f9',320:'#facc15',1600:'#fb7185'};
         const series=chart.addSeries(window.LightweightCharts.LineSeries,{
           color:emaColors[Number(overlay.period)] || '#e2e8f0',
           lineWidth:2,priceLineVisible:false,lastValueVisible:true,
@@ -514,7 +526,8 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
         trendEmaLines.push(series);
       }
     }
-    const rsiOverlays = (payload.overlays || []).filter(o => (o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period))) || (o.kind === 'rsi' && Number(o.period) === 14));
+    const selectedRsi = new Set([...document.querySelectorAll('.rsi-line:checked')].map(input => input.value));
+    const rsiOverlays = (payload.overlays || []).filter(o => ((o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period))) || (o.kind === 'rsi' && Number(o.period) === 14)) && selectedRsi.has(o.kind + ':' + o.period));
     if (rsiOverlays.length && $('show-rsi').checked && rsiOverlays.some(o => (o.data || []).length)) {
       // The built-in second pane shares the price chart's time scale:
       // horizontal panning, zooming, and crosshair remain aligned.
@@ -570,7 +583,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
   });
 
-  document.querySelectorAll('.ema-period').forEach(input => input.addEventListener('change', () => {
+  document.querySelectorAll('.ema-period, .rsi-line').forEach(input => input.addEventListener('change', () => {
     if (!payload || !chart) return;
     const visibleRange = chart.timeScale().getVisibleRange();
     buildChart();
@@ -675,20 +688,43 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   chartWrap.addEventListener('pointercancel',finishVerticalPan,{capture:true});
 
   async function load() {
+    const generation = ++loadGeneration;
+    const requestedTimeframe = currentTimeframe;
     diag.textContent = 'Loading…';
+    $('timeframe-note').textContent = 'Loading ' + requestedTimeframe + '…';
     try {
-      payload = await getJson(api('/api/payload',{
+      const nextPayload = await getJson(api('/api/payload',{
         trade_index:String(currentTrade),
-        chart_timeframe:boot.run.timeframe,
+        chart_timeframe:requestedTimeframe,
         full_run:'1',
       }));
+      if (generation !== loadGeneration) return;
+      payload = nextPayload;
+      timeframeSelect.replaceChildren();
+      for (const item of (payload.run.availableChartTimeframes || [{interval:boot.run.timeframe}])) {
+        const label = item.interval + (item.interval === boot.run.timeframe ? ' (strategy)' : '') + (item.coverage === 'partial' ? ' (partial data)' : '');
+        timeframeSelect.add(new Option(label, item.interval));
+      }
+      timeframeSelect.value = requestedTimeframe;
+      $('timeframe-note').textContent = requestedTimeframe === boot.run.timeframe
+        ? 'CSL indicators · strategy timeframe'
+        : 'CSL indicators · chart timeframe ' + requestedTimeframe + ' · trades from ' + boot.run.timeframe;
       buildChart();
       renderDiagnostics();
       requestAnimationFrame(centerSelected);
     } catch (error) {
+      if (generation !== loadGeneration) return;
+      currentTimeframe = payload?.chartTimeframe || boot.run.timeframe;
+      timeframeSelect.value = currentTimeframe;
+      $('timeframe-note').textContent = 'Could not load ' + requestedTimeframe + ': ' + error.message;
       diag.textContent = 'ERROR: ' + error.message;
     }
   }
+
+  timeframeSelect.addEventListener('change', () => {
+    currentTimeframe = timeframeSelect.value;
+    load();
+  });
 
   tradeSelect.addEventListener('change',() => {
     currentTrade = Number(tradeSelect.value);

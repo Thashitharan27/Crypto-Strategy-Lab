@@ -2123,19 +2123,18 @@ class CompletedRunVisualizer:
         run_start = _utc(request.period_start)
         run_end = _utc(request.period_end)
 
-        show_trend_emas = strategy_timeframe == chart_timeframe
+        available_timeframes = self.available_chart_timeframes()
+        if chart_timeframe not in {item["interval"] for item in available_timeframes}:
+            raise ValueError(f"chart timeframe {chart_timeframe!r} is not available in the canonical Data Lake")
         # V2 normally loads run candles only. For trading-identical EMA values,
         # include the native pre-run warmup and calculate before trimming.
-        # 2240 native bars provide ample EMA-RSI 1120 initialization on any
-        # supported timeframe, not just 15m.
-        timeframe_minutes = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}
-        rsi_warmup = pd.Timedelta(
-            minutes=timeframe_minutes[chart_timeframe] * 2240
-        ) if chart_timeframe in timeframe_minutes else pd.Timedelta(0)
-        calculation_start = run_start - max(
+        # Reference timeframes use 2240 bars for the longer research indicators.
+        interval = pd.Timedelta(interval_to_timedelta(chart_timeframe))
+        # Recursive indicators must start at exactly the engine's history boundary
+        # on the strategy timeframe. More history changes their seed and values.
+        calculation_start = run_start - (
             strategy_warmup_period(self.seed.config)
-            if strategy_timeframe == chart_timeframe else pd.Timedelta(0),
-            rsi_warmup,
+            if strategy_timeframe == chart_timeframe else interval * 2240
         )
         market = self._market_frame(
             calculation_start,
@@ -2162,19 +2161,17 @@ class CompletedRunVisualizer:
                 "data": _line_points(market.loc[visible, "period_start"],
                                      values[visible.to_numpy()]),
             })
-        if show_trend_emas:
-            visible = market["period_start"] >= run_start
-            for period in (9, 20, 100, 320, 1600):
-                ema_values = _causal_ema(market["close"].to_numpy(float), period)
-                overlays.append({
-                    "name": f"EMA {period}",
-                    "kind": "ema",
-                    "period": period,
-                    "data": _line_points(
-                        market.loc[visible, "period_start"],
-                        ema_values[visible.to_numpy()],
-                    ),
-                })
+        for period in (9, 20, 50, 100, 200, 320, 1600):
+            ema_values = _causal_ema(market["close"].to_numpy(float), period)
+            overlays.append({
+                "name": f"EMA {period}",
+                "kind": "ema",
+                "period": period,
+                "data": _line_points(
+                    market.loc[visible, "period_start"],
+                    ema_values[visible.to_numpy()],
+                ),
+            })
         market = market.loc[market["period_start"] >= run_start].reset_index(drop=True)
         candles = [
             {
@@ -2271,6 +2268,8 @@ class CompletedRunVisualizer:
                 "timeframe": strategy_timeframe,
                 "strategyTimeframe": strategy_timeframe,
                 "chartTimeframe": chart_timeframe,
+                "availableChartTimeframes": available_timeframes,
+                "indicatorSource": "CSL native EMA and Wilder RSI; EMA RSI is a separate research indicator",
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": selected_trade,

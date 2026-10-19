@@ -1012,3 +1012,46 @@ def test_snap_to_candle_handles_microsecond_datetime_index_resolution():
 
     assert snapped == int(target.timestamp())
     assert snapped != int(times[-1].timestamp())
+
+
+def test_v2_timeframes_use_native_indicator_values_and_warmup(tmp_path):
+    from crypto_strategy_lab.fib_retracement import _causal_ema
+    from crypto_strategy_lab.indicators import rsi
+
+    service, run_dir, manifest, _ = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    for timeframe in ("15m", "1h"):
+        payload = model.build_v2_diagnostic_payload(trade_index=0, chart_timeframe=timeframe)
+        request, _, interval = service.store.calls[-1]
+        assert interval == timeframe
+        if timeframe == "15m":
+            assert pd.Timestamp(request.start) == (
+                pd.Timestamp(model.seed.request.period_start)
+                - strategy_warmup_period(model.seed.config)
+            )
+        frame = service.store.load_dataset(request, DatasetKind.KLINES, interval=interval)
+        visible = frame["period_start"] >= pd.Timestamp(model.seed.request.period_start)
+        by_key = {(o["kind"], o["period"]): o for o in payload["overlays"]}
+        for kind, period, values in (
+            ("ema", 20, _causal_ema(frame["close"].to_numpy(float), 20)),
+            ("ema", 100, _causal_ema(frame["close"].to_numpy(float), 100)),
+            ("rsi", 14, rsi(frame["close"].to_numpy(float), 14)),
+        ):
+            expected = values[visible.to_numpy()]
+            expected = expected[np.isfinite(expected)]
+            actual = [p["value"] for p in by_key[kind, period]["data"]]
+            np.testing.assert_array_equal(actual, expected)
+        assert {o["period"] for o in payload["overlays"] if o["kind"] == "ema"} == {9,20,50,100,200,320,1600}
+        assert payload["run"]["chartTimeframe"] == timeframe
+        assert {item["interval"] for item in payload["run"]["availableChartTimeframes"]} == {"15m", "1h"}
+        assert payload["selectedTrade"]["Side"] == "LONG"
+
+
+def test_v2_rejects_unavailable_timeframe_before_loading_data(tmp_path):
+    import pytest
+    service, run_dir, manifest, _ = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    calls_before = len(service.store.calls)
+    with pytest.raises(ValueError, match="not available"):
+        model.build_v2_diagnostic_payload(chart_timeframe="7m")
+    assert len(service.store.calls) == calls_before
