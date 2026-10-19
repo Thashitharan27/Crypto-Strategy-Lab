@@ -237,3 +237,19 @@ concurrent appends or replacement; it does not create an atomic filesystem
 snapshot or protect against metadata-preserving tampering, host power loss,
 or unrecorded native effects. No journal repair, request replay, release
 activation or mutation routing is introduced.
+
+
+## B4 rollback evidence checklist (2026-10-19)
+
+The review-only `inspect_b4_rollback_readiness` helper reads the existing
+bounded audit verifier and crash/worker-claim inspector in separate isolated
+roots. It reports missing evidence, any recorded mutation attempt, existing or
+inaccessible native ownership claims, and unverifiable native artifacts. It
+never edits either root, associates a run with a request, releases a lock,
+replays a job, changes configuration or exposes a production route.
+
+**RELEASE_HELD is unconditional**: even a clean read-only audit and absent
+claims do not authorize production activation or establish hardware-level
+durability. This is an operator evidence checklist, not an automatic rollback
+decision. Preserve the PySide6 fallback and original-file hashes; require an
+independent release review and fresh explicit activation approval.
