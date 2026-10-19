@@ -965,6 +965,26 @@ class CompletedRunVisualizer:
         }
         return {key: value for key, value in summary.items() if value is not None}
 
+    def fvg_six_factor_derivation(self, index: int | None) -> dict[str, Any]:
+        """Read the decision saved with the trade, never reconstruct it."""
+        if index is None or not self.trade_count:
+            return {"status": "NOT_AVAILABLE"}
+        raw = self._trade_row(index).get("fvg_six_factor_context")
+        if not isinstance(raw, (str, dict)):
+            return {"status": "NOT_AVAILABLE"}
+        try:
+            value = json.loads(raw) if isinstance(raw, str) else dict(raw)
+            if not isinstance(value, dict) or value.get("version") != 1:
+                return {"status": "NOT_AVAILABLE"}
+            for key in ("bottom", "top", "midpoint", "impulseOrigin", "impulseExtreme", "structureLevel", "confluenceLevel"):
+                if _finite(value.get(key)) is None:
+                    return {"status": "NOT_AVAILABLE"}
+            for key in ("formedTime", "signalTime", "impulseStartTime"):
+                value[key] = _unix_seconds(_utc(value[key]))
+            return {**value, "status": "AVAILABLE"}
+        except (ValueError, TypeError, KeyError):
+            return {"status": "NOT_AVAILABLE"}
+
     def _center_time(self, trade_index: int | None) -> pd.Timestamp:
         if trade_index is not None and self.trade_count:
             row = self._trade_row(trade_index)
@@ -2274,6 +2294,7 @@ class CompletedRunVisualizer:
             "selectedTradeIndex": trade_index,
             "selectedTrade": selected_trade,
             "fibDerivation": self.fib_derivation(trade_index),
+            "fvgDerivation": self.fvg_six_factor_derivation(trade_index),
             "selectedTradeCandleTime": selected_trade_candle_time,
             "selectedTradeChartCandleTime": selected_trade_chart_candle_time,
             "selectedTradeViewStart": (

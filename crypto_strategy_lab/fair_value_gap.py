@@ -1,11 +1,14 @@
 """Causal three-candle fair value gap first-revisit signal."""
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 
 
 FVG_MODE = "FAIR_VALUE_GAP"
+FVG_MODES = {FVG_MODE, "FVG_SIX_FACTOR"}
 FVG_RULE_INDICATORS = frozenset({
     "FVG_GAP_SIZE_ATR",
     "FVG_STOP_BOUNDARY_DISTANCE_ATR",
@@ -384,7 +387,7 @@ class FairValueGapMixin:
     def _fvg_confirmation_enabled(self):
         return bool(
             getattr(self.config, "fvg_confirmation_enabled", False)
-            and getattr(self, "signal_strategy_mode", "DI") == FVG_MODE
+            and getattr(self, "signal_strategy_mode", "DI") in FVG_MODES
         )
 
     def _fvg_expected_entry_price(self, i, execution_i, direction):
@@ -525,7 +528,7 @@ class FairValueGapMixin:
     def _configure_signal_features(self):
         super()._configure_signal_features()
         if any(
-            str(rule.get("_strategy_direction_mode", "")).upper() == FVG_MODE
+            str(rule.get("_strategy_direction_mode", "")).upper() in FVG_MODES
             or str(rule.get("indicator", "")).upper() in FVG_RULE_INDICATORS
             for profile in self.config.strategy_profiles.values()
             for rule in getattr(profile, "entry_rules", ())
@@ -539,6 +542,18 @@ class FairValueGapMixin:
                 open_=self.open,
                 swing_strength=int(getattr(self.config, "fvg_structure_swing_strength", 2)),
             )
+            self.fvg_six_factor_reviews = None
+            if any(str(rule.get("_strategy_direction_mode", "")).upper() == "FVG_SIX_FACTOR"
+                   for profile in self.config.strategy_profiles.values()
+                   for rule in getattr(profile, "entry_rules", ())):
+                from crypto_strategy_lab.fvg_six_factor import six_factor_context
+                (self.fvg_first_revisit, self.fvg_rule_features,
+                 self.fvg_stop_boundaries, self.fvg_target_boundaries,
+                 self.fvg_six_factor_reviews) = six_factor_context(
+                    self.high, self.low, self.close, self.atr_values, open_=self.open,
+                    swing_strength=int(getattr(self.config, "fvg_structure_swing_strength", 2)),
+                    times=self.times,
+                )
             if bool(getattr(self.config, "fvg_context_enabled", False)):
                 self.fvg_htf_context = higher_timeframe_fvg_context_alignment(
                     self.times,
@@ -569,12 +584,12 @@ class FairValueGapMixin:
     def _infer_signal_strategy_mode(self):
         for profile in self.config.strategy_profiles.values():
             for rule in getattr(profile, "entry_rules", ()):
-                if str(rule.get("_strategy_direction_mode", "")).upper() == FVG_MODE:
-                    return FVG_MODE
+                if str(rule.get("_strategy_direction_mode", "")).upper() in FVG_MODES:
+                    return str(rule["_strategy_direction_mode"]).upper()
         return super()._infer_signal_strategy_mode()
 
     def _selected_direction(self, i):
-        if getattr(self, "signal_strategy_mode", "DI") == FVG_MODE:
+        if getattr(self, "signal_strategy_mode", "DI") in FVG_MODES:
             direction = self.fvg_first_revisit[i]
             if direction in {"LONG", "SHORT"} and bool(
                 getattr(self.config, "fvg_context_enabled", False)
@@ -586,13 +601,13 @@ class FairValueGapMixin:
         return super()._selected_direction(i)
 
     def _should_enter(self, i):
-        if getattr(self, "signal_strategy_mode", "DI") == FVG_MODE:
+        if getattr(self, "signal_strategy_mode", "DI") in FVG_MODES:
             if self._selected_direction(i) is None:
                 return False
         return super()._should_enter(i)
 
     def _sr_stop_plan(self, i, execution_i=None):
-        if getattr(self, "signal_strategy_mode", "DI") != FVG_MODE:
+        if getattr(self, "signal_strategy_mode", "DI") not in FVG_MODES:
             return super()._sr_stop_plan(i, execution_i)
         direction = self._effective_trade_direction(i)
         if direction not in {"LONG", "SHORT"}:
@@ -668,7 +683,7 @@ class FairValueGapMixin:
             passed, reason = super()._entry_filter_result(i, execution_i)
         finally:
             self._fvg_rule_execution_i = None
-        if not passed or getattr(self, "signal_strategy_mode", "DI") != FVG_MODE:
+        if not passed or getattr(self, "signal_strategy_mode", "DI") not in FVG_MODES:
             return passed, reason
         target = self._fvg_target_plan(i, execution_i)
         if not target["passed"]:
@@ -677,7 +692,7 @@ class FairValueGapMixin:
 
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):
         indicator_i = schedule["indicator_index"] if schedule else i
-        target = self._fvg_target_plan(indicator_i, i) if getattr(self, "signal_strategy_mode", "DI") == FVG_MODE else None
+        target = self._fvg_target_plan(indicator_i, i) if getattr(self, "signal_strategy_mode", "DI") in FVG_MODES else None
         before = len(self.active_pairs)
         result = super()._open_pair(i, entry_filter_passed, entry_filter_reason, schedule)
         if len(self.active_pairs) > before and schedule and schedule.get("fvg_confirmation"):
@@ -686,6 +701,8 @@ class FairValueGapMixin:
             pair.fvg_confirmation_close = schedule.get("fvg_confirmation_close", np.nan)
             pair.fvg_confirmation_minutes = schedule.get("fvg_confirmation_minutes", np.nan)
             pair.fvg_confirmation_time = schedule.get("actual_entry_timestamp")
+        if len(self.active_pairs) > before and getattr(self, "fvg_six_factor_reviews", None) is not None:
+            self.active_pairs[-1].fvg_six_factor_context = self.fvg_six_factor_reviews[indicator_i]
         if target and target.get("passed") and len(self.active_pairs) > before:
             for pos in self.active_pairs[-1].positions():
                 direction = "LONG" if str(getattr(pos.side, "value", pos.side)).upper() == "LONG" else "SHORT"
@@ -703,6 +720,8 @@ class FairValueGapMixin:
     def _build_result_row(self, pair, row_kind, positions):
         row = super()._build_result_row(pair, row_kind, positions)
         pos = positions[0] if positions else None
+        context = getattr(pair, "fvg_six_factor_context", None)
+        row["fvg_six_factor_context"] = json.dumps(context, separators=(",", ":")) if context else None
         row["fvg_stop_applied"] = bool(getattr(pos, "fvg_stop_applied", False))
         row["fvg_stop_boundary_price"] = getattr(pos, "fvg_stop_boundary_price", np.nan)
         row["fvg_stop_price"] = getattr(pos, "fvg_stop_price", np.nan)
