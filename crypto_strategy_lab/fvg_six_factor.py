@@ -6,6 +6,17 @@ import numpy as np
 from crypto_strategy_lab.fair_value_gap import FVG_RULE_INDICATORS, _fvg_market_structure_features
 
 
+def revisit_close_confirms(side, bottom, top, open_price, close_price):
+    """Accept an inside close or a directional rejection on the safe side."""
+    if not all(np.isfinite(v) for v in (bottom, top, open_price, close_price)):
+        return False
+    if bottom <= close_price <= top:
+        return True
+    if side == "LONG":
+        return bool(close_price > top and close_price > open_price)
+    return bool(close_price < bottom and close_price < open_price)
+
+
 def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=None):
     high, low, close, atr, open_ = [np.asarray(a, dtype=float) for a in (high, low, close, atr, open_)]
     if any(a.ndim != 1 or len(a) != len(close) for a in (high, low, close, atr, open_)):
@@ -66,7 +77,7 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
             gap_mid = (zone["bottom"] + zone["top"]) / 2
             checks = {
                 "First untouched revisit": True,
-                "Close inside or beyond gap": bool(close[i] >= zone["bottom"] if side == "LONG" else close[i] <= zone["top"]),
+                "Inside close or directional wick rejection": revisit_close_confirms(side, zone["bottom"], zone["top"], open_[i], close[i]),
                 "Prior pivot / broken-level overlap": zone["sr_aligned"],
                 "Highest priority in impulse": zone is ranked,
                 "Discount / premium half": bool(gap_mid <= midpoint if side == "LONG" else gap_mid >= midpoint),
@@ -101,6 +112,7 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
             f["FVG_LOCATION_ALIGNED"][i] = 1.0
             reviews[i] = {
                 "version": 1, "side": side, "bottom": zone["bottom"], "top": zone["top"],
+                "confirmationRule": "INSIDE_OR_DIRECTIONAL_REJECTION_V2",
                 "formedTime": stamp(formed), "signalTime": stamp(i),
                 "formationCandles": [dict(time=stamp(j), high=float(high[j]), low=float(low[j])) for j in range(formed-2, formed+1)],
                 "structurePivotTime": stamp(zone["structure_pivot_index"]),
