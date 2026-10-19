@@ -114,6 +114,12 @@ def build_browser_readonly_runtime(
         if static_root is not None
         else PROJECT_ROOT / "browser_ui" / "dist"
     )
+    # The certification-only React build exposes experimental guarded controls.
+    # Never serve that UI through the ordinary production read-only launcher,
+    # even when the caller explicitly overrides its static distribution.
+    # The separate operator-only certification server owns that bundle.
+    if effective_static_root.name == "dist-certification":
+        raise ValueError("Certification-only browser assets cannot be served in production")
     effective_output_root = (
         Path(output_root)
         if output_root is not None
