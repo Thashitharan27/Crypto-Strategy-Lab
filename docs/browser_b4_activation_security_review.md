@@ -253,3 +253,15 @@ claims do not authorize production activation or establish hardware-level
 durability. This is an operator evidence checklist, not an automatic rollback
 decision. Preserve the PySide6 fallback and original-file hashes; require an
 independent release review and fresh explicit activation approval.
+
+
+## B4 rollback evidence clean-checkout smoke (2026-10-19)
+
+The existing blocking Linux and Windows `browser_release_smoke` now also
+constructs temporary, isolated audit and native ownership evidence, records an
+unresolved submission ATTEMPT followed by an unrelated STATUS outcome, and
+checks that `inspect_b4_rollback_readiness` reports RELEASE_HELD with claims
+untouched. Original fixture bytes remain unchanged. This is finite controlled
+fixture evidence, not a real process kill, original workstation parity,
+physical power-loss certification or release authorization. The ordinary
+production launcher still has no guarded mutation routes.
