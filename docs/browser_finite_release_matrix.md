@@ -565,3 +565,25 @@ actual browser-UI/HTTP test-only guarded paths. It consolidates established A/B
 proof and retained historical caveats rather than restarting historical tests.
 The read-only launcher remains unchanged and ordinary guarded mutations remain
 server-disabled pending independent Windows evidence and explicit release approval.
+
+
+## B4 release-preparation hold (2026-10-19)
+
+The independent GitHub review of merged #813–#819 accepts the four Windows
+browser/PySide6 comparisons (16 trade rows and 13,274 cells) as **finite**
+certification evidence, not as clean-build or universal historical proof.
+The original executor manifests report `code_dirty=true`; untracked
+harness/research sources, missing genuine TP1→BE and SL1/trailing combinations,
+per-trade slippage/tick-order evidence, Windows filesystem-link privilege skips,
+and hardware power-loss limits remain explicit release qualifications.
+
+The production browser launcher must remain read-only. B4 preparation adds an
+explicit fail-closed production release-request boundary and regression checks
+that feature-like environment variables cannot attach guarded API routes.
+**This is not a production enablement switch.** A subsequent, separately
+reviewed authorization/composition change would require an explicit owner
+approval, dedicated non-original execution/configuration roots, authenticated
+loopback-only routing, bounded audit, real UI smoke on a clean release checkout,
+raw full pytest and all required CI checks, and preservation of PySide6 fallback.
+PR #501 stays held. Neither approval to prepare B4 nor passing this preparation
+PR authorizes guarded browser execution or configuration writes.
