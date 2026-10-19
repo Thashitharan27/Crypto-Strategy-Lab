@@ -35,6 +35,7 @@ class B4AuditJournal:
         self.path = directory / ("csl-b4-audit-" + session_id + ".jsonl")
         self._lock = threading.Lock()
         self._fd: int | None = None
+        self._broken = False
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND
         flags |= getattr(os, "O_BINARY", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -62,21 +63,30 @@ class B4AuditJournal:
         with self._lock:
             if self._fd is None:
                 raise RuntimeError("B4 audit journal is closed")
-            # Refuse a detached/replaced journal destination. An opened
-            # descriptor alone cannot prove its named evidence path survives.
-            opened = os.fstat(self._fd)
-            named = os.stat(self.path, follow_symlinks=False)
-            if (not stat.S_ISREG(named.st_mode)
-                    or opened.st_dev != named.st_dev
-                    or opened.st_ino != named.st_ino):
-                raise OSError("B4 audit destination identity changed")
-            offset = 0
-            while offset < len(line):
-                count = os.write(self._fd, line[offset:])
-                if count <= 0:
-                    raise OSError("B4 audit write made no progress")
-                offset += count
-            os.fsync(self._fd)
+            if self._broken:
+                raise OSError("B4 audit journal previously failed")
+            try:
+                # Refuse a detached/replaced journal destination. An opened
+                # descriptor alone cannot prove its named evidence path survives.
+                opened = os.fstat(self._fd)
+                named = os.stat(self.path, follow_symlinks=False)
+                if (not stat.S_ISREG(named.st_mode)
+                        or opened.st_dev != named.st_dev
+                        or opened.st_ino != named.st_ino):
+                    raise OSError("B4 audit destination identity changed")
+                offset = 0
+                while offset < len(line):
+                    count = os.write(self._fd, line[offset:])
+                    if count <= 0:
+                        raise OSError("B4 audit write made no progress")
+                    offset += count
+                os.fsync(self._fd)
+    
+            except (OSError, RuntimeError):
+                # A partial write or failed fsync leaves uncertain evidence.
+                # Never append further records to a compromised session.
+                self._broken = True
+                raise
 
     def close(self) -> None:
         with self._lock:

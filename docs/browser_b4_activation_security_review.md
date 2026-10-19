@@ -312,3 +312,13 @@ latch remains fail closed after persistence failure. This is an in-process
 candidate gate, not cross-process ownership, hardware durability, native
 cancellation, or release approval. The native request/worker claims remain
 authoritative; the ordinary production launcher remains read-only.
+
+
+## B4 fail-closed audit writer after disk or fsync failure (2026-10-19)
+
+A per-session audit journal now refuses all subsequent appends after its first
+filesystem write, pathname-integrity, or fsync failure. A partial record may
+already exist, so no truncation, replay, claim clearing or repair is attempted.
+The router's strict-audit admission remains independently fail closed. This
+is an isolated review-only candidate safeguard, not proof of host power-loss
+durability or an enabled guarded production release.
