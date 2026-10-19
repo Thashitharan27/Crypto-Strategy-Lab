@@ -40,9 +40,18 @@ than credential bytes. All task-owned listeners were stopped after verification.
   output retained; no skip is relabeled as a pass.
 - Matching GUI subset: **201 passed**, exit 0. The first exact-main GitHub GUI
   job failed with a 3-second wait timeout in the background-refresh regression
-  (**1 failed, 199 passed, 1 skipped**). Same-head retry passed; original failure
-  log retained. No demonstrated production defect or speculative code fix is
-  inferred from this transient result. PR #849's pre-merge checks were green.
+  (**1 failed, 199 passed, 1 skipped**). Same-head retry passed, but the report
+  PR reproduced the timeout; neither failure was discarded. A controlled occupied
+  global Qt pool prevented the old regression's refresh from starting, while a
+  private real pool delivered its queued error and no modal. Tests-only PR
+  [#851](https://github.com/Thashitharan27/Crypto-Strategy-Lab/pull/851) isolates
+  the two asynchronous regression pools, retaining the actual QRunnable/Qt signal
+  path, one-fetch, inline/no-modal and explicit-dialog assertions. This is bounded
+  scheduling reproduction, not retrospective proof of every CI timeout or a
+  production behavior change. At head `9fea2e29eb908a184126889399ceca2939a8e916`:
+  focused Windows **22 passed**, Linux full **2,263 passed / 1 skipped**, GUI
+  **200 passed / 1 skipped**, Windows safety **307 passed**, and all nine required
+  checks passed before merge. Original failure logs remain local.
 - Browser build and guarded-client tests passed. Clean-checkout smoke passed.
   The npm audit reports **one high and one moderate development-tool dependency
   finding** (Vite/esbuild); no Vite/esbuild development server was launched.
