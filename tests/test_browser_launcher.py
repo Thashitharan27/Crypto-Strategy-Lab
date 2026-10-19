@@ -242,3 +242,53 @@ def test_launcher_portfolio_endpoint_uses_configured_root_and_auth(tmp_path):
             headers={"Authorization": "Bearer " + token},
         ).status_code == 405
     service.portfolio_candidates.assert_called_once_with(output_root.resolve())
+
+
+@pytest.mark.parametrize("release_request", [True, 1, "true", None])
+def test_b4_explicit_production_guarded_request_denied_before_composition(tmp_path, release_request):
+    """A release proposal is not a server-side release authorization."""
+    with (
+        patch("crypto_strategy_lab.browser_launcher.build_browser_readonly_service") as service,
+        patch("crypto_strategy_lab.browser_launcher.create_browser_app") as factory,
+    ):
+        with pytest.raises(PermissionError, match="separate release approval"):
+            build_browser_readonly_runtime(
+                environ={},
+                token="g" * 48,
+                static_root=tmp_path,
+                guarded_release_requested=release_request,
+            )
+    service.assert_not_called()
+    factory.assert_not_called()
+
+
+def test_b4_environment_cannot_activate_guarded_production_routes(tmp_path):
+    """Feature-like environment toggles have no authority in production."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    static_root = _static_dist(tmp_path / "dist")
+    output = tmp_path / "output"
+    configs = tmp_path / "configs"
+    output.mkdir()
+    configs.mkdir()
+    token = "b" * 48
+    environ = {
+        "CSL_BROWSER_GUARDED_ENABLED": "true",
+        "CRYPTO_STRATEGY_LAB_BROWSER_GUARDED_ENABLED": "1",
+        "CRYPTO_STRATEGY_LAB_BROWSER_RELEASE_APPROVED": "true",
+    }
+    with patch("crypto_strategy_lab.browser_launcher.build_browser_readonly_service", return_value=Mock()):
+        runtime = build_browser_readonly_runtime(
+            environ=environ, token=token, static_root=static_root,
+            output_root=output, config_root=configs,
+        )
+    auth = {"Authorization": "Bearer " + token}
+    with TestClient(runtime.app, base_url="http://127.0.0.1:8767") as client:
+        assert client.get("/api/v1/health", headers=auth).json()["mode"] == "read-only"
+        for method, path in (
+            ("POST", "/api/v1/guarded/jobs"),
+            ("PUT", "/api/v1/guarded/configs/safe"),
+            ("GET", "/api/v1/guarded/jobs/safe"),
+        ):
+            assert client.request(method, path, headers=auth).status_code == 404
