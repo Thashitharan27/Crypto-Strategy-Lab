@@ -277,3 +277,15 @@ and all crash ownership evidence survives intact. This is a finite in-process
 HTTP check rather than proof of a production restart, server deployment,
 credential revocation across actual listeners, or hardware durability.
 Neither production capability is activated.
+
+
+## B4 audit writer path identity guard (2026-10-19)
+
+The isolated review-only `B4AuditJournal` now compares its opened file
+identity with the named audit path before each append, refusing to write if
+the path was replaced or detached. This supplements the existing bounded
+read-only snapshot inspection and prevents silently appending to a known
+orphaned descriptor. File replacement after that check and before writing,
+filesystem metadata spoofing, directory durability, hostile ACLs and physical
+power loss remain outside its guarantee. It is **not** authority to activate
+a guarded listener or proof of end-to-end durable post-commit outcome audit.

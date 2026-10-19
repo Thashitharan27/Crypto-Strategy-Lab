@@ -73,3 +73,26 @@ def test_audit_fsync_failure_is_observable_to_caller(tmp_path):
             with pytest.raises(OSError, match="unavailable"):
                 audit({"operation": "AUTH", "outcome": "DENIED"})
     # No assertion of durable success when fsync fails.
+
+
+def test_audit_refuses_detached_named_path_before_append(tmp_path, monkeypatch):
+    from crypto_strategy_lab import browser_release_audit as audit_module
+    with B4AuditJournal(tmp_path, "identity") as audit:
+        audit({"operation": "AUTH", "outcome": "DENIED"})
+        before = audit.path.read_bytes()
+        real_stat = audit_module.os.stat
+
+        def changed_identity(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if str(path) != str(audit.path):
+                return info
+            class ReplacementStat:
+                st_mode = info.st_mode
+                st_dev = info.st_dev
+                st_ino = info.st_ino + 1
+            return ReplacementStat()
+
+        monkeypatch.setattr(audit_module.os, "stat", changed_identity)
+        with pytest.raises(OSError, match="identity changed"):
+            audit({"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"})
+        assert audit.path.read_bytes() == before
