@@ -179,3 +179,21 @@ automated recovery API or permission to clear stale worker ownership. Audit
 records deliberately omit request IDs, so they also cannot independently
 establish request-to-run mapping. Keep rollback manual and fail closed until
 independent native artifact reconciliation can supply stronger provenance.
+
+
+## Read-only journal evidence verification (2026-10-19)
+
+`inspect_b4_audit` validates the existing per-session journal's exact bounded
+JSONL event schema from a canonical, unlinked directory. It rejects oversized,
+empty, truncated, noncanonical, malformed and unexpected records, returning
+`AUDIT_UNVERIFIED` without editing or repairing the file. A verified journal
+reports only record and `ATTEMPT` counts and whether the last record was an
+attempt without a recorded outcome. It does not contain request identifiers,
+prove persistence through a hardware interruption, prove that an outcome was
+recorded for every native commit, or associate a saved run with an in-flight
+request. `AUDIT_VERIFIED` is **record-format verification only**, not release
+approval, request completion, or ownership reconciliation.
+
+Keep the read-only claim inspection from #832 authoritative for surviving
+request/worker claims. Treat ambiguous native state as RECOVERY_UNVERIFIED,
+preserve evidence, never replay automatically and never clear stale locks.
