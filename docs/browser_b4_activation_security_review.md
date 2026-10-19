@@ -289,3 +289,15 @@ orphaned descriptor. File replacement after that check and before writing,
 filesystem metadata spoofing, directory durability, hostile ACLs and physical
 power loss remain outside its guarantee. It is **not** authority to activate
 a guarded listener or proof of end-to-end durable post-commit outcome audit.
+
+
+## B4 post-native audit outcome uncertainty response (2026-10-19)
+
+The isolated strict-audit guarded candidate now returns sanitized HTTP 503
+`Guarded outcome unverified` if a native operation has returned but the
+subsequent SUCCESS audit callback fails. It latches further mutation admission
+closed. It does **not** undo native persistence, cancel a started worker,
+replay a request, clear claims, or prove commit completion. Clients must retain
+an uncertain result and seek independent operator reconciliation rather than
+assuming failure and automatically retrying. The ordinary production browser
+still does not mount guarded routes; activation remains prohibited.

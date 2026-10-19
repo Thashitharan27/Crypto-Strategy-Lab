@@ -512,7 +512,8 @@ def test_b4_post_operation_audit_failure_does_not_claim_rollback():
                               headers={"Authorization": "Bearer " + TOKEN})
         retry = client.put("/api/v1/guarded/configs/test", json={"native": "data"},
                            headers={"Authorization": "Bearer " + TOKEN})
-    assert response.status_code == 200
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Guarded outcome unverified"}
     assert retry.status_code == 503
     assert retry.json() == {"detail": "Guarded audit unavailable"}
     integration.save_config.assert_called_once()
@@ -536,3 +537,29 @@ def test_b4_strict_mode_without_audit_callback_refuses_write():
                               headers={"Authorization": "Bearer " + TOKEN})
     assert response.status_code == 503
     integration.save_config.assert_not_called()
+
+
+def test_b4_cancel_post_operation_audit_loss_is_uncertain_and_latched():
+    integration = Mock()
+    events = []
+    def audit(event):
+        events.append(event)
+        if event["operation"] == "CANCEL" and event["outcome"] == "SUCCESS":
+            raise OSError("audit storage unavailable")
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=audit, require_audit_admission=True,
+    ))
+    auth = {"Authorization": "Bearer " + TOKEN}
+    with TestClient(app) as client:
+        first = client.post("/api/v1/guarded/jobs/known/cancel", headers=auth)
+        retry = client.post("/api/v1/guarded/jobs/known/cancel", headers=auth)
+    assert first.status_code == 503
+    assert first.json() == {"detail": "Guarded outcome unverified"}
+    assert retry.status_code == 503
+    integration.cancel.assert_called_once_with("known")
+    assert events == [
+        {"operation": "CANCEL", "outcome": "ATTEMPT"},
+        {"operation": "CANCEL", "outcome": "SUCCESS"},
+    ]

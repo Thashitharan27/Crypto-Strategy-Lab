@@ -26,17 +26,20 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
 
     audit_broken = False
 
-    def audit(operation: str, outcome: str) -> None:
+    def audit(operation: str, outcome: str) -> bool:
         nonlocal audit_broken
         # Never log IDs, payloads, tokens, result data or native exception text.
         if audit_callback is not None:
             try:
                 audit_callback({"operation": operation, "outcome": outcome})
+                return True
             except Exception:
                 # An operation may already have committed; never claim that it
                 # was rolled back. Deny all subsequent mutations in this app.
                 if require_audit_admission is True:
                     audit_broken = True
+                return False
+        return not require_audit_admission
 
 
     def admit_mutation(operation: str) -> None:
@@ -68,7 +71,8 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
             raise HTTPException(status_code=404, detail="Unknown job")
         try:
             result = call()
-            audit(operation, "SUCCESS")
+            if not audit(operation, "SUCCESS") and require_audit_admission:
+                raise HTTPException(status_code=503, detail="Guarded outcome unverified")
             return result
         except KeyError:
             audit(operation, "NOT_FOUND")
@@ -143,7 +147,8 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         admit_mutation("CONFIG_SAVE")
         try:
             integration.save_config(config_id, payload)
-            audit("CONFIG_SAVE", "SUCCESS")
+            if not audit("CONFIG_SAVE", "SUCCESS") and require_audit_admission:
+                raise HTTPException(status_code=503, detail="Guarded outcome unverified")
         except PermissionError as exc:
             # Capability denial uses a plain PermissionError. A native OS
             # permission/sharing error carries errno and is a persistence
@@ -215,7 +220,8 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         admit_mutation("JOB_SUBMIT")
         try:
             integration.submit(request_id, request, config)
-            audit("JOB_SUBMIT", "SUCCESS")
+            if not audit("JOB_SUBMIT", "SUCCESS") and require_audit_admission:
+                raise HTTPException(status_code=503, detail="Guarded outcome unverified")
         except PermissionError:
             audit("JOB_SUBMIT", "DENIED")
             raise HTTPException(status_code=403, detail="Guarded operations disabled")
