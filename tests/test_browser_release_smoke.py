@@ -51,7 +51,7 @@ def test_release_smoke_actual_http_security_and_original_preservation():
     from crypto_strategy_lab.browser_release_smoke import run_readonly_release_smoke
     result = run_readonly_release_smoke()
     assert result == {
-        "status": "PASS_READ_ONLY", "http_checks": 13,
+        "status": "PASS_READ_ONLY", "http_checks": 15,
         "guarded_routes_available": False, "originals_unchanged": True,
     }
 

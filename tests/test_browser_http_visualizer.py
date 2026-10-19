@@ -73,6 +73,7 @@ def test_visualizer_route_is_the_only_explicit_non_get_api_operation(tmp_path):
                 operations.setdefault(route.path, set()).update(route.methods)
         assert operations == {
             "/api/v1/health": {"GET"},
+            "/api/v1/release/capabilities": {"GET"},
             "/api/v1/capabilities": {"GET"},
             "/api/v1/catalog/symbols": {"GET"},
             "/api/v1/catalog/coverage": {"GET"},

@@ -48,6 +48,7 @@ def test_browser_api_route_inventory_is_read_only(tmp_path):
 
     assert api_routes == {
         "/api/v1/health": {"GET"},
+        "/api/v1/release/capabilities": {"GET"},
         "/api/v1/capabilities": {"GET"},
         "/api/v1/catalog/symbols": {"GET"},
         "/api/v1/catalog/coverage": {"GET"},
@@ -74,7 +75,7 @@ def test_browser_api_inventory_guard_rejects_root_and_mounted_routes(tmp_path):
         completed_run_root=tmp_path, config_root=tmp_path,
     )
     expected = {
-        "/api/v1/health", "/api/v1/capabilities", "/api/v1/catalog/symbols",
+        "/api/v1/health", "/api/v1/release/capabilities", "/api/v1/capabilities", "/api/v1/catalog/symbols",
         "/api/v1/catalog/coverage", "/api/v1/portfolio/candidates", "/api/v1/runs/{run_id}",
         "/api/v1/configs/{config_id}",
     }

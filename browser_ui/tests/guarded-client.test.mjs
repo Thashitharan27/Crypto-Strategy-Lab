@@ -904,3 +904,15 @@ test("unverified outputs are never offered as native verified folder links", asy
     }
   } finally {globalThis.fetch = original;}
 });
+
+
+test("production UI mounts guarded controls only from authenticated server capabilities", async () => {
+  const {readFileSync} = await import("node:fs");
+  const source = readFileSync(resolve("src/main.tsx"), "utf8");
+  assert.match(source, /getReadOnly<ReleaseCapabilities>\("\/api\/v1\/release\/capabilities", token\)/);
+  assert.match(source, /releaseCapabilities\?\.execution === true/);
+  assert.match(source, /releaseCapabilities\?\.configuration_editing === true/);
+  assert.match(source, /<GuardedRunControls enabled=\{true\} token=\{token\}\s*\/>/);
+  assert.match(source, /setReleaseCapabilities\(null\)/);
+  assert.doesNotMatch(source, /import\.meta\.env\.[A-Za-z_]*GUARDED/);
+});

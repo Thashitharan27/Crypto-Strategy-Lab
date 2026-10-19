@@ -112,6 +112,18 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             raise HTTPException(status_code=401, detail="Unauthorized")
         return {"status": "ok", "mode": "read-only"}
 
+    @app.get("/api/v1/release/capabilities")
+    def release_capabilities(authorization: str | None = Header(default=None)):
+        """B4 server-owned release contract; no caller/environment can enable it.
+
+        A future activation requires a separate approved composition change.
+        Advertising false never constructs a guarded integration or adds routes.
+        """
+        supplied = authorization.removeprefix("Bearer ") if authorization else ""
+        if not secrets.compare_digest(supplied, token):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return {"execution": False, "configuration_editing": False}
+
     if read_service is not None:
         @app.get("/api/v1/capabilities")
         def capabilities(authorization: str | None = Header(default=None)):
