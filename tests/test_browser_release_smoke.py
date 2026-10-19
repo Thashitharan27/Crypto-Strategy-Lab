@@ -71,7 +71,7 @@ def test_clean_checkout_verifier_normalizes_git_root_path(tmp_path):
             output = head
         else:
             output = ""
-        return subprocess.CompletedProcess(args, 0, output + "\\n", "")
+        return subprocess.CompletedProcess(args, 0, output + "\n", "")
 
     with patch("crypto_strategy_lab.browser_release_smoke.subprocess.run", side_effect=fake_run):
         assert verify_clean_checkout(repo) == head
