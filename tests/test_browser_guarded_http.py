@@ -652,3 +652,38 @@ def test_b4_readonly_status_audit_failure_latches_future_mutations():
     integration.status.assert_called_once_with("existing")
     integration.save_config.assert_not_called()
     assert events == [{"operation": "STATUS", "outcome": "SUCCESS"}]
+
+
+def test_b4_concurrent_mutation_denied_while_native_result_unsettled():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    started, release = Event(), Event()
+    integration = Mock()
+    def held_save(config_id, payload):
+        started.set()
+        assert release.wait(5)
+    integration.save_config.side_effect = held_save
+    events = []
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=events.append, require_audit_admission=True,
+    ))
+    auth = {"Authorization": "Bearer " + TOKEN}
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(client.put, "/api/v1/guarded/configs/first",
+                            json={}, headers=auth)
+        try:
+            assert started.wait(5)
+            second = client.put("/api/v1/guarded/configs/second", json={}, headers=auth)
+            assert second.status_code == 503
+            assert second.json() == {"detail": "Guarded audit unavailable"}
+        finally:
+            release.set()
+        assert first.result(timeout=5).status_code == 200
+    assert integration.save_config.call_count == 1
+    assert events == [
+        {"operation": "CONFIG_SAVE", "outcome": "ATTEMPT"},
+        {"operation": "CONFIG_SAVE", "outcome": "SUCCESS"},
+    ]
