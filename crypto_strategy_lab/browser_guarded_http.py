@@ -16,7 +16,7 @@ from starlette.requests import Request
 _REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 
 
-def create_guarded_job_router(*, token: str, integration, enabled: bool = False, audit_callback=None):
+def create_guarded_job_router(*, token: str, integration, enabled: bool = False, audit_callback=None, require_audit_admission: bool = False):
     from fastapi import APIRouter, Header, HTTPException
     router = APIRouter()
     if enabled is not True:
@@ -24,13 +24,37 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A browser bearer token is required")
 
+    audit_broken = False
+
     def audit(operation: str, outcome: str) -> None:
+        nonlocal audit_broken
         # Never log IDs, payloads, tokens, result data or native exception text.
         if audit_callback is not None:
             try:
                 audit_callback({"operation": operation, "outcome": outcome})
             except Exception:
-                pass
+                # An operation may already have committed; never claim that it
+                # was rolled back. Deny all subsequent mutations in this app.
+                if require_audit_admission is True:
+                    audit_broken = True
+
+
+    def admit_mutation(operation: str) -> None:
+        nonlocal audit_broken
+        # A durable ATTEMPT record must precede any native mutation in the B4
+        # candidate. Do not treat later audit failures as rollback evidence.
+        if require_audit_admission is not True:
+            return
+        if audit_broken:
+            raise HTTPException(status_code=503, detail="Guarded audit unavailable")
+        try:
+            if not callable(audit_callback):
+                raise RuntimeError("B4 audit callback missing")
+            audit_callback({"operation": operation, "outcome": "ATTEMPT"})
+        except Exception:
+            audit_broken = True
+            # Never leak filesystem, credentials or native error text.
+            raise HTTPException(status_code=503, detail="Guarded audit unavailable")
 
     def authorize(authorization: str | None):
         supplied = authorization[len("Bearer "):] if authorization and authorization.startswith("Bearer ") else ""
@@ -69,6 +93,7 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
     @router.post("/api/v1/guarded/jobs/{request_id}/cancel")
     def cancel(request_id: str, authorization: str | None = Header(default=None)):
         authorize(authorization)
+        admit_mutation("CANCEL")
         return invoke(request_id, lambda: integration.cancel(request_id), "CANCEL")
 
     async def authenticated_json_object(request: Request, authorization: str | None, operation: str):
@@ -115,6 +140,7 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         if not isinstance(config_id, str) or _REQUEST_ID.fullmatch(config_id) is None:
             audit("CONFIG_SAVE", "INVALID_ID")
             raise HTTPException(status_code=404, detail="Unknown configuration")
+        admit_mutation("CONFIG_SAVE")
         try:
             integration.save_config(config_id, payload)
             audit("CONFIG_SAVE", "SUCCESS")
@@ -186,6 +212,7 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         except (ValueError, TypeError, KeyError, AttributeError):
             audit("JOB_SUBMIT", "INVALID_INPUT")
             raise HTTPException(status_code=422, detail="Invalid native job payload")
+        admit_mutation("JOB_SUBMIT")
         try:
             integration.submit(request_id, request, config)
             audit("JOB_SUBMIT", "SUCCESS")

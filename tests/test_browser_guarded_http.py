@@ -440,3 +440,99 @@ def test_guarded_declared_oversize_rejected_without_reading_or_native_write():
                               content=b"{}", headers=auth)
     assert response.status_code == 413
     integration.save_config.assert_not_called()
+
+
+@pytest.mark.parametrize("method,path,payload,attribute", [
+    ("put", "/api/v1/guarded/configs/test", {"valid": True}, "save_config"),
+    ("post", "/api/v1/guarded/jobs/run-1/cancel", None, "cancel"),
+])
+def test_b4_audit_failure_blocks_native_mutation_before_it_starts(method, path, payload, attribute):
+    integration = Mock()
+    def broken_audit(_event):
+        raise OSError("private path /sensitive/audit.log")
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=broken_audit, require_audit_admission=True,
+    ))
+    with TestClient(app) as client:
+        kwargs = {"headers": {"Authorization": "Bearer " + TOKEN}}
+        if payload is not None:
+            kwargs["json"] = payload
+        result = getattr(client, method)(path, **kwargs)
+    assert result.status_code == 503
+    assert result.json() == {"detail": "Guarded audit unavailable"}
+    getattr(integration, attribute).assert_not_called()
+
+
+def test_b4_audit_failure_blocks_job_submit_before_claim(monkeypatch):
+    import crypto_strategy_lab.data_lake_config as native
+    config = Mock(spec=native.ResearchRunConfig)
+    monkeypatch.setattr(native, "normalize_data_lake_config", lambda _: config)
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=lambda event: (_ for _ in ()).throw(OSError("secret"))
+        if event["outcome"] == "ATTEMPT" else None,
+        require_audit_admission=True,
+    ))
+    payload = {
+        "request_id": "run-1",
+        "request": {
+            "exchange": "binance", "market": "futures_um", "symbol": "BTCUSDT",
+            "period_start": "2025-01-01T00:00:00Z",
+            "period_end": "2025-01-02T00:00:00Z",
+            "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+        },
+        "config": {},
+    }
+    with TestClient(app) as client:
+        response = client.post("/api/v1/guarded/jobs", json=payload,
+                               headers={"Authorization": "Bearer " + TOKEN})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Guarded audit unavailable"}
+    integration.submit.assert_not_called()
+
+
+def test_b4_post_operation_audit_failure_does_not_claim_rollback():
+    integration = Mock()
+    seen = []
+    def post_error(event):
+        seen.append(event)
+        if event["outcome"] == "SUCCESS":
+            raise OSError("after commit")
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=post_error, require_audit_admission=True,
+    ))
+    with TestClient(app) as client:
+        response = client.put("/api/v1/guarded/configs/test", json={"native": "data"},
+                              headers={"Authorization": "Bearer " + TOKEN})
+        retry = client.put("/api/v1/guarded/configs/test", json={"native": "data"},
+                           headers={"Authorization": "Bearer " + TOKEN})
+    assert response.status_code == 200
+    assert retry.status_code == 503
+    assert retry.json() == {"detail": "Guarded audit unavailable"}
+    integration.save_config.assert_called_once()
+    assert seen == [
+        {"operation": "CONFIG_SAVE", "outcome": "ATTEMPT"},
+        {"operation": "CONFIG_SAVE", "outcome": "SUCCESS"},
+    ]
+    # The native save already ran. Post-commit audit loss is *not* rollback
+    # evidence and remains a separate release blocker.
+
+
+def test_b4_strict_mode_without_audit_callback_refuses_write():
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        require_audit_admission=True,
+    ))
+    with TestClient(app) as client:
+        response = client.put("/api/v1/guarded/configs/id", json={},
+                              headers={"Authorization": "Bearer " + TOKEN})
+    assert response.status_code == 503
+    integration.save_config.assert_not_called()

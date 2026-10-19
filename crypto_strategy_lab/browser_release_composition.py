@@ -137,6 +137,7 @@ def compose_b4_guarded_candidate(
             completed_run_root=roots.execution, config_root=roots.configuration,
             static_root=static_root, guarded_integration=integration,
             guarded_enabled=True, guarded_audit_callback=audit_callback,
+            guarded_require_audit_admission=True,
         )
     except BaseException:
         integration.close()
