@@ -96,3 +96,17 @@ def test_audit_refuses_detached_named_path_before_append(tmp_path, monkeypatch):
         with pytest.raises(OSError, match="identity changed"):
             audit({"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"})
         assert audit.path.read_bytes() == before
+
+
+def test_failed_fsync_latches_journal_against_followup_append(tmp_path):
+    with B4AuditJournal(tmp_path, "fail-closed") as audit:
+        event = {"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"}
+        with patch("crypto_strategy_lab.browser_release_audit.os.fsync",
+                   side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                audit(event)
+        before = audit.path.read_bytes()
+        with pytest.raises(OSError, match="previously failed"):
+            audit({"operation": "JOB_SUBMIT", "outcome": "SUCCESS"})
+        assert audit.path.read_bytes() == before
+    # Existing evidence is retained for inspection, not repaired or replayed.
