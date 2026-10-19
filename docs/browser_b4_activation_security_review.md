@@ -230,7 +230,7 @@ no production route, automatic replay, claim cleanup or release authorization.
 
 Read-only audit inspection now checks the opened journal's device, inode,
 size, modification time and change time again after its bounded read. If
-metadata changed during inspection, the result remains AUDIT_UNVERIFIED and
+metadata changed during inspection or the journal path now refers to a\nreplacement inode, the result remains AUDIT_UNVERIFIED and
 mutation-attempt state remains unknown. This reduces false certainty from
 concurrent appends or replacement; it does not create an atomic filesystem
 snapshot or protect against metadata-preserving tampering, host power loss,
