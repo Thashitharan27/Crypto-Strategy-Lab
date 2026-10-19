@@ -62,6 +62,14 @@ class B4AuditJournal:
         with self._lock:
             if self._fd is None:
                 raise RuntimeError("B4 audit journal is closed")
+            # Refuse a detached/replaced journal destination. An opened
+            # descriptor alone cannot prove its named evidence path survives.
+            opened = os.fstat(self._fd)
+            named = os.stat(self.path, follow_symlinks=False)
+            if (not stat.S_ISREG(named.st_mode)
+                    or opened.st_dev != named.st_dev
+                    or opened.st_ino != named.st_ino):
+                raise OSError("B4 audit destination identity changed")
             offset = 0
             while offset < len(line):
                 count = os.write(self._fd, line[offset:])
