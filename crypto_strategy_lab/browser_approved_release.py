@@ -81,7 +81,9 @@ def _read(path: Path, limit: int) -> bytes:
         opened = os.fstat(stream.fileno())
         if (opened.st_ino, opened.st_dev) != (before.st_ino, before.st_dev) or opened.st_size > limit:
             raise PermissionError('Release evidence changed or exceeds bounds')
-        content = stream.read(limit + 1)
+        # The cap is a rejection boundary, not an allocation request. Keep one
+        # extra byte to observe growth without allocating 1 GiB per tiny file.
+        content = stream.read(opened.st_size + 1)
         after = path.lstat()
         keys = lambda s: (s.st_ino, s.st_dev, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
         if len(content) > limit or keys(opened) != keys(after):

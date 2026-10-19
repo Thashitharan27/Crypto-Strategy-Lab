@@ -301,3 +301,25 @@ def test_invalid_isolated_entry_shadows_original_portfolio_candidate(tmp_path, k
         result = client.get('/api/v1/portfolio/candidates', headers={'Authorization': 'Bearer ' + token})
         assert result.status_code == 200
         assert result.json()['candidates'] == [{'run_folder_id': 'unshadowed'}]
+
+
+def test_evidence_reads_allocate_only_observed_file_size_plus_sentinel(tmp_path, monkeypatch):
+    from crypto_strategy_lab.browser_approved_release import _read
+    path = tmp_path / 'small-evidence.json'
+    payload = b'{"small":true}'
+    path.write_bytes(payload)
+    real_fdopen = os.fdopen
+    class ObservedRead:
+        def __init__(self, stream):
+            self.stream = stream
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.stream.close()
+        def fileno(self):
+            return self.stream.fileno()
+        def read(self, size):
+            assert size == len(payload) + 1
+            return self.stream.read(size)
+    monkeypatch.setattr(os, 'fdopen', lambda fd, mode: ObservedRead(real_fdopen(fd, mode)))
+    assert _read(path, 1024 ** 3) == payload
