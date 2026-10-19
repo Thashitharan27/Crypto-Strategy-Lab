@@ -587,3 +587,25 @@ loopback-only routing, bounded audit, real UI smoke on a clean release checkout,
 raw full pytest and all required CI checks, and preservation of PySide6 fallback.
 PR #501 stays held. Neither approval to prepare B4 nor passing this preparation
 PR authorizes guarded browser execution or configuration writes.
+
+
+## B4 Phase 3: review-only production composition (2026-10-19)
+
+The new `compose_b4_review_only` entrypoint assembles a real, authenticated
+**read-only** local browser app using the sole production launcher, after
+verifying separate candidate configuration/execution roots through the existing
+B4 preflight. It **does not** instantiate `BrowserGuardedIntegration`, mount
+any `/api/v1/guarded/*` route, serve the certification-only React build, or
+change the normal production launch command. Explicit `release_requested`
+activation attempts are rejected before composing the service. Environment
+values claiming release approval have no authority. Dedicated candidate roots
+remain empty, original files and canonical Data Lake untouched.
+
+This is a preparatory integration contract, **not** an enabled guarded production
+composition or proof that a clean release build has passed final acceptance.
+The separately isolated certification server remains the only working guarded
+entrypoint. A distinct, reviewed activation PR would have to bind both the
+server side and a conditional production UI, include fail-closed authorization,
+audit/security gates and an isolated clean-checkout release smoke, then seek
+fresh explicit user permission **before activation**. Keep #501 held and PySide6
+fallback supported.
