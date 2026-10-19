@@ -118,7 +118,8 @@ def build_browser_readonly_runtime(
     # Never serve that UI through the ordinary production read-only launcher,
     # even when the caller explicitly overrides its static distribution.
     # The separate operator-only certification server owns that bundle.
-    if effective_static_root.name == "dist-certification":
+    if (effective_static_root.name == "dist-certification" or
+            effective_static_root.resolve(strict=False).name == "dist-certification"):
         raise ValueError("Certification-only browser assets cannot be served in production")
     effective_output_root = (
         Path(output_root)
