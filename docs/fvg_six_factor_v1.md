@@ -15,8 +15,14 @@ is unchanged. All six checks are required in this initial preset.
   bearish is mirrored. A gap becomes available after candle 3 closes.
 - Only its first later touching candle is eligible. Touches consume gaps even
   when the other checks fail; entire-candle gaps through the zone invalidate it.
-- A bullish revisit must close at or above the gap's bottom; bearish must close
-  at or below its top. Wicks through the zone are allowed.
+- A revisit closing inside the gap (including either boundary) is valid,
+  regardless of candle colour. If it closes outside on the favourable side,
+  it must also be directional: bullish close above open and above the gap for
+  longs, bearish close below open and below the gap for shorts. An opposite
+  colour candle or doji with only a wick touching is rejected. A close through
+  the wrong side of the gap is always rejected. Wicks through the zone are
+  allowed when the close qualifies. This corrected rule applies to new runs;
+  older saved trades retain their original checklist and decisions.
 - Structure uses strict confirmed pivots with the existing FVG Structure Swing
   Strength control (default two bars on each side). A close crossing the latest
   confirmed high/low establishes a directional break, including a change of

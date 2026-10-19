@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from crypto_strategy_lab.fair_value_gap import FairValueGapMixin
 from crypto_strategy_lab.fvg_six_factor import six_factor_context
@@ -131,3 +132,43 @@ def test_production_engine_executes_next_open_and_persists_review():
         assert row["fvg_stop_applied"]
         assert row["fvg_stop_boundary_price"] == review["stopBoundary"]
         assert all(review["checks"].values())
+
+
+@pytest.mark.parametrize("side,opening,closing,expected", [
+    ("LONG", 12, 10.5, True),   # red body closes inside
+    ("SHORT", 9, 10.5, True),   # green body closes inside
+    ("LONG", 11.2, 11.8, True), # bullish wick rejection above
+    ("LONG", 12, 11.8, False),  # bearish wick-only touch above
+    ("LONG", 11.8, 11.8, False),# doji outside
+    ("SHORT", 9.8, 9.2, True),  # bearish wick rejection below
+    ("SHORT", 9, 9.2, False),   # bullish wick-only touch below
+    ("SHORT", 9.2, 9.2, False), # doji outside
+    ("LONG", 8, 9, False),      # wrong-side close even if bullish
+    ("SHORT", 13, 12, False),   # wrong-side close even if bearish
+    ("LONG", 12, 10, True),     # inclusive lower boundary
+    ("SHORT", 9, 11, True),     # inclusive upper boundary
+])
+def test_revisit_body_and_wick_confirmation(side, opening, closing, expected):
+    from crypto_strategy_lab.fvg_six_factor import revisit_close_confirms
+    assert revisit_close_confirms(side, 10, 11, opening, closing) == expected
+
+
+def test_opposite_wick_candle_is_rejected_by_signal_engine():
+    arrays = candles()
+    signals, _, _, _, reviews = run(arrays)
+    for i, review in enumerate(reviews):
+        if not review:
+            continue
+        side = review["side"]
+        close = arrays[2][i]
+        outside = close > review["top"] if side == "LONG" else close < review["bottom"]
+        if not outside:
+            continue
+        changed = [a.copy() for a in arrays]
+        # Change only the revisit's body colour; keep its high/low and close.
+        changed[4][i] = (close + arrays[0][i])/2 if side == "LONG" else (close + arrays[1][i])/2
+        altered = run(changed, i+1)
+        assert altered[0][i] != side
+        assert review["confirmationRule"] == "INSIDE_OR_DIRECTIONAL_REJECTION_V2"
+        return
+    pytest.fail("fixture must contain a directional outside-close rejection")
