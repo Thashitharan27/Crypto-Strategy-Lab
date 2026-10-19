@@ -652,3 +652,40 @@ def test_b4_readonly_status_audit_failure_latches_future_mutations():
     integration.status.assert_called_once_with("existing")
     integration.save_config.assert_not_called()
     assert events == [{"operation": "STATUS", "outcome": "SUCCESS"}]
+
+
+def test_b4_concurrent_mutation_denied_while_native_result_unsettled():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    started, release = Event(), Event()
+    integration = Mock()
+    def held_cancel(request_id):
+        started.set()
+        assert release.wait(5)
+        return {"status": "CANCELLED"}
+    integration.cancel.side_effect = held_cancel
+    events = []
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=events.append, require_audit_admission=True,
+    ))
+    auth = {"Authorization": "Bearer " + TOKEN}
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(client.post, "/api/v1/guarded/jobs/first/cancel",
+                            headers=auth)
+        try:
+            assert started.wait(5)
+            second = client.put("/api/v1/guarded/configs/second", json={}, headers=auth)
+            assert second.status_code == 503
+            assert second.json() == {"detail": "Guarded audit unavailable"}
+        finally:
+            release.set()
+        assert first.result(timeout=5).status_code == 200
+    integration.cancel.assert_called_once_with("first")
+    integration.save_config.assert_not_called()
+    assert events == [
+        {"operation": "CANCEL", "outcome": "ATTEMPT"},
+        {"operation": "CANCEL", "outcome": "SUCCESS"},
+    ]
