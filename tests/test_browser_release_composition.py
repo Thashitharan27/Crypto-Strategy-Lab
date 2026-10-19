@@ -110,3 +110,83 @@ def test_bad_future_roots_refused_before_server_instantiation(tmp_path):
                 static_root=paths["static"],
             )
     launcher.assert_not_called()
+
+
+def test_candidate_refuses_default_activation_before_touching_native_or_roots(tmp_path):
+    from crypto_strategy_lab.browser_release_composition import compose_b4_guarded_candidate
+    native = Mock()
+    with patch("crypto_strategy_lab.browser_release_composition.preflight_browser_guarded_release") as roots:
+        with pytest.raises(PermissionError, match="not approved"):
+            compose_b4_guarded_candidate(
+                native_application=native, configuration=tmp_path / "config",
+                execution=tmp_path / "runs", audit_callback=lambda event: None,
+            )
+    roots.assert_not_called()
+    native.run.assert_not_called()
+
+
+def test_candidate_requires_auditor_and_native_service_before_root_access(tmp_path):
+    from crypto_strategy_lab.browser_release_composition import compose_b4_guarded_candidate
+    with patch("crypto_strategy_lab.browser_release_composition.preflight_browser_guarded_release") as roots:
+        with pytest.raises(ValueError, match="audit"):
+            compose_b4_guarded_candidate(
+                native_application=Mock(), configuration=tmp_path, execution=tmp_path,
+                approval_granted=True, audit_callback=None,
+            )
+        with pytest.raises(ValueError, match="native"):
+            compose_b4_guarded_candidate(
+                native_application=object(), configuration=tmp_path, execution=tmp_path,
+                approval_granted=True, audit_callback=lambda event: None,
+            )
+    roots.assert_not_called()
+
+
+def test_isolated_candidate_reuses_existing_router_and_never_executes_without_auth(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from crypto_strategy_lab.browser_release_composition import compose_b4_guarded_candidate
+
+    paths, env = _roots(tmp_path)
+    native = Mock()
+    events = []
+    token = "r" * 48
+    candidate = compose_b4_guarded_candidate(
+        native_application=native,
+        configuration=paths["future-config"], execution=paths["future-runs"],
+        static_root=paths["static"], environ=env,
+        token=token, audit_callback=events.append, approval_granted=True,
+    )
+    assert candidate.host == "127.0.0.1"
+    try:
+        with TestClient(candidate.app, base_url="http://127.0.0.1:8767") as client:
+            path = "/api/v1/guarded/jobs/saved"
+            assert client.get(path).status_code == 401
+            assert client.get(path, headers={"Authorization": "Bearer wrong"}).status_code == 401
+            auth = {"Authorization": "Bearer " + token}
+            assert client.get(path, headers={**auth, "Origin": "http://127.0.0.1:9876"}).status_code == 403
+            assert client.get(path, headers={**auth, "Host": "evil.example"}).status_code == 403
+            # Unknown ID must not be confused with native execution or replay.
+            assert client.get(path, headers=auth).status_code == 404
+            assert client.get("/api/v1/release/capabilities", headers=auth).json() == {
+                "execution": False, "configuration_editing": False,
+            }
+        native.run.assert_not_called()
+        assert events and all(set(item) == {"operation", "outcome"} for item in events)
+        assert all(token not in repr(item) for item in events)
+        assert not list(paths["future-config"].iterdir())
+        assert not list(paths["future-runs"].iterdir())
+    finally:
+        candidate.close()
+
+
+def test_candidate_factory_does_not_override_normal_readonly_launcher(tmp_path):
+    from crypto_strategy_lab.browser_release_composition import compose_b4_guarded_candidate
+    paths, env = _roots(tmp_path)
+    with patch("crypto_strategy_lab.browser_release_composition.preflight_browser_guarded_release") as preflight:
+        with pytest.raises(PermissionError):
+            compose_b4_guarded_candidate(
+                native_application=Mock(), configuration=paths["future-config"],
+                execution=paths["future-runs"], audit_callback=lambda event: None,
+                environ={**env, "CRYPTO_STRATEGY_LAB_BROWSER_RELEASE_APPROVED": "true"},
+            )
+    preflight.assert_not_called()
