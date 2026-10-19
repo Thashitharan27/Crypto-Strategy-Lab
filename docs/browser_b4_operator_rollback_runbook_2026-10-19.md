@@ -24,9 +24,10 @@ Record in a private, access-controlled operator ledger (do not commit secrets or
 
 1. **Stop accepting new guarded requests at the deployment boundary.** Do not infer cancellation of a native worker already running; do not forcibly kill it as a shortcut.
 2. Preserve native worker locks, request claims, existing saved runs, and bounded audit journals untouched, including any partially completed files. Do not delete, rename, truncate, or auto-repair evidence.
-3. Return to the existing normal read-only launcher with a newly issued per-session token. Check authenticated `GET /api/v1/health` reports read-only and authenticated `GET /api/v1/release/capabilities` advertises `execution=false` and `configuration_editing=false`. Verify old bearer tokens are rejected by the *new* session.
-4. Confirm guarded save, submit, status, progress, and cancel endpoints are unavailable through the normal read-only launcher. Confirm the ordinary React bundle is used, not `dist-certification`.
-5. Do not change source/cache/output destination settings to unverified originals. Preserve PySide6 startup/fallback and original-file hashes.
+3. Independently verify the **previous guarded listener/deployment route** is no longer reachable, or demonstrably rejects its previous credential on its original host/port and every published route. Do not treat old-token rejection at a new listener as revocation at the old listener. If the old listener remains reachable or its state cannot be established, retain RELEASE HELD, isolate the deployment boundary from new guarded requests, and escalate to the authorized operator without deleting worker claims or assuming in-flight cancellation.
+4. Return to the existing normal read-only launcher with a newly issued per-session token. Check authenticated `GET /api/v1/health` reports read-only and authenticated `GET /api/v1/release/capabilities` advertises `execution=false` and `configuration_editing=false`. Verify old bearer tokens are rejected by the *new* session.
+5. Confirm guarded save, submit, status, progress, and cancel endpoints are unavailable through the normal read-only launcher. Confirm the ordinary React bundle is used, not `dist-certification`.
+6. Do not change source/cache/output destination settings to unverified originals. Preserve PySide6 startup/fallback and original-file hashes.
 
 The existing clean-checkout `python -m crypto_strategy_lab.browser_release_smoke` checks a **finite in-process fixture**, not the physical server deployment or its recovery from a forced termination.
 
@@ -42,7 +43,7 @@ Never treat claim absence as proof of safe resubmission, or a later audit SUCCES
 
 ## Exit criteria and sign-off
 
-The safe rollback review is complete only when the operator has recorded verified old-token rejection, an authenticated read-only new session, absence of guarded production routes, retained claims/audit evidence, unchanged scoped original-file hashes, and available PySide6 fallback. Failed/untested checks remain explicit blockers, not implicit passes.
+The safe rollback review is complete only when the operator has recorded verified old guarded listener isolation/credential rejection at its original route, old-token rejection on the new session, an authenticated read-only new session, absence of guarded production routes, retained claims/audit evidence, unchanged scoped original-file hashes, and available PySide6 fallback. Failed/untested checks remain explicit blockers, not implicit passes.
 
 A future *guarded* production release requires **separate** independent security/reliability review of authorization, audit-admission and post-commit failure semantics, persistent ownership/restart uncertainty, root ACLs, final clean production build/launch smoke, and the documented finite parity limitations. Then seek a new explicit release-owner activation approval for that specific change.
 
