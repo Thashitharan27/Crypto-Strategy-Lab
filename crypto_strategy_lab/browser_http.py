@@ -222,7 +222,9 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 rows = read_service.portfolio_candidates(root)
                 if original_completed_run_root is not None:
                     previous = read_service.portfolio_candidates(original_completed_run_root)
-                    seen = {row['run_folder_id'] for row in rows}
+                    # Partial/invalid isolated objects still shadow originals,
+                    # exactly as direct run reads and the visualizer do.
+                    seen = {entry.name for entry in Path(root).iterdir()}
                     rows = rows + [row for row in previous if row['run_folder_id'] not in seen]
             except (OSError, ValueError, KeyError, TypeError):
                 raise HTTPException(status_code=503, detail="Portfolio discovery unavailable")

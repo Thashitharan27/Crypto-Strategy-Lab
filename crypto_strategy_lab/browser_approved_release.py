@@ -271,6 +271,24 @@ def compose_approved_release(*, deployment: ReleaseDeployment, approval_path: Pa
         claim.mkdir(mode=0o700)
     except FileExistsError as exc:
         raise PermissionError('Release approval already consumed') from exc
+    # Persist a receipt marker before constructing any native/audit owner. Keep
+    # both objects on failure. POSIX also flushes the parent directory, matching
+    # native request claims; Windows hardware power-loss durability is unproven.
+    with (claim / 'approval.sha256').open('xb') as marker:
+        marker.write((approved_record_sha256 + '\n').encode('ascii'))
+        marker.flush()
+        os.fsync(marker.fileno())
+    if os.name == 'posix':
+        fd = os.open(claim, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        fd = os.open(deployment.execution, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
     from crypto_strategy_lab.browser_release_audit import B4AuditJournal
     from crypto_strategy_lab.browser_guarded_integration import BrowserGuardedIntegration
     from crypto_strategy_lab.browser_readonly_service import BrowserReadOnlyService

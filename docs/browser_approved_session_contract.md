@@ -32,6 +32,11 @@ The prior-state digest includes existing configuration, execution and audit
 files and empty directories, bounded to 1 GiB. Any existing native worker lock
 requires review. An atomic, retained session claim prevents reuse of one receipt,
 including after construction failure. No prior ownership or journal is cleared.
+Before any native owner is constructed, a receipt-hash marker is exclusively
+created, flushed and fsynced; POSIX also fsyncs the claim and execution
+directories. Any failure retains evidence and denies construction. Windows
+directory/power-loss durability remains unproven; the claim is not a promise of
+exactly-once authorization across arbitrary hardware failure.
 
 ## Runtime behavior
 

@@ -1,6 +1,7 @@
 """Approved-session composition is unlaunched; every test owns fresh fixtures."""
 import hashlib
 import json
+import os
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -238,3 +239,65 @@ def test_approval_for_another_account_is_denied_even_with_matching_deployment_ha
     with pytest.raises(PermissionError):
         _compose(d, p, digest)
     assert not list(d.audit.iterdir()) and not list(d.execution.iterdir())
+
+
+def test_claim_flush_failure_retains_evidence_before_any_native_owner(tmp_path, monkeypatch):
+    import os
+    d, p, digest, _ = _fixture(tmp_path)
+    native = Mock()
+    monkeypatch.setattr(os, 'fsync', Mock(side_effect=OSError('fixture claim flush failed')))
+    with pytest.raises(OSError, match='fixture claim flush failed'):
+        _compose(d, p, digest, native_factory=native)
+    native.assert_not_called()
+    assert list(d.execution.glob('.b4-release-*.claim'))
+    assert not list(d.audit.iterdir())
+
+
+def test_session_claim_contains_flushed_receipt_marker_before_native_construction(tmp_path):
+    d, p, digest, _ = _fixture(tmp_path)
+    marker = d.execution / '.b4-release-fixture-1.claim' / 'approval.sha256'
+    def native(raw, cache):
+        assert marker.read_text() == digest + '\n'
+        return Mock(raw_root=raw, cache_root=cache)
+    runtime = _compose(d, p, digest, native_factory=native)
+    runtime.close()
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX directory fsync; Windows power-loss durability unproven')
+def test_parent_directory_flush_failure_blocks_native_construction(tmp_path, monkeypatch):
+    import stat
+    d, p, digest, _ = _fixture(tmp_path)
+    native = Mock()
+    original_fsync = os.fsync
+    execution_inode = d.execution.stat().st_ino
+    def fail_parent(fd):
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode) and info.st_ino == execution_inode:
+            raise OSError('fixture parent directory flush failed')
+        original_fsync(fd)
+    monkeypatch.setattr(os, 'fsync', fail_parent)
+    with pytest.raises(OSError, match='fixture parent directory flush failed'):
+        _compose(d, p, digest, native_factory=native)
+    native.assert_not_called()
+    assert list(d.execution.glob('.b4-release-*.claim'))
+    assert not list(d.audit.iterdir())
+
+
+@pytest.mark.parametrize('kind', ['directory', 'file'])
+def test_invalid_isolated_entry_shadows_original_portfolio_candidate(tmp_path, kind):
+    from fastapi.testclient import TestClient
+    from crypto_strategy_lab.browser_http import create_browser_app
+    isolated, original = tmp_path / 'isolated', tmp_path / 'original'
+    isolated.mkdir(); original.mkdir()
+    entry = isolated / 'retained'
+    entry.mkdir() if kind == 'directory' else entry.write_text('partial invalid run')
+    read = Mock()
+    read.portfolio_candidates.side_effect = lambda root: [] if Path(root) == isolated else [
+        {'run_folder_id': 'retained'}, {'run_folder_id': 'unshadowed'}]
+    token = 'p' * 48
+    app = create_browser_app(token=token, read_service=read, completed_run_root=isolated,
+        original_completed_run_root=original)
+    with TestClient(app, base_url='http://localhost') as client:
+        result = client.get('/api/v1/portfolio/candidates', headers={'Authorization': 'Bearer ' + token})
+        assert result.status_code == 200
+        assert result.json()['candidates'] == [{'run_folder_id': 'unshadowed'}]
