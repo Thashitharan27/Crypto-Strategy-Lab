@@ -212,3 +212,15 @@ This is not new original-workstation parity certification or permission to
 release the guarded server. The normal production launcher remains read-only;
 physical interruption, power-loss durability and request-to-run provenance
 limitations remain qualified. Do not automatically reclaim native locks.
+
+## B4 conservative audit-attempt indicator (2026-10-19)
+
+The read-only bounded journal inspector now also reports `any_mutation_attempt`.
+It remains true if an ATTEMPT appears anywhere in the validated journal,
+including when later unrelated read-only or mutation outcomes were recorded.
+Because audit records omit request identifiers, a later SUCCESS does not prove
+that an earlier mutation attempt completed or was undone. The existing
+`last_event_status` describes only the final journal row; it is not a
+reconciliation decision. A malformed, absent or truncated journal reports
+unknown/unverified evidence with `any_mutation_attempt: null`, never an inferred safe completion. This adds
+no production route, automatic replay, claim cleanup or release authorization.

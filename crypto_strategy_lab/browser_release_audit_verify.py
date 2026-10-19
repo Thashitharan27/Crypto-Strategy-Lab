@@ -19,7 +19,7 @@ _MAX_BYTES = 8 * 1024 * 1024
 _MAX_RECORDS = 100_000
 
 
-def inspect_b4_audit(root: Path, session_id: str) -> dict[str, str | int]:
+def inspect_b4_audit(root: Path, session_id: str) -> dict[str, str | int | bool | None]:
     """Read a single immutable snapshot; reject incomplete/corrupt evidence.
 
     No write, deletion, recovery decision or request ID is permitted. A
@@ -28,9 +28,9 @@ def inspect_b4_audit(root: Path, session_id: str) -> dict[str, str | int]:
     """
     if not isinstance(session_id, str) or _SESSION.fullmatch(session_id) is None:
         raise ValueError("Unsafe B4 audit session ID")
-    result: dict[str, str | int] = {
+    result: dict[str, str | int | bool | None] = {
         "status": "AUDIT_UNVERIFIED", "records": 0, "attempts": 0,
-        "last_event_status": "UNKNOWN",
+        "last_event_status": "UNKNOWN", "any_mutation_attempt": None,
     }
     try:
         directory = _nonlink_canonical_directory(Path(root))
@@ -73,6 +73,9 @@ def inspect_b4_audit(root: Path, session_id: str) -> dict[str, str | int]:
             result["status"] = "AUDIT_VERIFIED"
             result["records"] = len(lines)
             result["attempts"] = attempts
+            # Outcome rows have no request or operation correlation IDs. Even
+            # a later SUCCESS cannot resolve an earlier ATTEMPT after a crash.
+            result["any_mutation_attempt"] = attempts > 0
             result["last_event_status"] = "ATTEMPT_ONLY" if (
                 json.loads(lines[-1])["outcome"] == "ATTEMPT"
             ) else "RECORDED_OUTCOME"
