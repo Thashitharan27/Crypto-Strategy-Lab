@@ -510,7 +510,11 @@ def test_b4_post_operation_audit_failure_does_not_claim_rollback():
     with TestClient(app) as client:
         response = client.put("/api/v1/guarded/configs/test", json={"native": "data"},
                               headers={"Authorization": "Bearer " + TOKEN})
+        retry = client.put("/api/v1/guarded/configs/test", json={"native": "data"},
+                           headers={"Authorization": "Bearer " + TOKEN})
     assert response.status_code == 200
+    assert retry.status_code == 503
+    assert retry.json() == {"detail": "Guarded audit unavailable"}
     integration.save_config.assert_called_once()
     assert seen == [
         {"operation": "CONFIG_SAVE", "outcome": "ATTEMPT"},
