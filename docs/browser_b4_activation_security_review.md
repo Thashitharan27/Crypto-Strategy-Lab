@@ -116,3 +116,27 @@ This is engineering preparation; simply passing the flag in fixture tests is
 environment approval or automatic bootstrap. A later reviewed release change
 must supply an authenticated, durable operation audit and explicit approval
 records, and verify rollback before opening a production listener.
+
+
+## B4 per-session audit journal preparation (2026-10-19)
+
+`browser_release_audit.B4AuditJournal` provides an **optional, isolated,
+operator-owned journal callback** for the unlaunched B4 candidate. It requires
+a canonical, symlink/junction-free pre-existing audit directory and an
+exclusive-create safe session filename. Each accepted event is a bounded JSON
+line containing *only* an allowlisted operation and outcome. Writes flush
+with `os.fsync`; reopening the same session filename fails instead of
+overwriting existing evidence. Fixture tests cover duplicate journals,
+private paths, malformed/sensitive event fields, link rejection, write failure
+and actual authenticated guarded HTTP audit delivery.
+
+**Important release blocker:** `browser_guarded_http` presently catches and
+suppresses audit-callback exceptions so that a log-storage error cannot alter
+native operations. This journal does not change that contract: its existence
+is **not proof of fail-closed durable operation auditing**. Before any future
+production activation, separately review whether to fail closed on journal
+failure, how to reconcile an operation that commits before an audit failure,
+how to manage disk-full/restart/rotation, and how to provision independent
+audit-root ACLs and per-session ownership. Do not present an isolated
+`fsync` success as hardware power-loss certification. The ordinary production
+launcher remains read-only; PR #501 stays held.
