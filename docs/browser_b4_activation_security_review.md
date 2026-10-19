@@ -265,3 +265,15 @@ untouched. Original fixture bytes remain unchanged. This is finite controlled
 fixture evidence, not a real process kill, original workstation parity,
 physical power-loss certification or release authorization. The ordinary
 production launcher still has no guarded mutation routes.
+
+
+## B4 fresh-session read-only rollback smoke (2026-10-19)
+
+The existing Linux/Windows clean-checkout release smoke now also composes a
+second normal read-only browser session after interrupted request/worker claims
+exist in the isolated fixture root. It verifies that the prior token is refused,
+the fresh token can only access read-only health, guarded routes remain absent,
+and all crash ownership evidence survives intact. This is a finite in-process
+HTTP check rather than proof of a production restart, server deployment,
+credential revocation across actual listeners, or hardware durability.
+Neither production capability is activated.

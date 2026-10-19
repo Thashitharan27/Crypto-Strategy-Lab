@@ -280,6 +280,7 @@ def test_background_refresh_failure_is_inline_and_does_not_open_modal(qtbot, mon
     assert widget.status_detail.text() == "Background fetch unavailable"
     assert widget.activity[-1] == "[GIT] Error: Background fetch unavailable"
     assert warnings == []
+    assert not widget._pending_tasks
 
 
 def test_explicit_operation_failure_keeps_error_dialog(qtbot, monkeypatch):
