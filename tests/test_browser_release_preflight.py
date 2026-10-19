@@ -37,10 +37,8 @@ def test_preflight_rejects_overlap_on_both_sides(tmp_path, location, target):
         "ancestor": original.parent,
     }[location]
     unsafe.mkdir(exist_ok=True)
-    kwargs = {"configuration": other, "execution": other}
-    kwargs[target] = unsafe
-    # The other root must remain disjoint except in this deliberately
-    # overlapping case, which still must be rejected.
+    kwargs = {"configuration": other, "execution": unsafe} if target == "execution" else {"configuration": unsafe, "execution": other}
+    # Writable roots themselves are distinct: only source overlap may fail.
     with pytest.raises(ValueError):
         prepare_guarded_release_roots(protected_roots=(original,), **kwargs)
 
