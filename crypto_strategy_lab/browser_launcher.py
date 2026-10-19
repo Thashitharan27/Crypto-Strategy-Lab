@@ -58,9 +58,15 @@ def build_browser_readonly_runtime(
     static_root: str | Path | None = None,
     output_root: str | Path | None = None,
     config_root: str | Path | None = None,
+    guarded_release_requested: bool = False,
 ) -> BrowserReadOnlyRuntime:
     """Compose the existing read-only browser pieces without starting a server."""
 
+    # B4 preparation is not release approval. There is deliberately no
+    # production code path that attaches guarded routes, even if a caller or
+    # operator sets a feature-like environment variable.
+    if guarded_release_requested is not False:
+        raise PermissionError("Production browser mutations await separate release approval")
     if isinstance(port, bool) or not isinstance(port, int) or not (1 <= port <= 65535):
         raise ValueError("Browser port must be an integer from 1 to 65535")
 
