@@ -630,3 +630,17 @@ Any future production guarded server/UI composition remains a **separate**
 reviewed implementation requiring explicit release owner approval, trusted
 isolated writable roots, dedicated audit and a genuine Windows browser smoke.
 No ordinary browser write or execution capability is enabled by this phase.
+
+
+## B4 clean-checkout smoke CI gate (2026-10-19)
+
+The Python tests workflow now runs the **actual** `python -m
+crypto_strategy_lab.browser_release_smoke` command in a separate blocking
+`b4-clean-checkout-release-smoke` Linux job, after checking out the PR
+head and installing browser/API dependencies. It checks clean Git status,
+reports the exact commit, exercises the production *read-only* FastAPI
+composition with isolated fixtures and rejects every guarded operation.
+This verifies the real release-smoke command at a clean CI checkout;
+it does **not** repeat original Windows trading-parity certification or
+authorize any production write/execute route. The PySide6 fallback remains
+unchanged, and a separate release activation approval is still mandatory.

@@ -306,6 +306,33 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m pytest -vv --durations=25 -o faulthandler_timeout=60
 
+  b4-clean-checkout-release-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact PR commit
+        uses: actions/checkout@v4
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1
+      - name: Install browser release smoke dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r browser_ui/requirements.txt httpx
+      - name: Assert clean HEAD and execute real read-only B4 HTTP smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m crypto_strategy_lab.browser_release_smoke
+
   windows-smoke-safety:
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: windows-latest
