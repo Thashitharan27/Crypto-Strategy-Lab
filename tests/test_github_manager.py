@@ -381,7 +381,7 @@ def test_destroyed_github_widget_ignores_late_thread_result(qtbot, monkeypatch):
     pool = DeferredPool()
     monkeypatch.setattr(github_manager.GitManager, "status", lambda self, fetch=False: GitStatus("main", "origin", ()))
     widget = GitHubIntegrationWidget()
-    qtbot.addWidget(widget)
+    # This test explicitly destroys the widget; do not register it for\n    # pytest-qt teardown, which would attempt to close a deleted C++ object.
     # Wait for the automatically queued initial task to finish before
     # injecting a controlled completion after widget destruction.
     qtbot.waitUntil(lambda: widget.state.text() == "● Up to date", timeout=5000)
