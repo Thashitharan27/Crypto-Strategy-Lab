@@ -72,3 +72,27 @@ historical combined TP1→BE, executed SL1/trailing, full tick-order and
 per-trade slippage were not independently observed. Windows symlink-privilege
 skips and hardware power-loss limits remain qualifications, not universal
 passes. See `browser_consolidated_windows_certification_2026-10-19.md`.
+
+
+## Preparation integration: authenticated disabled-by-default capability contract
+
+The production FastAPI app now exposes authenticated
+`GET /api/v1/release/capabilities`, returning exact booleans
+`{"execution": false, "configuration_editing": false}`.
+It is intentionally **not** configurable by an environment flag, request,
+or locally displayed checkbox. It never constructs guarded native services,
+mounts guarded HTTP routes or creates writable files.
+
+The ordinary React app reads these booleans along with its existing authenticated
+health/catalog capability reads. It invalidates the advertised release state
+on token change or failed reconnect, and mounts the already existing
+`GuardedRunControls` only if *both* server booleans are exactly `true` and
+the session is connected. Client-side visibility is **not authorization**;
+the native server's independent guarded router/ownership gates still govern
+every write and run.
+
+Current production always advertises both as `false`. This integration
+prepares the UI/server handshake for later approval, without enabling it.
+The separate certification-only React app remains restricted to its own
+operator-approved isolated server. A later activation implementation must
+undergo a new independent review and receive explicit user authorization.
