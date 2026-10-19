@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { getReadOnly, openVerifiedVisualizer, type Health, type Symbols } from "./api";
+import { GuardedRunControls } from "./GuardedRunControls";
 import "./style.css";
 
 const sections = ["Setup", "Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Portfolio", "Integrations", "Trade Visualizer"] as const;
@@ -17,6 +18,7 @@ type FeatureCapability = {
   required_features: string[]; warmup_bars: number; availability_rule: string;
 };
 type Capabilities = {mode: string; strategy: StrategyCapability; features: FeatureCapability[]};
+type ReleaseCapabilities = {execution: boolean; configuration_editing: boolean};
 
 function App() {
   const [section, setSection] = React.useState<Section>("Runs & Results");
@@ -24,6 +26,7 @@ function App() {
   const [featureQuery, setFeatureQuery] = React.useState("");
   const [token, setToken] = React.useState("");
   const [connected, setConnected] = React.useState(false);
+  const [releaseCapabilities, setReleaseCapabilities] = React.useState<ReleaseCapabilities | null>(null);
   const connectRequest = React.useRef(0);
   const [symbols, setSymbols] = React.useState<string[]>([]);
   const [capabilities, setCapabilities] = React.useState<Capabilities | null>(null);
@@ -198,19 +201,23 @@ function App() {
     setCoverageQueryLabel("");
     setCoverageError("");
     setConnected(false);
+    setReleaseCapabilities(null);
     setSymbols([]);
     setCapabilities(null);
     try {
       const health = await getReadOnly<Health>("/api/v1/health", token);
       if (health.mode !== "read-only" || health.status !== "ok") throw new Error("Unexpected API mode");
-      const [catalog, capabilityData] = await Promise.all([
+      const [catalog, capabilityData, releaseData] = await Promise.all([
         getReadOnly<Symbols>("/api/v1/catalog/symbols", token),
         getReadOnly<Capabilities>("/api/v1/capabilities", token),
+        getReadOnly<ReleaseCapabilities>("/api/v1/release/capabilities", token),
       ]);
       if (capabilityData.mode !== "read-only" || !Array.isArray(capabilityData.features) || !capabilityData.strategy?.indicators) throw new Error("Invalid capability metadata");
+      if (!releaseData || typeof releaseData.execution !== "boolean" || typeof releaseData.configuration_editing !== "boolean") throw new Error("Invalid release capability metadata");
       if (requestId !== connectRequest.current) return;
       setSymbols(catalog.symbols);
       setCapabilities(capabilityData);
+      setReleaseCapabilities(releaseData);
       setConnected(true);
       setMessage("Connected to local read-only API");
     } catch {
@@ -228,7 +235,7 @@ function App() {
     <section aria-live="polite"><header><small>RESEARCH WORKSPACE</small><h2>{section}</h2></header>
       <div className="connection">
         <label htmlFor="local-token">Local session token</label>
-        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++connectRequest.current; ++configRequest.current; ++coverageRequest.current; ++runRequest.current; ++portfolioRequest.current; ++visualizerRequest.current; setVisualizerUrl(""); setVisualizerError(""); setToken(event.target.value); setConnected(false); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigSection(""); setConfigError(""); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError(""); setPortfolioCandidates(null); setPortfolioError(""); setCoverage(null); setCoverageError(""); setCoverageQueryLabel(""); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
+        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++connectRequest.current; ++configRequest.current; ++coverageRequest.current; ++runRequest.current; ++portfolioRequest.current; ++visualizerRequest.current; setVisualizerUrl(""); setVisualizerError(""); setToken(event.target.value); setConnected(false); setReleaseCapabilities(null); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigSection(""); setConfigError(""); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError(""); setPortfolioCandidates(null); setPortfolioError(""); setCoverage(null); setCoverageError(""); setCoverageQueryLabel(""); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
         <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
         <p role="status">{message}</p>
       </div>
@@ -391,7 +398,11 @@ function App() {
         {visualizerError && <p role="alert">{visualizerError}</p>}
         {visualizerUrl && <p><a href={visualizerUrl} target="_blank" rel="noopener noreferrer">Open verified visualizer in a new tab</a>. This link is local and expires when its session is replaced or the server stops.</p>}
       </div>}
-      <p>No strategy execution or configuration editing is enabled.</p>
+      {section === "Risk & Execution" && connected && releaseCapabilities?.execution === true &&
+        releaseCapabilities?.configuration_editing === true &&
+        <GuardedRunControls enabled={true} token={token}/>}
+      {releaseCapabilities?.execution !== true || releaseCapabilities?.configuration_editing !== true ?
+        <p>No strategy execution or configuration editing is enabled.</p> : null}
     </section>
   </main>;
 }
