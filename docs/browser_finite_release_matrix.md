@@ -644,3 +644,17 @@ This verifies the real release-smoke command at a clean CI checkout;
 it does **not** repeat original Windows trading-parity certification or
 authorize any production write/execute route. The PySide6 fallback remains
 unchanged, and a separate release activation approval is still mandatory.
+
+
+## B4 production static asset separation (2026-10-19)
+
+The normal production launcher refuses a caller-selected static root named
+`dist-certification` (including a filesystem alias resolving to that
+directory) before constructing a native read service or FastAPI app.
+This closes an accidental packaging path where the operator-only React
+certification controls could otherwise appear in the normal read-only
+browser, despite guarded API routes remaining disabled. Only the separate
+opt-in certification server may serve the certification build. Existing
+production `dist` and independently tested static fixtures remain
+supported. This is a UI/release isolation guard, **not** user approval
+or an implementation of guarded production activation.

@@ -292,3 +292,55 @@ def test_b4_environment_cannot_activate_guarded_production_routes(tmp_path):
             ("GET", "/api/v1/guarded/jobs/safe"),
         ):
             assert client.request(method, path, headers=auth).status_code == 404
+
+
+@pytest.mark.parametrize("use_alias", [False, True])
+def test_production_launcher_rejects_certification_bundle_before_service(tmp_path, use_alias):
+    """Only the separately opted-in certification server may serve this UI."""
+    dedicated = tmp_path / "dist-certification"
+    dedicated.mkdir()
+    (dedicated / "index.html").write_text("certification only", encoding="utf-8")
+    selected = dedicated
+    if use_alias:
+        selected = tmp_path / "production-alias"
+        try:
+            selected.symlink_to(dedicated, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("Filesystem directory links unavailable")
+    with (
+        patch("crypto_strategy_lab.browser_launcher.build_browser_readonly_service") as service,
+        patch("crypto_strategy_lab.browser_launcher.create_browser_app") as factory,
+    ):
+        with pytest.raises(ValueError, match="Certification-only browser assets"):
+            build_browser_readonly_runtime(
+                environ={}, token="s" * 48, static_root=selected,
+            )
+    service.assert_not_called()
+    factory.assert_not_called()
+    assert (dedicated / "index.html").read_text(encoding="utf-8") == "certification only"
+
+
+def test_b4_review_composition_cannot_serve_certification_ui(tmp_path):
+    from crypto_strategy_lab.browser_release_composition import compose_b4_review_only
+    asset = tmp_path / "dist-certification"
+    config = tmp_path / "new-config"
+    runs = tmp_path / "new-runs"
+    for root in (asset, config, runs):
+        root.mkdir()
+    (asset / "index.html").write_text("certification only", encoding="utf-8")
+    with (
+        patch("crypto_strategy_lab.browser_launcher.build_browser_readonly_service") as service,
+        patch("crypto_strategy_lab.browser_launcher.create_browser_app") as factory,
+    ):
+        with pytest.raises(ValueError, match="Certification-only browser assets"):
+            compose_b4_review_only(
+                configuration=config, execution=runs, static_root=asset,
+                environ={
+                    "CRYPTO_STRATEGY_LAB_RAW_ROOT": str(tmp_path / "raw"),
+                    "CRYPTO_STRATEGY_LAB_CACHE_DIR": str(tmp_path / "cache"),
+                }, token="r" * 48,
+            )
+    service.assert_not_called()
+    factory.assert_not_called()
+    assert not list(config.iterdir())
+    assert not list(runs.iterdir())
