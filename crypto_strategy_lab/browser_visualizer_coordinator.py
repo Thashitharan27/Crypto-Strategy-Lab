@@ -14,9 +14,10 @@ from crypto_strategy_lab.browser_visualizer_session_owner import BrowserVisualiz
 class BrowserVisualizerCoordinator:
     """Explicitly open one *verified* completed run in the existing browser chart."""
 
-    def __init__(self, application_service, completed_run_root: str | Path, *, owner=None):
+    def __init__(self, application_service, completed_run_root: str | Path, *, owner=None, original_completed_run_root=None):
         self._service = application_service
         self._root = Path(completed_run_root)
+        self._original_root = Path(original_completed_run_root) if original_completed_run_root is not None else None
         self._owner = owner if owner is not None else BrowserVisualizerSessionOwner()
         self._lock = RLock()
 
@@ -25,7 +26,13 @@ class BrowserVisualizerCoordinator:
         with self._lock:
             # Stop any previous model/session before attempting a new selection.
             self._owner.stop()
-            model = load_browser_visualizer(self._service, self._root, run_id)
+            root = self._root
+            if self._original_root is not None:
+                try:
+                    (root / run_id).lstat()
+                except FileNotFoundError:
+                    root = self._original_root
+            model = load_browser_visualizer(self._service, root, run_id)
             return self._owner.replace(model)
 
     def stop(self) -> None:

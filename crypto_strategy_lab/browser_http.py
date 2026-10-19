@@ -28,10 +28,41 @@ def _json_safe_summary(value):
     return value
 
 
-def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None, visualizer_coordinator=None, guarded_integration=None, guarded_enabled=False, guarded_audit_callback=None, guarded_require_audit_admission=False):
+def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None, visualizer_coordinator=None, guarded_integration=None, guarded_enabled=False, guarded_audit_callback=None, guarded_require_audit_admission=False, guarded_release_gate=None, guarded_release_close=None, guarded_release_origin=None, original_config_root=None, original_completed_run_root=None):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
+    if guarded_release_gate is not None:
+        if (not callable(guarded_release_gate) or not callable(guarded_release_close)
+                or guarded_enabled is not True or guarded_require_audit_admission is not True
+                or guarded_integration is None):
+            raise ValueError("Approved release requires guarded owners, strict audit and lifecycle")
+        try:
+            approved_origin = urlsplit(guarded_release_origin)
+            if (approved_origin.scheme != 'http' or approved_origin.hostname != '127.0.0.1'
+                    or approved_origin.port is None
+                    or guarded_release_origin != f'http://127.0.0.1:{approved_origin.port}'):
+                raise ValueError('Invalid approved origin')
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError('Exact approved loopback origin required') from exc
+
+    def release_open():
+        if guarded_release_gate is None:
+            return False
+        try:
+            return guarded_release_gate() is True
+        except Exception:
+            return False
+
+    def selected_root(primary, fallback, name):
+        from pathlib import Path
+        root = Path(primary).resolve()
+        if fallback is not None:
+            try:
+                (root / name).lstat()
+            except FileNotFoundError:
+                root = Path(fallback).resolve()
+        return root
     from fastapi import FastAPI, Header, HTTPException, Request
     from starlette.responses import JSONResponse
 
@@ -41,7 +72,9 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             yield
         finally:
             try:
-                if guarded_enabled is True and guarded_integration is not None:
+                if guarded_release_close is not None:
+                    guarded_release_close()
+                elif guarded_enabled is True and guarded_integration is not None:
                     guarded_integration.close()
             finally:
                 if visualizer_coordinator is not None:
@@ -59,6 +92,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             token=token, integration=guarded_integration, enabled=True,
             audit_callback=guarded_audit_callback,
             require_audit_admission=guarded_require_audit_admission,
+            release_admission=guarded_release_gate,
         ))
 
     @app.middleware("http")
@@ -95,6 +129,8 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             valid_host, valid_origin = False, False
         if not valid_host or not valid_origin:
             return JSONResponse({"detail": "Forbidden"}, status_code=403)
+        if guarded_release_gate is not None and 'http://' + host != guarded_release_origin:
+            return JSONResponse({"detail": "Forbidden"}, status_code=403)
         # Guarded endpoints may change native state. A different localhost
         # port is a different browser origin, even if both are loopback.
         # Preserve no-Origin CLI/TestClient requests; bearer auth remains
@@ -104,6 +140,9 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 and origin is not None
                 and origin != "http://" + host):
             return JSONResponse({"detail": "Forbidden"}, status_code=403)
+        if (guarded_release_gate is not None and request.url.path.startswith('/api/v1/guarded/')
+                and not release_open()):
+            return JSONResponse({"detail": "Release admission unavailable"}, status_code=503)
         return await call_next(request)
 
     @app.get("/api/v1/health")
@@ -111,7 +150,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
         supplied = authorization.removeprefix("Bearer ") if authorization else ""
         if not secrets.compare_digest(supplied, token):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        return {"status": "ok", "mode": "read-only"}
+        return {"status": "ok", "mode": "guarded" if release_open() else "read-only"}
 
     @app.get("/api/v1/release/capabilities")
     def release_capabilities(authorization: str | None = Header(default=None)):
@@ -123,7 +162,8 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
         supplied = authorization.removeprefix("Bearer ") if authorization else ""
         if not secrets.compare_digest(supplied, token):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        return {"execution": False, "configuration_editing": False}
+        enabled = release_open()
+        return {"execution": enabled, "configuration_editing": enabled}
 
     if read_service is not None:
         @app.get("/api/v1/capabilities")
@@ -180,6 +220,10 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 return {"candidates": []}
             try:
                 rows = read_service.portfolio_candidates(root)
+                if original_completed_run_root is not None:
+                    previous = read_service.portfolio_candidates(original_completed_run_root)
+                    seen = {row['run_folder_id'] for row in rows}
+                    rows = rows + [row for row in previous if row['run_folder_id'] not in seen]
             except (OSError, ValueError, KeyError, TypeError):
                 raise HTTPException(status_code=503, detail="Portfolio discovery unavailable")
             return {"candidates": rows[:100]}
@@ -194,7 +238,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             if not (1 <= len(run_id) <= 100 and run_id.isascii() and
                     all(c.isalnum() or c in "_-" for c in run_id)):
                 raise HTTPException(status_code=404, detail="Run not found")
-            root = Path(completed_run_root).resolve()
+            root = selected_root(completed_run_root, original_completed_run_root, run_id)
             candidate = root / run_id
             if candidate.is_symlink():
                 raise HTTPException(status_code=404, detail="Run not found")
@@ -222,7 +266,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             if not (1 <= len(config_id) <= 100 and config_id.isascii() and
                     all(c.isalnum() or c in "_-" for c in config_id)):
                 raise HTTPException(status_code=404, detail="Configuration not found")
-            root = Path(config_root).resolve()
+            root = selected_root(config_root, original_config_root, config_id + '.json')
             candidate = root / (config_id + ".json")
             if candidate.is_symlink():
                 raise HTTPException(status_code=404, detail="Configuration not found")
