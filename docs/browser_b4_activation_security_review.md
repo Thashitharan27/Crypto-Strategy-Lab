@@ -96,3 +96,23 @@ prepares the UI/server handshake for later approval, without enabling it.
 The separate certification-only React app remains restricted to its own
 operator-approved isolated server. A later activation implementation must
 undergo a new independent review and receive explicit user authorization.
+
+
+## Guarded server candidate implementation (2026-10-19)
+
+The internal `compose_b4_guarded_candidate` factory prepares an **in-process
+candidate**, not a production listener or startup flag. It defaults to denying
+every call unless an explicit trusted Python caller supplies literal
+`approval_granted=True`. Approval-like environment variables cannot enable it.
+It requires a callable audit callback, the existing native service, validated
+isolated writable roots and a strong session token before composing the
+existing `BrowserGuardedIntegration` and `create_browser_app` guarded routes.
+The candidate has no network listener and its integration must be closed by
+the caller. The normal browser launcher remains read-only and does not invoke
+this factory; its authenticated UI capability flags remain hard-OFF.
+
+This is engineering preparation; simply passing the flag in fixture tests is
+**not release-owner permission to activate**. Do not add a public CLI flag,
+environment approval or automatic bootstrap. A later reviewed release change
+must supply an authenticated, durable operation audit and explicit approval
+records, and verify rollback before opening a production listener.
