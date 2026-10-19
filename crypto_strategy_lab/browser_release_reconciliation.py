@@ -41,12 +41,15 @@ def _safe_root(path: Path) -> Path | None:
 def _claimed_directory(root: Path, label: str) -> bool | None:
     path = root / label
     try:
-        if path.is_symlink() or (
-            getattr(path.lstat(), "st_file_attributes", 0)
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or (
+            getattr(info, "st_file_attributes", 0)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         ):
             return None
-        return path.is_dir()
+        # Any unexpected object still occupies the native ownership path.
+        # Only a missing path is absent; never call a corrupt claim unclaimed.
+        return True if stat.S_ISDIR(info.st_mode) else None
     except FileNotFoundError:
         return False
     except (OSError, ValueError, RuntimeError):
