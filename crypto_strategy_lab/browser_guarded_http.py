@@ -40,6 +40,7 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
 
 
     def admit_mutation(operation: str) -> None:
+        nonlocal audit_broken
         # A durable ATTEMPT record must precede any native mutation in the B4
         # candidate. Do not treat later audit failures as rollback evidence.
         if require_audit_admission is not True:
@@ -51,7 +52,6 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
                 raise RuntimeError("B4 audit callback missing")
             audit_callback({"operation": operation, "outcome": "ATTEMPT"})
         except Exception:
-            nonlocal audit_broken
             audit_broken = True
             # Never leak filesystem, credentials or native error text.
             raise HTTPException(status_code=503, detail="Guarded audit unavailable")
