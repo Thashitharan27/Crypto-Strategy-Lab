@@ -114,6 +114,12 @@ jobs:
           tests/test_browser_http_capabilities.py
           tests/test_browser_capabilities.py
           tests/test_browser_launcher.py
+          tests/test_browser_guarded_http.py
+          tests/test_browser_guarded_recovery_verify.py
+          tests/test_browser_release_composition.py
+          tests/test_browser_release_audit.py
+          tests/test_browser_release_audit_verify.py
+          tests/test_browser_release_reconciliation.py
           tests/test_browser_visualizer_adapter.py
           tests/test_browser_visualizer_session_owner.py
           tests/test_browser_visualizer_coordinator.py
