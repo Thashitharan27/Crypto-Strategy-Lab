@@ -223,3 +223,41 @@ def test_guarded_candidate_audit_events_persist_without_sensitive_data(tmp_path)
     )
     assert token.encode() not in journal.path.read_bytes()
     native.run.assert_not_called()
+
+
+def test_exhausted_journal_blocks_native_mutation_and_retains_evidence(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from crypto_strategy_lab import browser_release_audit as audit_module
+    from crypto_strategy_lab.browser_release_composition import compose_b4_guarded_candidate
+    from crypto_strategy_lab.browser_release_audit_verify import inspect_b4_audit
+
+    paths, env = _roots(tmp_path)
+    audit_root = tmp_path / "audit"
+    audit_root.mkdir()
+    native = Mock()
+    token = "capacity-only-" + "s" * 48
+    with audit_module.B4AuditJournal(audit_root, "capacity") as journal:
+        journal({"operation": "STATUS", "outcome": "SUCCESS"})
+        original = journal.path.read_bytes()
+        monkeypatch.setattr(audit_module, "_MAX_RECORDS", 1)
+        candidate = compose_b4_guarded_candidate(
+            native_application=native, configuration=paths["future-config"],
+            execution=paths["future-runs"], static_root=paths["static"],
+            environ=env, token=token, audit_callback=journal, approval_granted=True,
+        )
+        try:
+            with patch.object(candidate.integration, "cancel") as cancel:
+                with TestClient(candidate.app, base_url="http://127.0.0.1:8767") as client:
+                    for _ in range(2):
+                        response = client.post("/api/v1/guarded/jobs/probe/cancel",
+                                               headers={"Authorization": "Bearer " + token})
+                        assert response.status_code == 503
+                cancel.assert_not_called()
+        finally:
+            candidate.close()
+        assert journal.path.read_bytes() == original
+    assert inspect_b4_audit(audit_root, "capacity")["status"] == "AUDIT_VERIFIED"
+    assert not list(paths["future-runs"].iterdir())
+    assert not list(paths["future-config"].iterdir())
+    native.run.assert_not_called()

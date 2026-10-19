@@ -23,6 +23,9 @@ _OUTCOMES = frozenset({
     "REJECTED", "EXECUTION_UNAVAILABLE", "ATTEMPT",
 })
 _SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,64}\Z", re.ASCII)
+_MUTATION_OPERATIONS = frozenset({"CONFIG_SAVE", "JOB_SUBMIT", "CANCEL"})
+_MAX_BYTES = 8 * 1024 * 1024
+_MAX_RECORDS = 100_000
 
 
 class B4AuditJournal:
@@ -36,6 +39,7 @@ class B4AuditJournal:
         self._lock = threading.Lock()
         self._fd: int | None = None
         self._broken = False
+        self._records = 0
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND
         flags |= getattr(os, "O_BINARY", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -58,6 +62,8 @@ class B4AuditJournal:
             raise ValueError("Unknown audit operation")
         if not isinstance(outcome, str) or outcome not in _OUTCOMES:
             raise ValueError("Unknown audit outcome")
+        if outcome == "ATTEMPT" and operation not in _MUTATION_OPERATIONS:
+            raise ValueError("Audit ATTEMPT requires a mutation operation")
         line = (json.dumps({"operation": operation, "outcome": outcome},
                            sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
         with self._lock:
@@ -74,6 +80,8 @@ class B4AuditJournal:
                         or opened.st_dev != named.st_dev
                         or opened.st_ino != named.st_ino):
                     raise OSError("B4 audit destination identity changed")
+                if opened.st_size + len(line) > _MAX_BYTES or self._records >= _MAX_RECORDS:
+                    raise OSError("B4 audit capacity exhausted")
                 offset = 0
                 while offset < len(line):
                     count = os.write(self._fd, line[offset:])
@@ -81,6 +89,7 @@ class B4AuditJournal:
                         raise OSError("B4 audit write made no progress")
                     offset += count
                 os.fsync(self._fd)
+                self._records += 1
     
             except (OSError, RuntimeError):
                 # A partial write or failed fsync leaves uncertain evidence.
