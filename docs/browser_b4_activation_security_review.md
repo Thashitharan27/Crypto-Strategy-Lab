@@ -322,3 +322,14 @@ already exist, so no truncation, replay, claim clearing or repair is attempted.
 The router's strict-audit admission remains independently fail closed. This
 is an isolated review-only candidate safeguard, not proof of host power-loss
 durability or an enabled guarded production release.
+
+
+## B4 finite cross-process torn-audit evidence regression (2026-10-19)
+
+An isolated test child writes a valid mutation ATTEMPT, leaves a partial
+journal line and exits using `os._exit`. A separate process then verifies
+that the journal is AUDIT_UNVERIFIED, same-session creation is refused,
+request and worker claims remain intact, and rollback review stays
+RELEASE_HELD without replay or cleanup. This tests evidence handling after
+an abrupt process exit, not a live native worker kill, hardware power loss,
+filesystem ACL/durability guarantees, or production guarded activation.

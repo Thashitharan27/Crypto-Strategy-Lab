@@ -376,6 +376,7 @@ jobs:
           tests/test_browser_release_audit.py
           tests/test_browser_release_audit_verify.py
           tests/test_browser_release_reconciliation.py
+          tests/test_browser_b4_cross_process_interrupted_audit.py
           tests/test_stage16_hidden_pair_management_gui_removed.py
           tests/test_freeze_browser_parity_catalog_inputs.py
           tests/test_verify_browser_parity_provenance.py
