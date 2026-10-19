@@ -87,6 +87,22 @@ def run_readonly_release_smoke() -> dict[str, object]:
                 "/api/v1/health", headers={**auth, "Host": "remote.example"},
             ).status_code == 403
             checked += 1
+            # Cross-origin requests cannot borrow a local bearer session.
+            for hostile_origin in (
+                "http://malicious.example:8767",
+                "http://127.0.0.1:9999",
+            ):
+                assert client.get(
+                    "/api/v1/health",
+                    headers={**auth, "Origin": hostile_origin},
+                ).status_code == 403
+                checked += 1
+            # Even a correctly authenticated client must never discover
+            # mutation routes in the normal read-only production composition.
+            assert client.get(
+                "/api/v1/guarded/jobs/smoke", headers={**auth, "Origin": "http://127.0.0.1:9999"},
+            ).status_code == 403
+            checked += 1
             for method, path in (
                 ("POST", "/api/v1/guarded/jobs"),
                 ("PUT", "/api/v1/guarded/configs/smoke"),
