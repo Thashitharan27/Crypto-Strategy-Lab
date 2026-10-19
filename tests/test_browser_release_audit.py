@@ -110,3 +110,31 @@ def test_failed_fsync_latches_journal_against_followup_append(tmp_path):
             audit({"operation": "JOB_SUBMIT", "outcome": "SUCCESS"})
         assert audit.path.read_bytes() == before
     # Existing evidence is retained for inspection, not repaired or replayed.
+
+
+def test_partial_audit_write_failure_preserves_bytes_and_latches(tmp_path):
+    from crypto_strategy_lab import browser_release_audit as audit_module
+
+    with B4AuditJournal(tmp_path, "partial") as audit:
+        audit({"operation": "AUTH", "outcome": "DENIED"})
+        original = audit.path.read_bytes()
+        real_write = audit_module.os.write
+        writes = 0
+
+        def partial_then_failure(fd, data):
+            nonlocal writes
+            writes += 1
+            if writes == 1:
+                return real_write(fd, data[:7])
+            raise OSError("simulated disk full after partial append")
+
+        with patch.object(audit_module.os, "write", side_effect=partial_then_failure):
+            with pytest.raises(OSError, match="disk full"):
+                audit({"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"})
+        partial = audit.path.read_bytes()
+        assert partial.startswith(original)
+        assert len(partial) == len(original) + 7
+        with pytest.raises(OSError, match="previously failed"):
+            audit({"operation": "JOB_SUBMIT", "outcome": "SUCCESS"})
+        assert audit.path.read_bytes() == partial
+    # Torn evidence is retained rather than repaired or falsely certified.
