@@ -116,3 +116,13 @@ composition. Exact-head tests, required CI, the patched dependency lock, actual
 Windows account acceptance and guarded-to-read-only rollback must still pass.
 Production stays OFF until those results support a bound session receipt.
 Original preservation, uncertain-work handling and PR #501's hold continue.
+
+## Actual-account approved-session and rollback acceptance
+
+See `browser_b4_actual_account_rollback_certification_2026-10-19.md`: the dedicated
+Windows account passed the temporary isolated native-operation and same-port
+read-only rollback test, with original-file preservation and retained claims.
+PR #859 passed all required CI and merged. This supersedes the missing actual
+account rollback evidence, while production remains OFF pending the separate
+exact deployment bootstrap/receipt and operator handoff. The finite recovery
+limits, owner-authorized AI-led review and PR #501 hold continue.
