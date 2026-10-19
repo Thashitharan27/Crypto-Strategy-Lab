@@ -104,3 +104,15 @@ implementing agent's review is not a separate independent sign-off. Independent
 acceptance, an exact reviewed activation change and separate explicit activation
 approval still precede any guarded deployment. The HOLD and preservation/rollback
 rules above remain unchanged.
+
+## Later release-owner instruction: AI-led conditional review
+
+The release owner subsequently stated that no other reviewer is available and
+authorized the implementing AI to review and release if all checks pass. This
+supersedes the external independent-review requirement as an owner decision;
+it does not constitute independent human sign-off or waive technical gates.
+See `browser_approved_session_contract.md` for the separate, unlaunched approval
+composition. Exact-head tests, required CI, the patched dependency lock, actual
+Windows account acceptance and guarded-to-read-only rollback must still pass.
+Production stays OFF until those results support a bound session receipt.
+Original preservation, uncertain-work handling and PR #501's hold continue.

@@ -16,6 +16,23 @@ new Function("module", "exports", "require", bundle.outputFiles[0].text)(
 const api = generated.exports;
 const TOKEN = "test-only-token";
 
+test("connection rejects stale or contradictory approved capability handshakes", async () => {
+  const compiled = await build({entryPoints: [resolve("src/releaseHandshake.ts")], platform: "node",
+    format: "cjs", bundle: true, write: false, logLevel: "silent"});
+  const module = {exports: {}};
+  new Function("module", "exports", compiled.outputFiles[0].text)(module, module.exports);
+  const mode = module.exports.approvedConnectionMode;
+  assert.equal(mode({status: "ok", mode: "read-only"}, {execution: false, configuration_editing: false}), "read-only");
+  assert.equal(mode({status: "ok", mode: "guarded"}, {execution: true, configuration_editing: true}), "guarded");
+  for (const [health, release] of [
+    [{status: "ok", mode: "read-only"}, {execution: true, configuration_editing: true}],
+    [{status: "ok", mode: "guarded"}, {execution: false, configuration_editing: false}],
+    [{status: "ok", mode: "guarded"}, {execution: true, configuration_editing: false}],
+    [{status: "error", mode: "guarded"}, {execution: true, configuration_editing: true}],
+    [{status: "ok", mode: "guarded"}, {execution: "true", configuration_editing: true}],
+  ]) assert.throws(() => mode(health, release), /capabilit|disagree/);
+});
+
 test("ordinary client can authenticate the release capability read", async () => {
   const compiled = await build({entryPoints: [resolve("src/api.ts")], platform: "node",
     format: "cjs", bundle: true, write: false, logLevel: "silent"});

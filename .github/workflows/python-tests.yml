@@ -373,6 +373,7 @@ jobs:
           tests/test_browser_guarded_http.py
           tests/test_browser_guarded_recovery_verify.py
           tests/test_browser_release_composition.py
+          tests/test_browser_approved_release.py
           tests/test_browser_release_audit.py
           tests/test_browser_release_audit_verify.py
           tests/test_browser_release_reconciliation.py

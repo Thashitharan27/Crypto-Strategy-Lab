@@ -17,7 +17,7 @@ from starlette.requests import Request
 _REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 
 
-def create_guarded_job_router(*, token: str, integration, enabled: bool = False, audit_callback=None, require_audit_admission: bool = False):
+def create_guarded_job_router(*, token: str, integration, enabled: bool = False, audit_callback=None, require_audit_admission: bool = False, release_admission=None):
     from fastapi import APIRouter, Header, HTTPException
     router = APIRouter()
     if enabled is not True:
@@ -51,6 +51,13 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         # Serialize admission with audit failures. A second candidate mutation
         # never crosses into native code while an earlier result is unsettled.
         with audit_lock:
+            if release_admission is not None:
+                try:
+                    allowed = release_admission() is True
+                except Exception:
+                    allowed = False
+                if not allowed:
+                    raise HTTPException(status_code=503, detail="Release admission unavailable")
             if audit_broken or mutation_active:
                 raise HTTPException(status_code=503, detail="Guarded audit unavailable")
             mutation_active = True

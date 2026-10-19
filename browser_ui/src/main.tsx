@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { getReadOnly, openVerifiedVisualizer, type Health, type Symbols } from "./api";
 import { GuardedRunControls } from "./GuardedRunControls";
+import { approvedConnectionMode } from "./releaseHandshake";
 import "./style.css";
 
 const sections = ["Setup", "Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Portfolio", "Integrations", "Trade Visualizer"] as const;
@@ -206,7 +207,6 @@ function App() {
     setCapabilities(null);
     try {
       const health = await getReadOnly<Health>("/api/v1/health", token);
-      if (health.mode !== "read-only" || health.status !== "ok") throw new Error("Unexpected API mode");
       const [catalog, capabilityData, releaseData] = await Promise.all([
         getReadOnly<Symbols>("/api/v1/catalog/symbols", token),
         getReadOnly<Capabilities>("/api/v1/capabilities", token),
@@ -214,12 +214,13 @@ function App() {
       ]);
       if (capabilityData.mode !== "read-only" || !Array.isArray(capabilityData.features) || !capabilityData.strategy?.indicators) throw new Error("Invalid capability metadata");
       if (!releaseData || typeof releaseData.execution !== "boolean" || typeof releaseData.configuration_editing !== "boolean") throw new Error("Invalid release capability metadata");
+      const mode = approvedConnectionMode(health, releaseData);
       if (requestId !== connectRequest.current) return;
       setSymbols(catalog.symbols);
       setCapabilities(capabilityData);
       setReleaseCapabilities(releaseData);
       setConnected(true);
-      setMessage("Connected to local read-only API");
+      setMessage(mode === "guarded" ? "Connected to approved browser session" : "Connected to local read-only API");
     } catch {
       if (requestId !== connectRequest.current) return;
       setMessage("Local API unavailable or authorization rejected");
@@ -227,7 +228,7 @@ function App() {
   }
 
   return <main className="layout">
-    <aside><h1>Crypto Strategy Lab</h1><p>Browser migration · read-only</p>
+    <aside><h1>Crypto Strategy Lab</h1><p>{connected && releaseCapabilities?.execution === true && releaseCapabilities?.configuration_editing === true ? "Approved browser session" : "Read-only browser"}</p>
       <nav aria-label="Research sections">{sections.map(item =>
         <button key={item} type="button" aria-current={section === item ? "page" : undefined} onClick={() => setSection(item)}>{item}</button>
       )}</nav>
@@ -236,7 +237,7 @@ function App() {
       <div className="connection">
         <label htmlFor="local-token">Local session token</label>
         <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++connectRequest.current; ++configRequest.current; ++coverageRequest.current; ++runRequest.current; ++portfolioRequest.current; ++visualizerRequest.current; setVisualizerUrl(""); setVisualizerError(""); setToken(event.target.value); setConnected(false); setReleaseCapabilities(null); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigSection(""); setConfigError(""); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError(""); setPortfolioCandidates(null); setPortfolioError(""); setCoverage(null); setCoverageError(""); setCoverageQueryLabel(""); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
-        <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
+        <button type="button" onClick={() => void connect()} disabled={!token}>Connect</button>
         <p role="status">{message}</p>
       </div>
       {section === "Setup" && connected && <div className="connection">

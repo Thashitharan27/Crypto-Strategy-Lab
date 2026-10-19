@@ -97,6 +97,22 @@ class B4AuditJournal:
                 self._broken = True
                 raise
 
+    def available(self) -> bool:
+        """Read-only live admission signal; no capacity reservation is implied."""
+        with self._lock:
+            if self._fd is None or self._broken:
+                return False
+            try:
+                opened = os.fstat(self._fd)
+                named = os.stat(self.path, follow_symlinks=False)
+                if (not stat.S_ISREG(named.st_mode)
+                        or opened.st_dev != named.st_dev or opened.st_ino != named.st_ino
+                        or opened.st_size >= _MAX_BYTES or self._records >= _MAX_RECORDS):
+                    self._broken = True
+            except (OSError, RuntimeError):
+                self._broken = True
+            return not self._broken
+
     def close(self) -> None:
         with self._lock:
             fd, self._fd = self._fd, None
