@@ -660,10 +660,11 @@ def test_b4_concurrent_mutation_denied_while_native_result_unsettled():
 
     started, release = Event(), Event()
     integration = Mock()
-    def held_save(config_id, payload):
+    def held_cancel(request_id):
         started.set()
         assert release.wait(5)
-    integration.save_config.side_effect = held_save
+        return {"status": "CANCELLED"}
+    integration.cancel.side_effect = held_cancel
     events = []
     app = FastAPI()
     app.include_router(create_guarded_job_router(
@@ -672,8 +673,8 @@ def test_b4_concurrent_mutation_denied_while_native_result_unsettled():
     ))
     auth = {"Authorization": "Bearer " + TOKEN}
     with TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as pool:
-        first = pool.submit(client.put, "/api/v1/guarded/configs/first",
-                            json={}, headers=auth)
+        first = pool.submit(client.post, "/api/v1/guarded/jobs/first/cancel",
+                            headers=auth)
         try:
             assert started.wait(5)
             second = client.put("/api/v1/guarded/configs/second", json={}, headers=auth)
@@ -682,8 +683,9 @@ def test_b4_concurrent_mutation_denied_while_native_result_unsettled():
         finally:
             release.set()
         assert first.result(timeout=5).status_code == 200
-    assert integration.save_config.call_count == 1
+    integration.cancel.assert_called_once_with("first")
+    integration.save_config.assert_not_called()
     assert events == [
-        {"operation": "CONFIG_SAVE", "outcome": "ATTEMPT"},
-        {"operation": "CONFIG_SAVE", "outcome": "SUCCESS"},
+        {"operation": "CANCEL", "outcome": "ATTEMPT"},
+        {"operation": "CANCEL", "outcome": "SUCCESS"},
     ]
