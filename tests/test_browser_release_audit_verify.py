@@ -16,7 +16,7 @@ def test_verified_audit_bytes_do_not_establish_native_completion(tmp_path):
     result = inspect_b4_audit(tmp_path, "session1")
     assert result == {
         "status": "AUDIT_VERIFIED", "records": 2, "attempts": 1,
-        "last_event_status": "ATTEMPT_ONLY",
+        "last_event_status": "ATTEMPT_ONLY", "any_mutation_attempt": True,
     }
     assert journal.path.read_bytes() == original
 
@@ -27,7 +27,7 @@ def test_complete_outcome_is_only_recorded_outcome(tmp_path):
         journal({"operation": "CONFIG_SAVE", "outcome": "SUCCESS"})
     assert inspect_b4_audit(tmp_path, "session2") == {
         "status": "AUDIT_VERIFIED", "records": 2, "attempts": 1,
-        "last_event_status": "RECORDED_OUTCOME",
+        "last_event_status": "RECORDED_OUTCOME", "any_mutation_attempt": True,
     }
 
 
@@ -81,3 +81,35 @@ def test_symlinked_journal_and_root_rejected_without_following(tmp_path):
     alias.symlink_to(root, target_is_directory=True)
     assert inspect_b4_audit(alias, "safe")["status"] == "AUDIT_UNVERIFIED"
     assert hidden.read_bytes() == b"private"
+
+
+def test_later_unrelated_outcome_cannot_clear_earlier_attempt(tmp_path):
+    with B4AuditJournal(tmp_path, "uncertain") as journal:
+        journal({"operation": "JOB_SUBMIT", "outcome": "ATTEMPT"})
+        journal({"operation": "STATUS", "outcome": "SUCCESS"})
+    result = inspect_b4_audit(tmp_path, "uncertain")
+    assert result["status"] == "AUDIT_VERIFIED"
+    assert result["last_event_status"] == "RECORDED_OUTCOME"
+    assert result["any_mutation_attempt"] is True
+    assert result["attempts"] == 1
+
+
+def test_journal_without_mutation_attempt_has_no_attempt_indicator(tmp_path):
+    with B4AuditJournal(tmp_path, "readonly") as journal:
+        journal({"operation": "AUTH", "outcome": "DENIED"})
+        journal({"operation": "STATUS", "outcome": "NOT_FOUND"})
+    result = inspect_b4_audit(tmp_path, "readonly")
+    assert result["status"] == "AUDIT_VERIFIED"
+    assert result["any_mutation_attempt"] is False
+    assert result["attempts"] == 0
+
+
+def test_unverified_journal_attempt_state_is_unknown(tmp_path):
+    missing = inspect_b4_audit(tmp_path, "absent")
+    assert missing["status"] == "AUDIT_UNVERIFIED"
+    assert missing["any_mutation_attempt"] is None
+    path = tmp_path / "csl-b4-audit-damaged.jsonl"
+    path.write_bytes(b'{"operation":"JOB_SUBMIT","outcome":"ATTEMPT"}')
+    damaged = inspect_b4_audit(tmp_path, "damaged")
+    assert damaged["status"] == "AUDIT_UNVERIFIED"
+    assert damaged["any_mutation_attempt"] is None
