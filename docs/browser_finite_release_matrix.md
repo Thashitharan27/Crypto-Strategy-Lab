@@ -658,3 +658,17 @@ opt-in certification server may serve the certification build. Existing
 production `dist` and independently tested static fixtures remain
 supported. This is a UI/release isolation guard, **not** user approval
 or an implementation of guarded production activation.
+
+
+## B4 cross-platform clean-checkout release smoke (2026-10-19)
+
+The existing blocking `windows-smoke-safety` job now runs
+`python -m crypto_strategy_lab.browser_release_smoke` against the exact
+clean Windows Actions checkout, after installing the optional HTTP test
+dependencies and before executing the existing Windows safety tests.
+This complements the already-blocking Linux clean-checkout smoke and verifies
+that real Windows path handling, local-only authentication, read-only mode,
+missing guarded routes, and temporary-fixture preservation behave consistently.
+It does **not** certify the workstation's original files or physical Windows
+process interruptions again. Production guarded execution/configuration
+writes stay disabled until an independent release approval.
