@@ -493,12 +493,18 @@ class GitHubIntegrationWidget(QWidget):
         self._pending_tasks.add(task)
 
         def on_done(result):
+            # A global Qt thread may outlive its parent widget. Queued
+            # callbacks must not touch Python wrappers of deleted C++ UI.
+            if not isValid(self):
+                return
             try:
                 done(result)
             finally:
                 self._pending_tasks.discard(task)
 
         def on_failed(message):
+            if not isValid(self):
+                return
             try:
                 (error_handler or self._error)(message)
             finally:
