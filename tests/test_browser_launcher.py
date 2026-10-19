@@ -344,3 +344,38 @@ def test_b4_review_composition_cannot_serve_certification_ui(tmp_path):
     factory.assert_not_called()
     assert not list(config.iterdir())
     assert not list(runs.iterdir())
+
+
+def test_b4_authenticated_release_capabilities_remain_hard_off_in_production(tmp_path):
+    """The production API advertises no execution/editing despite env claims."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    static_root = _static_dist(tmp_path / "dist")
+    output = tmp_path / "output"
+    configs = tmp_path / "configs"
+    output.mkdir()
+    configs.mkdir()
+    with patch("crypto_strategy_lab.browser_launcher.build_browser_readonly_service", return_value=Mock()):
+        runtime = build_browser_readonly_runtime(
+            environ={
+                "CRYPTO_STRATEGY_LAB_BROWSER_RELEASE_APPROVED": "true",
+                "CRYPTO_STRATEGY_LAB_BROWSER_GUARDED_ENABLED": "true",
+            },
+            token="a" * 48, static_root=static_root,
+            output_root=output, config_root=configs,
+        )
+    with TestClient(runtime.app, base_url="http://127.0.0.1:8767") as client:
+        endpoint = "/api/v1/release/capabilities"
+        assert client.get(endpoint).status_code == 401
+        assert client.get(endpoint, headers={"Authorization": "Bearer wrong"}).status_code == 401
+        auth = {"Authorization": "Bearer " + "a" * 48}
+        assert client.get(endpoint, headers=auth).json() == {
+            "execution": False, "configuration_editing": False,
+        }
+        assert client.get(endpoint, headers={**auth, "Host": "remote.example"}).status_code == 403
+        for method, path in (
+            ("POST", "/api/v1/guarded/jobs"),
+            ("PUT", "/api/v1/guarded/configs/safe"),
+        ):
+            assert client.request(method, path, headers=auth).status_code == 404
