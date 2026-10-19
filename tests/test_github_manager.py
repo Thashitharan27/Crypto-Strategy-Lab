@@ -366,3 +366,29 @@ def test_windows_git_timeout_kills_child_holding_output_pipes(tmp_path, monkeypa
             assert kernel.WaitForSingleObject(handle, 0) == 0
         finally:
             kernel.CloseHandle(handle)
+
+
+def test_destroyed_github_widget_ignores_late_thread_result(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from shiboken6 import delete
+    from crypto_strategy_lab.gui import github_manager
+
+    class DeferredPool:
+        task = None
+        def start(self, task):
+            self.task = task
+
+    pool = DeferredPool()
+    monkeypatch.setattr(github_manager.GitManager, "status", lambda self, fetch=False: GitStatus("main", "origin", ()))
+    widget = GitHubIntegrationWidget()
+    qtbot.addWidget(widget)
+    # Wait for the automatically queued initial task to finish before
+    # injecting a controlled completion after widget destruction.
+    qtbot.waitUntil(lambda: widget.state.text() == "● Up to date", timeout=5000)
+    widget.pool = pool
+    widget.refresh_status(False)
+    assert pool.task is not None
+    delete(widget)
+    # Emitting queued completion must never dereference deleted Qt labels.
+    pool.task.signals.done.emit(GitStatus("main", "origin", ()))
+    QApplication.processEvents()
