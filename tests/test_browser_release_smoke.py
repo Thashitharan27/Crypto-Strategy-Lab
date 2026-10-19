@@ -54,3 +54,24 @@ def test_release_smoke_actual_http_security_and_original_preservation():
         "status": "PASS_READ_ONLY", "http_checks": 10,
         "guarded_routes_available": False, "originals_unchanged": True,
     }
+
+
+def test_clean_checkout_verifier_normalizes_git_root_path(tmp_path):
+    """Path spelling differences must not make a clean checkout appear dirty."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    head = "b" * 40
+
+    def fake_run(args, **kwargs):
+        if "--show-toplevel" in args:
+            # Trailing separators, and on Windows a forward-slash spelling,
+            # must compare as the same canonical checkout location.
+            output = repo.as_posix() + "/"
+        elif "rev-parse" in args:
+            output = head
+        else:
+            output = ""
+        return subprocess.CompletedProcess(args, 0, output + "\\n", "")
+
+    with patch("crypto_strategy_lab.browser_release_smoke.subprocess.run", side_effect=fake_run):
+        assert verify_clean_checkout(repo) == head
