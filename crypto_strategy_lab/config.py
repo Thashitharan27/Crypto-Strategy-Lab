@@ -78,6 +78,7 @@ class BacktestConfig:
     fvg_confirmation_enabled: bool = False
     fvg_confirmation_minutes: int = 1
     fvg_target_mode: str = "FIXED_R"
+    ema_reversal_min_gap_atr: float = 0.5
     fvg_reject_ema100_in_tp: bool = False
     fvg_target_timeframe_minutes: int = 240
     fvg_target_minimum_r: float = 1.5
@@ -172,6 +173,8 @@ class BacktestConfig:
     create_standard_charts: bool = True
 
     def __post_init__(self) -> None:
+        if not math.isfinite(self.ema_reversal_min_gap_atr) or self.ema_reversal_min_gap_atr < 0:
+            raise ValueError("EMA minimum gap must be finite and non-negative")
         object.__setattr__(self, "strategy_profiles", normalize_profiles(self.strategy_profiles))
         if self.strategy_profile_run_mode not in ("ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"):
             raise ValueError("invalid strategy_profile_run_mode")

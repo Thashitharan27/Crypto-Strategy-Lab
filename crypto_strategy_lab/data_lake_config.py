@@ -400,6 +400,7 @@ class ExecutionConfig:
     fvg_confirmation_enabled: bool = False
     fvg_confirmation_minutes: int = 1
     fvg_target_mode: str = "FIXED_R"
+    ema_reversal_min_gap_atr: float = 0.5
     fvg_reject_ema100_in_tp: bool = False
     fvg_target_timeframe_minutes: int = 240
     fvg_target_minimum_r: float = 1.5
@@ -481,6 +482,8 @@ class ResearchRunConfig:
     config_version: int = CONFIG_VERSION
 
     def validate(self, request=None) -> None:
+        if not math.isfinite(self.execution.ema_reversal_min_gap_atr) or self.execution.ema_reversal_min_gap_atr < 0:
+            raise ValueError("EMA minimum gap must be finite and non-negative")
         data, features, strategy, execution, reporting = (
             self.data, self.features, self.strategy, self.execution, self.reporting
         )

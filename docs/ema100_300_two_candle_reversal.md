@@ -46,3 +46,16 @@ The V2 visualizer starts with EMA 100 (low) in blue and EMA 300 (high) in red.
 Other strategies retain their close-price EMA calculations. Selecting another
 chart timeframe recalculates those displayed EMAs on that chart timeframe;
 persisted entry, TP and SL remain the strategy's recorded values.
+
+
+### Minimum EMA separation
+
+Risk & Execution exposes **Minimum EMA gap**, default **0.5 × ATR**.
+At the signal candle close, require `abs(EMA100(low) - EMA300(high)) >= minimum * ATR`.
+ATR is the strategy engine's configured strategy-timeframe ATR. Equality passes;
+smaller gaps are rejected with `EMA100_300_GAP_TOO_SMALL`. A positive threshold
+also rejects unavailable or nonpositive ATR. Set the threshold to **0** to disable.
+The check uses only the completed signal candle, alongside the existing entry
+position and EMA-order checks, and affects only this preset. This is an adjustable
+starting threshold, not a demonstrated performance improvement. Rerun backtests
+when changing it; completed runs retain their original trades.
