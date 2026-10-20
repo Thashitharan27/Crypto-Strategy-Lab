@@ -897,8 +897,8 @@ class RiskExecutionWorkspace(QWidget):
         if self._signal_strategy_mode() == "EMA_100_300_REVERSAL":
             self.summary_label.setText(
                 f"EMA 100 (low) / EMA 300 (high) — automatic {execution.ema_reversal_target_r:g}R plan. "
-                "Short: EMA 300 > EMA 100, green → red → red; enter above both EMAs. "
-                "Long: EMA 300 < EMA 100, red → green → green; enter below both EMAs. "
+                "Short: EMA 300 > EMA 100, green → red → red → red; enter above both EMAs. "
+                "Long: EMA 300 < EMA 100, red → green → green → green; enter below both EMAs. "
                 f"Minimum EMA gap: {execution.ema_reversal_min_gap_atr:g} × ATR (0 = off). "
                 f"Minimum entry distance from EMA 300: {execution.ema_reversal_min_entry_ema300_atr:g} × ATR (0 = off). "
                 "Entry: next candle open. TP: last completed candle's EMA 100 (low), fixed at entry. "

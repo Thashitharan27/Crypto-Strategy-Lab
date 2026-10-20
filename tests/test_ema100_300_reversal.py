@@ -9,16 +9,23 @@ from crypto_strategy_lab.strategy_rule_model import compile_profiles, infer_dire
 
 
 @pytest.mark.parametrize("opens,closes,fast,slow,side", [
-    ([10,12,11],[11,11,10],9,12,"SHORT"),
-    ([12,10,11],[11,11,12],13,10,"LONG"),
-    ([10,12,11],[11,12,10],9,12,None),
-    ([10,12,11],[11,11,10],12,9,None),
-    ([10,12,11],[11,11,10],9,9,None),
+    ([10,12,11,10],[11,11,10,9],9,12,"SHORT"),
+    ([12,10,11,12],[11,11,12,13],13,10,"LONG"),
+    ([10,12,11,10],[11,11,10,10],9,12,None),
+    ([10,12,11,10],[11,11,10,11],9,12,None),
+    ([10,12,11,10],[11,11,10,9],12,9,None),
+    ([10,12,11,10],[11,11,10,9],9,9,None),
+    ([10,12,11],[11,11,10],9,12,None),
 ])
-def test_pattern_requires_two_consecutive_candles_and_matching_ema_order(opens, closes, fast, slow, side):
-    result = reversal_directions(opens, closes, [fast]*3, [slow]*3)
-    assert list(result[:2]) == [None,None]
+def test_pattern_requires_three_confirmation_candles_and_matching_ema_order(opens,closes,fast,slow,side):
+    result=reversal_directions(opens,closes,[fast]*len(opens),[slow]*len(opens))
+    assert list(result[:3]) == [None]*min(3,len(opens))
     assert result[-1] == side
+
+
+def test_fourth_same_colour_does_not_repeat_setup():
+    result=reversal_directions([10,12,11,10,9],[11,11,10,9,8],[7]*5,[12]*5)
+    assert list(result) == [None,None,None,"SHORT",None]
 
 
 def test_strategy_marker_round_trip():
@@ -69,7 +76,7 @@ def test_native_engine_uses_last_closed_low_ema_and_custom_r(target_r):
     from crypto_strategy_lab.config import BacktestConfig
     from crypto_strategy_lab.strategy_profiles import StrategyProfile
     from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
-    rng = np.random.default_rng(31)
+    rng = np.random.default_rng(2)
     n = 2400
     close = 100 + 10*np.sin(np.arange(n)/90) + rng.normal(0,.5,n)
     opens = np.r_[close[0],close[:-1]]
@@ -92,6 +99,10 @@ def test_native_engine_uses_last_closed_low_ema_and_custom_r(target_r):
         signal = pd.Timestamp(row.signal_candle_time)
         entry = pd.Timestamp(row.entry_time)
         assert entry == signal+pd.Timedelta(minutes=15)
+        signal_i=times.get_loc(signal)
+        colours=close[signal_i-3:signal_i+1]-opens[signal_i-3:signal_i+1]
+        assert (colours[0]>0 and (colours[1:]<0).all() if row.side=="SHORT"
+                else colours[0]<0 and (colours[1:]>0).all())
         prefix=row.side.lower()
         tp=getattr(row,prefix+'_tp')
         stop=getattr(row,prefix+'_original_sl')
