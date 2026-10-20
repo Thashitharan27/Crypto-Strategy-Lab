@@ -78,6 +78,7 @@ class BacktestConfig:
     fvg_confirmation_enabled: bool = False
     fvg_confirmation_minutes: int = 1
     fvg_target_mode: str = "FIXED_R"
+    fvg_reject_ema100_in_tp: bool = False
     fvg_target_timeframe_minutes: int = 240
     fvg_target_minimum_r: float = 1.5
     fvg_target_no_level_policy: str = "REJECT_TRADE"
