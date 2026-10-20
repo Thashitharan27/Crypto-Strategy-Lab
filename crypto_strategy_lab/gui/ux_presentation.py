@@ -161,6 +161,9 @@ FIELDS = {
 }
 
 ENUM_LABELS = {
+    "fvg_target_mode": {"FIXED_R": "Fixed R — Before Swing Extreme", "HTF_OPPOSING_FVG": "Opposing Higher-Timeframe FVG"},
+    "fvg_target_timeframe_minutes": {60: "1 hour", 240: "4 hours", 1440: "1 day"},
+    "fvg_target_no_level_policy": {"REJECT_TRADE": "Skip Trade", "USE_FIXED_TP": "Use Fixed R With Swing-Room Check"},
     "ema_320_exit_mode": {
         "BOTH": "Fixed TP or Opposite EMA 320 Cross (first hit)",
         "EMA_ONLY": "Opposite EMA 320 Cross Only (ATR Stop Still Active)",

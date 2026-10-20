@@ -668,6 +668,11 @@ button:disabled{opacity:.45;cursor:default}
     const confirmation=bars.find(bar=>bar.time<=fvg.signalTime && bar.time+strategySeconds>fvg.signalTime) || bars.find(bar=>bar.time===fvg.signalTime);
     const signalY=yAt(confirmation?.close ?? (fvg.bottom+fvg.top)/2);
     note('First revisit / confirmation',end+8,signalY,'#67e8f9');
+    if (fvg.targetZone) {
+      const zone=fvg.targetZone;
+      band(zone.bottom,zone.top,end,right,'#a78bfa25');
+      note(String(zone.timeframe_minutes)+'m opposing FVG target',end+8,yAt(zone.top),'#c4b5fd');
+    }
   }
 
   function renderDiagnostics() {
@@ -717,6 +722,11 @@ button:disabled{opacity:.45;cursor:default}
       const facts=document.createElement('div'); facts.className='setup-facts';
       facts.textContent='Gap: '+formatPrice(fvg.bottom)+' – '+formatPrice(fvg.top)+'\\nConfirmation: '+fmtTime(fvg.signalTime)+'\\nEntry: '+String(trade['Entry Time'] || trade.entryTime || 'n/a')+'\\nFormation candles: 1 / 2 displacement / 3\\nOrange: BOS · Purple: S/R\\nRed half: premium · Green half: discount';
       facts.style.whiteSpace='pre-line'; panel.appendChild(facts);
+      if (fvg.targetZone) {
+        const target=document.createElement('p');
+        target.textContent='TP: nearest opposing '+fvg.targetZone.timeframe_minutes+'m FVG '+formatPrice(fvg.targetZone.bottom)+' – '+formatPrice(fvg.targetZone.top)+'; confirmed '+fmtTime(fvg.targetZone.confirmedTime)+'. Target fixed at entry with a buffer before the near edge.';
+        panel.appendChild(target);
+      }
       if(fvg.separation) {
         const spacing=document.createElement('div'); spacing.className='setup-check';
         spacing.textContent='✓ Separation: '+fvg.separation.clearBars+' clear candles (minimum '+fvg.separation.requiredClearBars+') · '+Number(fvg.separation.moveAwayAtr).toFixed(2)+' ATR away (minimum '+fvg.separation.requiredMoveAwayAtr+')';

@@ -989,6 +989,11 @@ class CompletedRunVisualizer:
                     {**candle, "time": _unix_seconds(_utc(candle["time"]))}
                     for candle in value["formationCandles"]
                 ]
+            raw_zone = self._trade_row(index).get("fvg_target_htf_zone")
+            if isinstance(raw_zone, (str, dict)):
+                zone = json.loads(raw_zone) if isinstance(raw_zone, str) else dict(raw_zone)
+                if isinstance(zone, dict) and all(_finite(zone.get(k)) is not None for k in ("bottom", "top", "timeframe_minutes")):
+                    value["targetZone"] = {**zone, "confirmedTime": _unix_seconds(_utc(zone["confirmed_at"]))}
             return {**value, "status": "AVAILABLE"}
         except (ValueError, TypeError, KeyError):
             return {"status": "NOT_AVAILABLE"}

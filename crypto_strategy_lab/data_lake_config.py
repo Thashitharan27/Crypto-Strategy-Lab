@@ -399,6 +399,10 @@ class ExecutionConfig:
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
     fvg_confirmation_minutes: int = 1
+    fvg_target_mode: str = "FIXED_R"
+    fvg_target_timeframe_minutes: int = 240
+    fvg_target_minimum_r: float = 1.5
+    fvg_target_no_level_policy: str = "REJECT_TRADE"
     fvg_context_enabled: bool = False
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
@@ -657,6 +661,10 @@ class ResearchRunConfig:
                 raise ValueError("FVG context timeframe must be larger than strategy timeframe")
             if execution.fvg_context_timeframe_minutes % data.strategy_timeframe_minutes:
                 raise ValueError("FVG context timeframe must be an exact multiple of strategy timeframe")
+        from crypto_strategy_lab.fvg_htf_targets import validate_target_settings
+        validate_target_settings(execution.fvg_target_mode, execution.fvg_target_timeframe_minutes,
+                                 execution.fvg_target_minimum_r, execution.fvg_target_no_level_policy,
+                                 data.strategy_timeframe_minutes)
         if execution.fvg_confirmation_enabled:
             if not data.use_intrabar_data:
                 raise ValueError("FVG confirmation requires intrabar data")
@@ -781,8 +789,8 @@ class ResearchRunConfig:
             raise ValueError("S/R minimum TP cannot exceed maximum TP")
         if execution.sr_take_profit_buffer_r < 0:
             raise ValueError("S/R take-profit buffer cannot be negative")
-        if execution.fvg_target_buffer_atr < 0:
-            raise ValueError("FVG target buffer cannot be negative")
+        if not math.isfinite(execution.fvg_target_buffer_atr) or execution.fvg_target_buffer_atr < 0:
+            raise ValueError("FVG target buffer must be finite and nonnegative")
         structural_stop = execution.risk_mode == "SR_STRUCTURE"
         sr_target = execution.sr_take_profit_mode in {"SR_CAPPED_R", "SR_LEVEL"}
         separate_sizing = any(

@@ -520,6 +520,7 @@ class FairValueGapMixin:
             fvg_confirmation_minutes=int(candle["minutes"]),
         )
         self._pending_fvg_confirmation_price = float(candle["close"])
+        self._pending_fvg_confirmation_time = candle["confirmed_at"]
         try:
             passed, reason = self._entry_filter_result(indicator_i, i)
             if not passed:
@@ -533,6 +534,7 @@ class FairValueGapMixin:
                     self._scan_pair_exit(pair, i)
         finally:
             self._pending_fvg_confirmation_price = None
+            self._pending_fvg_confirmation_time = None
 
     def _configure_signal_features(self):
         super()._configure_signal_features()
@@ -564,6 +566,13 @@ class FairValueGapMixin:
                     times=self.times,
                     min_clear_bars=getattr(self.config, "fvg_min_clear_bars", 3),
                     min_move_away_atr=getattr(self.config, "fvg_min_move_away_atr", 0.5),
+                )
+            if getattr(self.config, "fvg_target_mode", "FIXED_R") == "HTF_OPPOSING_FVG":
+                from crypto_strategy_lab.fvg_htf_targets import opposing_fvg_snapshots
+                self.fvg_target_htf_snapshots = opposing_fvg_snapshots(
+                    self.times, self.high, self.low, self.close,
+                    int(self.config.strategy_timeframe_minutes),
+                    int(self.config.fvg_target_timeframe_minutes),
                 )
             if bool(getattr(self.config, "fvg_context_enabled", False)):
                 self.fvg_htf_context = higher_timeframe_fvg_context_alignment(
@@ -661,6 +670,24 @@ class FairValueGapMixin:
         atr = float(self.atr_values[i])
         entry = self._fvg_expected_entry_price(i, execution_i, direction)
         risk = float(stop_plan["distance"])
+        if getattr(self.config, "fvg_target_mode", "FIXED_R") == "HTF_OPPOSING_FVG":
+            from crypto_strategy_lab.fvg_htf_targets import nearest_opposing_zone
+            zones = self._fvg_target_zones_at_entry(i)
+            zone, reason = nearest_opposing_zone(zones, direction, entry)
+            if zone is not None:
+                edge = zone["bottom"] if direction == "LONG" else zone["top"]
+                buffer = float(self.config.fvg_target_buffer_atr) * atr
+                limit = edge - buffer if direction == "LONG" else edge + buffer
+                room = limit - entry if direction == "LONG" else entry - limit
+                target_r = room / risk if risk > 0 else np.nan
+                if not np.isfinite(target_r) or target_r < float(self.config.fvg_target_minimum_r):
+                    return {"passed": False, "reason": "FVG_HTF_TARGET_INSUFFICIENT_ROOM"}
+                return {"passed": True, "reason": reason, "target_r": target_r,
+                        "available_r": target_r, "level_price": edge, "limit_price": limit,
+                        "mode": "HTF_OPPOSING_FVG", "zone": zone}
+            # An enclosing opposing zone is an obstacle, never a missing-level fallback.
+            if reason != "FVG_HTF_TARGET_UNAVAILABLE" or self.config.fvg_target_no_level_policy == "REJECT_TRADE":
+                return {"passed": False, "reason": reason}
         target_buffer_atr = float(
             getattr(self.config, "fvg_target_buffer_atr", FVG_TARGET_BUFFER_ATR)
         )
@@ -673,6 +700,9 @@ class FairValueGapMixin:
         available_r = room / risk if risk > 0 else np.nan
         profile = self._profile_context(i)[3]
         target_r = float(profile.reward_risk_ratio)
+        if (getattr(self.config, "fvg_target_mode", "FIXED_R") == "HTF_OPPOSING_FVG"
+                and target_r < float(self.config.fvg_target_minimum_r)):
+            return {"passed": False, "reason": "FVG_HTF_TARGET_INSUFFICIENT_ROOM"}
         if (
             not np.isfinite(available_r) or not np.isfinite(target_r) or target_r <= 0
             or available_r + 1e-12 < target_r
@@ -686,7 +716,27 @@ class FairValueGapMixin:
             "passed": True, "reason": "FVG_CONFIGURED_R_TARGET",
             "target_r": target_r, "available_r": available_r,
             "level_price": level, "limit_price": target_limit,
+            "mode": "FIXED_R",
         }
+
+    def _fvg_target_zones_at_entry(self, i):
+        snapshots = getattr(self, "fvg_target_htf_snapshots", ())
+        zones = snapshots[i] if i < len(snapshots) else ()
+        end = getattr(self, "_pending_fvg_confirmation_time", None)
+        if end is None or not zones:
+            return zones
+        start = pd.Timestamp(self.times[i])
+        start = (start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC"))
+        start += pd.Timedelta(minutes=int(self.config.strategy_timeframe_minutes))
+        data = self.intrabar_data
+        stamps = pd.DatetimeIndex(pd.to_datetime(data["timestamp"] if isinstance(data, pd.DataFrame) else data.timestamp, utc=True))
+        left, right = stamps.searchsorted(start), stamps.searchsorted(pd.Timestamp(end))
+        highs = np.asarray(data["high"] if isinstance(data, pd.DataFrame) else data.high)[left:right]
+        lows = np.asarray(data["low"] if isinstance(data, pd.DataFrame) else data.low)[left:right]
+        if len(highs) == 0:
+            return zones
+        # A zone touched during confirmation is already spent when we enter.
+        return tuple(z for z in zones if not np.any((lows <= z["top"]) & (highs >= z["bottom"])))
 
     def _entry_filter_result(self, i, execution_i=None):
         self._fvg_rule_execution_i = execution_i
@@ -726,6 +776,8 @@ class FairValueGapMixin:
                 pos.fvg_target_available_r = float(target["available_r"])
                 pos.fvg_target_level_price = float(target["level_price"])
                 pos.fvg_target_limit_price = float(target["limit_price"])
+                pos.fvg_target_mode = target.get("mode", "FIXED_R")
+                pos.fvg_target_zone = target.get("zone")
         return result
 
     def _build_result_row(self, pair, row_kind, positions):
@@ -740,6 +792,9 @@ class FairValueGapMixin:
         row["fvg_target_available_r"] = getattr(pos, "fvg_target_available_r", np.nan)
         row["fvg_target_level_price"] = getattr(pos, "fvg_target_level_price", np.nan)
         row["fvg_target_limit_price"] = getattr(pos, "fvg_target_limit_price", np.nan)
+        row["fvg_target_mode"] = getattr(pos, "fvg_target_mode", "FIXED_R")
+        zone = getattr(pos, "fvg_target_zone", None)
+        row["fvg_target_htf_zone"] = json.dumps(zone, separators=(",", ":")) if zone else None
         row["fvg_confirmation_open"] = getattr(pair, "fvg_confirmation_open", np.nan)
         row["fvg_confirmation_close"] = getattr(pair, "fvg_confirmation_close", np.nan)
         row["fvg_confirmation_minutes"] = getattr(pair, "fvg_confirmation_minutes", np.nan)

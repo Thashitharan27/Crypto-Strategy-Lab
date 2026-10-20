@@ -93,6 +93,41 @@ def test_first_minute_shortcut_sets_execution_data_and_round_trips():
         app.processEvents()
 
 
+def test_htf_fvg_target_controls_and_saved_settings():
+    app, window = _window()
+    try:
+        selector = window.rule_builder.direction_mode
+        selector.setCurrentIndex(selector.findData("FVG_SIX_FACTOR"))
+        window.strategy_tf.setCurrentText("15m")
+        workspace = window.risk_execution_workspace
+        widgets = window.execution_form.widgets
+        mode = widgets["fvg_target_mode"]
+        mode.setCurrentIndex(mode.findData("HTF_OPPOSING_FVG"))
+        widgets["fvg_target_timeframe_minutes"].setCurrentIndex(widgets["fvg_target_timeframe_minutes"].findData(60))
+        widgets["fvg_target_minimum_r"].setValue(2.)
+        workspace.refresh_visibility()
+        for name in ("fvg_target_timeframe_minutes", "fvg_target_minimum_r", "fvg_target_no_level_policy"):
+            assert not widgets[name].isHidden()
+        assert window.base_execution_form.widgets["reward_risk_ratio"].isHidden()
+        config = window.build_config()
+        config.validate()
+        assert config.execution.fvg_target_timeframe_minutes == 60
+        assert config.execution.fvg_target_minimum_r == 2.
+        assert "nearest opposing 1h FVG" in workspace.summary_label.text()
+        from crypto_strategy_lab.data_lake_config import normalize_data_lake_config
+        window.apply_config(normalize_data_lake_config(config.to_dict()))
+        assert mode.currentData() == "HTF_OPPOSING_FVG"
+        policy = widgets["fvg_target_no_level_policy"]
+        policy.setCurrentIndex(policy.findData("USE_FIXED_TP"))
+        assert not window.base_execution_form.widgets["reward_risk_ratio"].isHidden()
+        mode.setCurrentIndex(mode.findData("FIXED_R"))
+        assert widgets["fvg_target_timeframe_minutes"].isHidden()
+        assert not window.base_execution_form.widgets["reward_risk_ratio"].isHidden()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_risk_page_is_reorganized_around_one_execution_plan():
     app, window = _window()
     try:

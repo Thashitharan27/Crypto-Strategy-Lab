@@ -109,6 +109,11 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
             pd.Timedelta(days=int(features.bull_regime_lookback_days)),
         )
 
+    execution = run_config.execution
+    if getattr(execution, "fvg_target_mode", "FIXED_R") == "HTF_OPPOSING_FVG":
+        # Three complete HTF candles plus one boundary-alignment bucket.
+        duration = max(duration, pd.Timedelta(minutes=4 * execution.fvg_target_timeframe_minutes))
+
     # Two strategy bars cover previous-value / candle-close boundary consumers
     # without rounding the whole window up to additional calendar days.
     return duration + (strategy_interval * 2)
