@@ -224,7 +224,7 @@ def test_v2_includes_price_ema20_with_existing_trend_emas():
     assert "selectedEmas.has(Number(overlay.period))" in html
     assert "20:'#4ade80'" in html
     source = inspect.getsource(CompletedRunVisualizer.build_v2_diagnostic_payload)
-    assert "for period in (9, 20, 50, 100, 200, 320, 1600):" in source
+    assert "for period in (9, 20, 50, 100, 200, 300, 320, 1600):" in source
 
 
 def test_standard_visualizer_ema320_layer_and_payload_support():
@@ -232,7 +232,7 @@ def test_standard_visualizer_ema320_layer_and_payload_support():
     from crypto_strategy_lab import strategy_visualizer, strategy_visualizer_browser
     source = inspect.getsource(strategy_visualizer)
     browser_source = inspect.getsource(strategy_visualizer_browser)
-    assert 'periods = (20, 50, 100, 200, 320)' in source
+    assert 'periods = (20, 50, 100, 200, 300, 320)' in source
     assert 'periods += (1600,)' in source
     assert 'data-overlay="ema320" checked' in browser_source
     assert 'strategy_warmup_period(self.seed.config)' in source

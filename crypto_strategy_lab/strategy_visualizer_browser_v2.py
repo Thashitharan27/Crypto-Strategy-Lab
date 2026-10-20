@@ -41,6 +41,7 @@ def build_browser_visualizer_v2_html(
             "symbol": request.symbol,
             "timeframe": request.strategy_timeframe,
             "tradeCount": model.trade_count,
+            "emaReversal": getattr(model, "_ema_source", lambda period: "close")(300) == "high",
         },
     }
     encoded = json.dumps(bootstrap, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
@@ -202,6 +203,7 @@ button:disabled{opacity:.45;cursor:default}
         <label><input type="checkbox" class="ema-period" value="50"> EMA 50</label>
         <label><input type="checkbox" class="ema-period" value="100"> EMA 100</label>
         <label><input type="checkbox" class="ema-period" value="200"> EMA 200</label>
+        <label><input type="checkbox" class="ema-period" value="300"> EMA 300</label>
         <label><input type="checkbox" class="ema-period" value="320" checked> EMA 320</label>
         <label><input type="checkbox" class="ema-period" value="1600" checked> EMA 1600</label>
       </div>
@@ -235,8 +237,11 @@ button:disabled{opacity:.45;cursor:default}
   $('chart-symbol').textContent = boot.run.symbol;
   const indicatorDialog = $('indicator-dialog');
   const indicatorInputs = [...document.querySelectorAll('.ema-period, .rsi-line, #show-rsi')];
+  if (boot.run.emaReversal) {
+    for (const input of indicatorInputs) input.checked=input.classList.contains('ema-period') && ['100','300'].includes(input.value);
+  }
   function indicatorName(input) {
-    if (input.classList.contains('ema-period')) return 'EMA ' + input.value;
+    if (input.classList.contains('ema-period')) return 'EMA ' + input.value + (boot.run.emaReversal && input.value==='100' ? ' (low)' : boot.run.emaReversal && input.value==='300' ? ' (high)' : '');
     return (input.value.startsWith('ema_rsi:') ? 'EMA RSI ' : 'Wilder RSI ') + input.value.split(':')[1];
   }
   // Family names stay on the cards; the selectors show only their periods.
@@ -976,7 +981,7 @@ button:disabled{opacity:.45;cursor:default}
         if (overlay.kind !== 'ema' || !selectedEmas.has(Number(overlay.period))) continue;
         const emaColors = {9:'#60a5fa',20:'#4ade80',50:'#fb923c',100:'#a78bfa',200:'#e879f9',320:'#facc15',1600:'#fb7185'};
         const series=chart.addSeries(window.LightweightCharts.LineSeries,{
-          color:emaColors[Number(overlay.period)] || '#e2e8f0',
+          color:boot.run.emaReversal && Number(overlay.period)===100 ? '#3b82f6' : Number(overlay.period)===300 ? '#ef4444' : emaColors[Number(overlay.period)] || '#e2e8f0',
           lineWidth:2,priceLineVisible:false,lastValueVisible:true,
           crosshairMarkerVisible:false,
           // Share candle coordinates, but do not let trend EMA lines enlarge

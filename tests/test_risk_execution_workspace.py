@@ -131,6 +131,30 @@ def test_htf_fvg_target_controls_and_saved_settings():
         app.processEvents()
 
 
+def test_ema_reversal_preset_shows_automatic_geometry_and_round_trips():
+    from crypto_strategy_lab.strategy_rule_model import infer_direction_mode
+    app, window = _window()
+    try:
+        selector = window.rule_builder.direction_mode
+        index = selector.findData("EMA_100_300_REVERSAL")
+        assert index >= 0
+        selector.setCurrentIndex(index)
+        selector.activated.emit(index)
+        app.processEvents()
+        config = window.build_config()
+        assert infer_direction_mode(config.strategy.profiles) == "EMA_100_300_REVERSAL"
+        workspace = window.risk_execution_workspace
+        assert "automatic fixed 1R" in workspace.summary_label.text()
+        assert workspace.target_card.isHidden()
+        assert workspace.management_card.isHidden()
+        assert not workspace.account_card.isHidden()
+        assert config.execution.entry_timing_mode == "NEXT_CANDLE_OPEN"
+        window.apply_config(config)
+        assert selector.currentData() == "EMA_100_300_REVERSAL"
+    finally:
+        window.close()
+
+
 def test_risk_page_is_reorganized_around_one_execution_plan():
     app, window = _window()
     try:
