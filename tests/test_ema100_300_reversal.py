@@ -64,7 +64,8 @@ def test_entry_must_be_outside_both_emas_with_profitable_target(side,entry,targe
         assert plan['reason'] == "EMA100_300_ENTRY_POSITION_REJECTED"
 
 
-def test_native_engine_uses_last_closed_low_ema_and_fixed_one_r():
+@pytest.mark.parametrize("target_r", [1.,2.,3.,2.5])
+def test_native_engine_uses_last_closed_low_ema_and_custom_r(target_r):
     from crypto_strategy_lab.config import BacktestConfig
     from crypto_strategy_lab.strategy_profiles import StrategyProfile
     from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
@@ -79,7 +80,7 @@ def test_native_engine_uses_last_closed_low_ema_and_fixed_one_r():
     profiles,_ = compile_profiles(direction_mode=MODE, market_permissions=MARKET_PERMISSIONS)
     native = {k:replace(StrategyProfile(**asdict(p)), reward_risk_ratio=3., stop_loss_multiple=2.,
                       trailing_enabled=True, break_even_enabled=True) for k,p in profiles.items()}
-    config = BacktestConfig(strategy_profiles=native, use_intrabar_data=False,
+    config = BacktestConfig(strategy_profiles=native, ema_reversal_target_r=target_r, use_intrabar_data=False,
                             enable_support_resistance_analysis=False, market_regime_method="ASSET_RETURN",
                             entry_timing_mode="SIGNAL_CLOSE", enable_trade_telemetry=False)
     engine = RuleAwareDataLakeProductionBacktestEngine(frame,config)
@@ -95,11 +96,12 @@ def test_native_engine_uses_last_closed_low_ema_and_fixed_one_r():
         tp=getattr(row,prefix+'_tp')
         stop=getattr(row,prefix+'_original_sl')
         assert tp == pytest.approx(row.ema100_low)
-        assert abs(tp-row.entry_price) == pytest.approx(abs(row.entry_price-stop))
+        assert abs(tp-row.entry_price) == pytest.approx(target_r*abs(row.entry_price-stop))
         assert (row.ema300_high>row.ema100_low) == (row.side=='SHORT')
         assert (tp<row.entry_price) == (row.side=='SHORT')
         assert (row.entry_price>max(row.ema100_low,row.ema300_high) if row.side=='SHORT'
                 else row.entry_price<min(row.ema100_low,row.ema300_high))
+        assert row.ema_reversal_target_r == target_r
         assert row.ema_reversal_entry_position_rule == "SHORT_ABOVE_BOTH_LONG_BELOW_BOTH_V1"
     # Prefix-only features must agree with full-history decisions.
     prefix = RuleAwareDataLakeProductionBacktestEngine(frame.iloc[:1200],config)
@@ -139,10 +141,11 @@ def test_invalid_minimum_gap_is_rejected(value):
 def test_gap_threshold_equality_passes_and_native_adapter_keeps_setting():
     from crypto_strategy_lab.data_lake_config import ResearchRunConfig,ExecutionConfig
     from crypto_strategy_lab.research_adapters import native_simulator_config
-    config=ResearchRunConfig(execution=ExecutionConfig(ema_reversal_min_gap_atr=1.25,ema_reversal_min_entry_ema300_atr=.75))
+    config=ResearchRunConfig(execution=ExecutionConfig(ema_reversal_min_gap_atr=1.25,ema_reversal_min_entry_ema300_atr=.75,ema_reversal_target_r=2.5))
     native=native_simulator_config(config.data,config.features,config.strategy,config.execution)
     assert native.ema_reversal_min_gap_atr == 1.25
     assert native.ema_reversal_min_entry_ema300_atr == .75
+    assert native.ema_reversal_target_r == 2.5
     test_minimum_ema_gap_rejects_clusters_and_can_be_disabled("SHORT",98.,98.5,100.,0.5,1.,True)
 
 
@@ -173,3 +176,33 @@ def test_invalid_entry_ema300_distance_is_rejected(value):
         BacktestConfig(ema_reversal_min_entry_ema300_atr=value)
     with pytest.raises(ValueError,match="EMA 300 entry distance"):
         ResearchRunConfig(execution=ExecutionConfig(ema_reversal_min_entry_ema300_atr=value)).validate()
+
+
+@pytest.mark.parametrize("target_r", [1.,2.,3.,2.5])
+@pytest.mark.parametrize("side,target,slow", [("LONG",110.,105.),("SHORT",90.,95.)])
+def test_ema_target_stays_fixed_while_stop_distance_is_divided(target_r,side,target,slow):
+    from types import SimpleNamespace
+    from crypto_strategy_lab.ema100_300_reversal import Ema100300ReversalMixin
+    p=Ema100300ReversalMixin()
+    p.signal_strategy_mode=MODE
+    p.config=SimpleNamespace(strategy_timeframe_minutes=15,ema_reversal_target_r=target_r)
+    p.ema100_low_values=np.array([target])
+    p.ema300_high_values=np.array([slow])
+    p.atr_values=np.array([1.])
+    p._effective_trade_direction=lambda i:side
+    p._expected_entry_price=lambda i,j,d:100.
+    plan=p._sr_stop_plan(0,1)
+    assert plan["passed"]
+    assert plan["distance"] == pytest.approx(10./target_r)
+    assert plan["level_price"] == target
+    assert plan["stop_price"] == pytest.approx(100.+(10./target_r if side=="SHORT" else -10./target_r))
+
+
+@pytest.mark.parametrize("value", [0.,-1.,float("nan"),float("inf")])
+def test_invalid_ema_reward_risk_is_rejected(value):
+    from crypto_strategy_lab.config import BacktestConfig
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig,ExecutionConfig
+    with pytest.raises(ValueError,match="EMA reward/risk"):
+        BacktestConfig(ema_reversal_target_r=value)
+    with pytest.raises(ValueError,match="EMA reward/risk"):
+        ResearchRunConfig(execution=ExecutionConfig(ema_reversal_target_r=value)).validate()

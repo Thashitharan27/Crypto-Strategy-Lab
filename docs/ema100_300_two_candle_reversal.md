@@ -1,6 +1,6 @@
-# EMA 100/300 — Two-Candle Reversal (1R)
+# EMA 100/300 — Two-Candle Reversal (Custom R)
 
-Choose **EMA 100/300 — Two-Candle Reversal (1R)** in Strategy Builder.
+Choose **EMA 100/300 — Two-Candle Reversal (Custom R)** in Strategy Builder.
 Choose the data period, strategy timeframe, intrabar detail and account risk,
 then run a new backtest. The automatic execution plan is shown in Risk &
 Execution. Save the configuration to reuse the preset.
@@ -26,10 +26,11 @@ The EMA order is checked on the last completed confirmation candle; the signal
 does not require an EMA crossover. Missing strategy candles break the pattern.
 
 TP is the EMA 100 (low) value from that last completed candle, frozen at entry.
-SL is reflected around the actual entry: `SL = 2 × entry − TP`.
+SL distance is `abs(TP − entry) / reward_risk`, placed opposite the target.
+The reward/risk setting defaults to 1R.
 Entry includes configured slippage. Reject the setup when the target is not
 strictly below a short entry or strictly above a long entry, including after
-an opening gap. This is 1R before fees and exit slippage, not guaranteed 1R net.
+an opening gap. The selected ratio is before fees and exit slippage.
 
 The preset owns its fixed stop, target and stop-based position sizing. It ignores
 profile stop/R multipliers, separate sizing-stop overrides, partial exits,
@@ -72,3 +73,18 @@ Set **0** to disable this distance check independently of the EMA-to-EMA gap.
 Both filters must pass, along with EMA ordering and entry outside both lines.
 The default is a starting point for testing; no performance gain is established.
 Restart the tool and run a new backtest to apply the setting to new trades.
+
+
+### Custom reward/risk (EMA target unchanged)
+
+Risk & Execution → EMA 100/300 trade settings → **Reward / risk** accepts positive
+custom values (default **1R**). TP remains the last completed signal candle's EMA
+100 (low), fixed at entry. Actual SL distance is `abs(TP - entry) / reward_risk`.
+At 2R the stop is half the entry-to-target distance; at 3R it is one-third.
+The stop is placed opposite the target for both directions. Position sizing uses
+this actual stop distance and account risk; higher ratios therefore increase
+position size subject to existing leverage limits. Fees/slippage can make net
+outcomes differ from the configured gross ratio. Other geometry/management
+controls remain overridden by this preset. Saved trades record the selected
+`ema_reversal_target_r`. Existing runs remain unchanged and new backtests use
+the selected ratio.

@@ -135,7 +135,7 @@ class RiskExecutionWorkspace(QWidget):
         plan_layout.addWidget(self.summary_label)
         layout.addWidget(self.plan_box)
 
-        self.ema_gap_card = FormCard("EMA 100/300 separation", note="Skip clustered EMAs. ATR measures recent candle volatility; 0 disables this filter.")
+        self.ema_gap_card = FormCard("EMA 100/300 trade settings", note="Skip clustered EMAs. ATR measures recent candle volatility; 0 disables this filter.")
         self.account["ema_reversal_min_gap_atr"].setRange(0., 100.)
         self.account["ema_reversal_min_gap_atr"].setSuffix(" × ATR")
         self.ema_gap_card.add_field("ema_reversal_min_gap_atr", "Minimum EMA gap", self.account["ema_reversal_min_gap_atr"])
@@ -143,6 +143,10 @@ class RiskExecutionWorkspace(QWidget):
         self.account["ema_reversal_min_entry_ema300_atr"].setSuffix(" × ATR")
         self.account["ema_reversal_min_entry_ema300_atr"].setToolTip("Minimum distance from the actual next-open entry price, including slippage, to the last completed candle's EMA 300 (high). Set 0 to disable.")
         self.ema_gap_card.add_field("ema_reversal_min_entry_ema300_atr", "Minimum entry distance from EMA 300", self.account["ema_reversal_min_entry_ema300_atr"])
+        self.account["ema_reversal_target_r"].setRange(0.01, 100.)
+        self.account["ema_reversal_target_r"].setSuffix(" R")
+        self.account["ema_reversal_target_r"].setToolTip("TP stays at EMA 100. SL distance = entry-to-TP distance divided by this ratio. 2R halves SL distance; 3R uses one-third.")
+        self.ema_gap_card.add_field("ema_reversal_target_r", "Reward / risk (TP stays at EMA 100)", self.account["ema_reversal_target_r"])
         layout.addWidget(self.ema_gap_card)
 
         self.entry_card = FormCard(
@@ -892,13 +896,13 @@ class RiskExecutionWorkspace(QWidget):
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "EMA_100_300_REVERSAL":
             self.summary_label.setText(
-                "EMA 100 (low) / EMA 300 (high) — automatic fixed 1R plan. "
+                f"EMA 100 (low) / EMA 300 (high) — automatic {execution.ema_reversal_target_r:g}R plan. "
                 "Short: EMA 300 > EMA 100, green → red → red; enter above both EMAs. "
                 "Long: EMA 300 < EMA 100, red → green → green; enter below both EMAs. "
                 f"Minimum EMA gap: {execution.ema_reversal_min_gap_atr:g} × ATR (0 = off). "
                 f"Minimum entry distance from EMA 300: {execution.ema_reversal_min_entry_ema300_atr:g} × ATR (0 = off). "
                 "Entry: next candle open. TP: last completed candle's EMA 100 (low), fixed at entry. "
-                "SL: equal distance in the opposite direction. Wrong-side targets are skipped. "
+                f"SL distance: entry-to-TP distance ÷ {execution.ema_reversal_target_r:g}, in the opposite direction. Wrong-side targets are skipped. "
                 f"Account risk: {execution.risk_per_leg * base.risk_multiplier:.2%} per trade before costs. "
                 "Stop multipliers, separate sizing stops and optional trade management do not apply."
             )
