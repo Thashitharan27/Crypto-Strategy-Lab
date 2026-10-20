@@ -38,10 +38,14 @@ def test_missing_next_candle_does_not_enter_at_a_later_open():
 
 
 @pytest.mark.parametrize("side,entry,target,slow,passed", [
-    ("SHORT",100.,98.,101.,True), ("SHORT",97.,98.,101.,False),
-    ("LONG",100.,102.,99.,True), ("LONG",103.,102.,99.,False),
+    ("SHORT",100.,98.,99.,True), ("SHORT",97.,98.,101.,False),
+    ("LONG",100.,102.,101.,True), ("LONG",103.,102.,99.,False),
+    ("SHORT",100.,98.,101.,False), ("LONG",100.,102.,99.,False),
+    ("SHORT",101.,98.,101.,False), ("LONG",101.,102.,101.,False),
+    ("SHORT",101.000001,98.,101.,True), ("LONG",100.999999,102.,101.,True),
+    ("SHORT",9440.187545,9425.50943469679,9579.288691828522,False),
 ])
-def test_opening_gap_cannot_put_target_on_wrong_side(side,entry,target,slow,passed):
+def test_entry_must_be_outside_both_emas_with_profitable_target(side,entry,target,slow,passed):
     from types import SimpleNamespace
     from crypto_strategy_lab.ema100_300_reversal import Ema100300ReversalMixin
     p = Ema100300ReversalMixin()
@@ -56,6 +60,8 @@ def test_opening_gap_cannot_put_target_on_wrong_side(side,entry,target,slow,pass
     assert plan['passed'] == passed
     if passed:
         assert plan['stop_price'] == 2*entry-target
+    elif (entry>target if side == "SHORT" else entry<target):
+        assert plan['reason'] == "EMA100_300_ENTRY_POSITION_REJECTED"
 
 
 def test_native_engine_uses_last_closed_low_ema_and_fixed_one_r():
@@ -92,6 +98,9 @@ def test_native_engine_uses_last_closed_low_ema_and_fixed_one_r():
         assert abs(tp-row.entry_price) == pytest.approx(abs(row.entry_price-stop))
         assert (row.ema300_high>row.ema100_low) == (row.side=='SHORT')
         assert (tp<row.entry_price) == (row.side=='SHORT')
+        assert (row.entry_price>max(row.ema100_low,row.ema300_high) if row.side=='SHORT'
+                else row.entry_price<min(row.ema100_low,row.ema300_high))
+        assert row.ema_reversal_entry_position_rule == "SHORT_ABOVE_BOTH_LONG_BELOW_BOTH_V1"
     # Prefix-only features must agree with full-history decisions.
     prefix = RuleAwareDataLakeProductionBacktestEngine(frame.iloc[:1200],config)
     assert np.allclose(engine.ema100_low_values[:1200], prefix.ema100_low_values,equal_nan=True)
