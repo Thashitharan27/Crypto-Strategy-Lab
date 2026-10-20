@@ -109,7 +109,7 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
             pd.Timedelta(days=int(features.bull_regime_lookback_days)),
         )
 
-    execution = run_config.execution
+    execution = getattr(run_config, "execution", None)
     if getattr(execution, "fvg_target_mode", "FIXED_R") == "HTF_OPPOSING_FVG":
         # Three complete HTF candles plus one boundary-alignment bucket.
         duration = max(duration, pd.Timedelta(minutes=4 * execution.fvg_target_timeframe_minutes))
