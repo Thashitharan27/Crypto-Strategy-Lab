@@ -18,6 +18,7 @@ from crypto_strategy_lab.strategy_visualizer import (
     CompletedRunVisualizer,
     LIGHTWEIGHT_CHARTS_URL,
 )
+from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -140,6 +141,12 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 .period-options label,.ema-options label{padding:8px 10px;min-width:66px;justify-content:center}
 .rsi-method{font-size:12px;color:#b8c2cc;margin:12px 0 6px}
 .indicator-group[hidden]{display:none}
+#replay-controls{flex-basis:100%;padding:12px;background:#17283b;border:1px solid #42607f;border-radius:7px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#replay-controls[hidden]{display:none}
+#replay-notes{width:260px;max-width:100%;background:#0c1420;color:#e6edf3;border:1px solid #475569;border-radius:5px;padding:8px;font:inherit}
+#replay-status{flex-basis:100%;font-size:13px;line-height:1.5;color:#c8e3f9}
+#replay-toggle[aria-pressed=true]{background:#255b91;border-color:#60a5fa}
+button:disabled{opacity:.45;cursor:default}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
@@ -159,8 +166,19 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     <label for="trade">Review trade</label><select id="trade"></select>
     <button id="center">Center selected</button>
     <button id="review-setup" aria-pressed="false" hidden>Review setup</button>
+    <button id="replay-toggle" aria-pressed="false" disabled>Trade replay</button>
     <div id="active-indicators" aria-label="Active indicators"></div>
     <span id="timeframe-note" class="muted" role="status"></span>
+    <div id="replay-controls" hidden>
+      <strong>Your judgement:</strong>
+      <button data-replay-decision="Take">Take</button><button data-replay-decision="Skip">Skip</button><button data-replay-decision="Unsure">Unsure</button>
+      <input id="replay-notes" aria-label="Pre-entry judgement note" placeholder="Why would you take or skip it?">
+      <button id="replay-step">Next candle</button><button id="replay-play">Play</button>
+      <select id="replay-speed" aria-label="Replay speed"><option value="1500">Slow</option><option value="750" selected>Normal</option><option value="300">Fast</option></select>
+      <button id="replay-reveal">Reveal result</button><button id="replay-restart">Restart at entry</button>
+      <button id="replay-export">Export reviews</button>
+      <span id="replay-status" role="status"></span>
+    </div>
   </div>
   <details id="diagnostics"><summary>Trade diagnostics (expand)</summary><div id="diag">Loading…</div></details>
   <div id="workspace"><div id="chart-wrap">
@@ -211,6 +229,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 </dialog>
 <script>
 (() => {
+  __REPLAY_HELPERS__
   const boot = __BOOTSTRAP__;
   const $ = id => document.getElementById(id);
   $('chart-symbol').textContent = boot.run.symbol;
@@ -280,6 +299,21 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   $('reviewbar').appendChild(fvgReview);
   fvgReview.style.flexBasis = '100%';
   let payload = null;
+  let sourcePayload = null;
+  let replayActive = false;
+  let replayCutoff = 0;
+  let replayEntryTime = 0;
+  let replayInterval = 900;
+  let replayAdvanced = false;
+  let replayRevealed = false;
+  let replayOutcomeVisible = false;
+  let replayTimer = null;
+  let replayBusy = false;
+  let reviewRecords = [];
+  let reviewStorageAvailable = true;
+  const normalViewsSeen = new Set();
+  const reviewStorageKey='csl-replay-reviews-v1';
+  try { const saved=JSON.parse(localStorage.getItem(reviewStorageKey)||'[]'); if(Array.isArray(saved)) reviewRecords=saved; } catch { reviewStorageAvailable=false; }
   let reviewMode = false;
   let currentTimeframe = boot.run.timeframe;
   let loadGeneration = 0;
@@ -297,6 +331,145 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   let pricePanOffset = 0.0;
   let verticalPan = null;
   let defaultPriceRange = null;
+
+  function stopReplay() {
+    if(replayTimer) clearInterval(replayTimer);
+    replayTimer=null; $('replay-play').textContent='Play';
+  }
+  function replayKey() {
+    const trade=sourcePayload?.selectedTrade || {};
+    return JSON.stringify([boot.run.runId,boot.run.symbol,trade.Pair ?? currentTrade,trade['Entry Time']]);
+  }
+  function currentReview() { return reviewRecords.find(record=>record?.key===replayKey()); }
+  function saveReviews() {
+    try { localStorage.setItem(reviewStorageKey,JSON.stringify(reviewRecords)); }
+    catch { reviewStorageAvailable=false; }
+  }
+  function initializeReplay() {
+    stopReplay(); replayAdvanced=false; replayRevealed=false; replayOutcomeVisible=false;
+    const match=String(boot.run.timeframe).match(/^([0-9]+)([mhdw])$/);
+    replayInterval=match ? Number(match[1])*({m:60,h:3600,d:86400,w:604800}[match[2]]) : 0;
+    replayEntryTime=Date.parse(sourcePayload?.selectedTrade?.['Entry Time'] || '')/1000;
+    replayCutoff=replayEntryTime;
+    if(!replayInterval || !Number.isFinite(replayEntryTime)) throw Error('This trade has no usable entry time or strategy interval for replay.');
+    $('replay-notes').value=currentReview()?.notes || '';
+  }
+  function updateReplayControls() {
+    const record=currentReview();
+    const locked=Boolean(record?.revealedAt) || replayAdvanced || replayRevealed;
+    for(const button of document.querySelectorAll('[data-replay-decision]')) {
+      button.disabled=replayBusy || locked;
+      button.setAttribute('aria-pressed',String(record?.decision===button.dataset.replayDecision));
+    }
+    $('replay-notes').disabled=replayBusy || locked;
+    for(const id of ['replay-step','replay-play','replay-reveal']) $(id).disabled=replayBusy || !record || replayRevealed || replayOutcomeVisible;
+    $('replay-restart').disabled=replayBusy;
+    let message=String(sourcePayload?.selectedTrade?.Side || '')+' entry preview · '+fmtTime(replayCutoff)+' · '+(record ? 'Your choice: '+record.decision : 'Record Take, Skip or Unsure to unlock future candles.');
+    if(record?.revealedAt && !replayAdvanced && !replayRevealed) message+=' Previously reviewed; original judgement retained.';
+    if(replayOutcomeVisible) message+=' Result: '+String(sourcePayload.selectedTrade['Exit Reason'] || '')+' · '+String(sourcePayload.selectedTrade['Net R'] ?? 'n/a')+' R';
+    else if(replayAdvanced) message+=' · Result still hidden.';
+    if(replayOutcomeVisible) {
+      const scored=reviewRecords.filter(r=>r?.runId===boot.run.runId && r?.symbol===boot.run.symbol && r.netR!=null && Number.isFinite(Number(r.netR)));
+      const total=scored.reduce((sum,r)=>sum+Number(r.netR),0);
+      const manual=scored.filter(r=>r.decision==='Take').reduce((sum,r)=>sum+Number(r.netR),0);
+      message+=' · Revealed reviews: '+scored.length+' · Auto total '+total.toFixed(2)+' R · Take-only '+manual.toFixed(2)+' R (trade sums).';
+    }
+    message+=' · Saved in this browser; export to keep reviews across visualizer sessions.';
+    if(!reviewStorageAvailable) message+=' Browser storage unavailable: export before closing.';
+    $('replay-status').textContent=message;
+  }
+  function refreshReplay() {
+    if(!sourcePayload) return;
+    if(replayActive) {
+      const projected=cslReplayView(sourcePayload,replayCutoff,replayInterval,replayEntryTime,replayRevealed,replayAdvanced);
+      payload=projected.view; replayOutcomeVisible=projected.outcomeVisible;
+      const record=currentReview();
+      if(record && replayOutcomeVisible) {
+        record.netR=sourcePayload.selectedTrade['Net R'] ?? null;
+        record.exitReason=sourcePayload.selectedTrade['Exit Reason'] ?? null;
+        saveReviews();
+      }
+    } else {
+      payload=sourcePayload;
+      normalViewsSeen.add(replayKey());
+      const record=currentReview();
+      if(record) {
+        record.revealedAt=record.revealedAt || new Date().toISOString();
+        record.netR=sourcePayload.selectedTrade['Net R'] ?? null;
+        record.exitReason=sourcePayload.selectedTrade['Exit Reason'] ?? null;
+        saveReviews();
+      }
+    }
+    defaultPriceRange=null; priceZoomFactor=1; pricePanOffset=0;
+    renderDiagnostics(); buildChart();
+    chartWrap.style.visibility='visible';
+    if(replayActive) updateReplayControls();
+    requestAnimationFrame(centerSelected);
+  }
+  function markFutureSeen() {
+    const record=currentReview();
+    if(!record) return false;
+    if(!record.revealedAt) { record.revealedAt=new Date().toISOString(); saveReviews(); }
+    return true;
+  }
+  function stepReplay() {
+    if(replayBusy || !replayActive || replayRevealed || replayOutcomeVisible || !markFutureSeen()) return;
+    const next=(sourcePayload.candles || []).find(bar=>bar.time+replayInterval>replayCutoff);
+    if(!next) { stopReplay(); $('replay-status').textContent='End of available candles. Export your review to retain it.'; return; }
+    replayCutoff=next.time+replayInterval; replayAdvanced=true;
+    refreshReplay();
+    if(replayOutcomeVisible) stopReplay();
+  }
+  function updateTradeLabels() {
+    [...tradeSelect.options].forEach((option,index)=>option.textContent=replayActive ? 'Trade '+(index+1)+' · outcome hidden' : boot.trades[index].label);
+  }
+  $('replay-toggle').addEventListener('click',()=>{
+    stopReplay(); replayActive=!replayActive;
+    $('replay-toggle').setAttribute('aria-pressed',String(replayActive));
+    $('replay-controls').hidden=!replayActive;
+    timeframeSelect.disabled=replayActive;
+    updateTradeLabels();
+    if(replayActive && currentTimeframe!==boot.run.timeframe) {
+      currentTimeframe=boot.run.timeframe; timeframeSelect.value=currentTimeframe; load(); return;
+    }
+    if(replayActive) initializeReplay();
+    refreshReplay();
+  });
+  document.querySelectorAll('[data-replay-decision]').forEach(button=>button.addEventListener('click',()=>{
+    if(replayBusy || replayAdvanced || replayRevealed || currentReview()?.revealedAt) return;
+    const trade=sourcePayload.selectedTrade;
+    let record=currentReview();
+    if(!record) { record={key:replayKey(),runId:boot.run.runId,symbol:boot.run.symbol,tradeIndex:currentTrade,pair:trade.Pair,entryTime:trade['Entry Time'],side:trade.Side,recordedAt:new Date().toISOString(),outcomePreviouslyShown:normalViewsSeen.has(replayKey()),notes:'',decision:''}; reviewRecords.push(record); }
+    record.decision=button.dataset.replayDecision; record.notes=$('replay-notes').value;
+    saveReviews(); updateReplayControls();
+  }));
+  $('replay-notes').addEventListener('input',()=>{
+    const record=currentReview();
+    if(record && !record.revealedAt && !replayAdvanced && !replayRevealed) { record.notes=$('replay-notes').value; saveReviews(); }
+  });
+  $('replay-step').addEventListener('click',()=>{stopReplay();stepReplay();});
+  $('replay-play').addEventListener('click',()=>{
+    if(replayTimer) {stopReplay();return;}
+    if(replayBusy || !currentReview() || replayOutcomeVisible || replayRevealed) return;
+    replayTimer=setInterval(stepReplay,Number($('replay-speed').value)); $('replay-play').textContent='Pause';
+  });
+  $('replay-speed').addEventListener('change',()=>{if(replayTimer){stopReplay();$('replay-play').click();}});
+  $('replay-reveal').addEventListener('click',()=>{
+    if(replayBusy || !markFutureSeen()) return;
+    stopReplay(); replayRevealed=true; refreshReplay();
+  });
+  $('replay-restart').addEventListener('click',()=>{if(!replayBusy){initializeReplay();refreshReplay();}});
+  $('replay-export').addEventListener('click',()=>{
+    const records=reviewRecords.filter(record=>record?.runId===boot.run.runId && record?.symbol===boot.run.symbol);
+    const scored=records.filter(record=>record.netR!=null && Number.isFinite(Number(record.netR)));
+    const sum=list=>list.reduce((total,record)=>total+Number(record.netR),0);
+    const report={version:1,runId:boot.run.runId,symbol:boot.run.symbol,exportedAt:new Date().toISOString(),
+      summary:{reviewed:records.length,revealed:scored.length,automaticNetR:sum(scored),manualTakeNetR:sum(scored.filter(r=>r.decision==='Take')),skippedNetR:sum(scored.filter(r=>r.decision==='Skip')),unsureNetR:sum(scored.filter(r=>r.decision==='Unsure'))},
+      interpretation:'Sums of saved trade R for reviewed trades only; not a resimulation of portfolio sizing or overlapping positions.',reviews:records};
+    const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
+    const link=document.createElement('a'); link.href=url; link.download='csl-manual-replay-reviews.json'; document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+  window.addEventListener('pagehide',stopReplay);
 
   for (const item of boot.trades) {
     const option = document.createElement('option');
@@ -342,7 +515,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 
   function computeSelectedPriceRange() {
     const items=payload?.candles || [];
-    const bounds=reviewMode ? setupBounds() : null;
+    const bounds=replayActive && !replayRevealed ? replayBounds() : (reviewMode ? setupBounds() : null);
     const start=Number(bounds?.from ?? payload?.selectedTradeViewStart);
     const end=Number(bounds?.to ?? payload?.selectedTradeViewEnd);
     let low=Infinity, high=-Infinity;
@@ -711,7 +884,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     const exitPrice=Number(trade.Exit ?? trade.exit);
     const x1=chart.timeScale().timeToCoordinate(Number(open.time));
     const endTime=exit ? Number(exit.time) : Number(payload.selectedTradeViewEnd);
-    const x2=chart.timeScale().timeToCoordinate(endTime);
+    const x2=replayActive && !replayOutcomeVisible ? Number(x1)+100 : chart.timeScale().timeToCoordinate(endTime);
     const entryY=candles.priceToCoordinate(entry);
     const stopY=candles.priceToCoordinate(stop);
     const targetY=candles.priceToCoordinate(target);
@@ -865,7 +1038,14 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
     if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
   }));
 
+  function replayBounds() {
+    const known=payload?.fvgDerivation;
+    const from=known?.status==='AVAILABLE' ? known.impulseStartTime-8*replayInterval : replayCutoff-80*replayInterval;
+    return {from,to:replayCutoff+12*replayInterval};
+  }
+
   function setupBounds() {
+    if(replayActive && !replayRevealed) return null;
     const fvg=payload?.fvgDerivation;
     if (fvg?.status!=='AVAILABLE') return null;
     const bars=payload.candles || [];
@@ -878,11 +1058,15 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 
   function centerSelected() {
     if (!payload || !chart) return;
-    const bounds=reviewMode ? setupBounds() : null;
+    const bounds=replayActive && !replayRevealed ? replayBounds() : (reviewMode ? setupBounds() : null);
     const start = Number(bounds?.from ?? payload.selectedTradeViewStart);
     const end = Number(bounds?.to ?? payload.selectedTradeViewEnd);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
-    chart.timeScale().setVisibleRange({from:start,to:end});
+    if(replayActive && !replayRevealed) {
+      const bars=payload.candles || [];
+      const index=bars.findIndex(bar=>bar.time>=start);
+      chart.timeScale().setVisibleLogicalRange({from:Math.max(0,index),to:bars.length+12});
+    } else chart.timeScale().setVisibleRange({from:start,to:end});
     defaultPriceRange=computeSelectedPriceRange();
     priceZoomFactor=1.0;
     pricePanOffset=0.0;
@@ -974,6 +1158,9 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
   chartWrap.addEventListener('pointercancel',finishVerticalPan,{capture:true});
 
   async function load() {
+    stopReplay(); replayBusy=true;
+    $('replay-toggle').disabled=true;
+    if(replayActive) { chartWrap.style.visibility='hidden'; $('setup-panel').hidden=true; updateReplayControls(); $('replay-status').textContent='Loading entry preview…'; }
     const generation = ++loadGeneration;
     const requestedTimeframe = currentTimeframe;
     diag.textContent = 'Loading…';
@@ -985,6 +1172,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
         full_run:'1',
       }));
       if (generation !== loadGeneration) return;
+      sourcePayload = nextPayload;
       payload = nextPayload;
       timeframeSelect.replaceChildren();
       for (const item of (payload.run.availableChartTimeframes || [{interval:boot.run.timeframe}])) {
@@ -995,15 +1183,17 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
       $('timeframe-note').textContent = requestedTimeframe === boot.run.timeframe
         ? 'CSL indicators · strategy timeframe'
         : 'CSL indicators · chart timeframe ' + requestedTimeframe + ' · trades from ' + boot.run.timeframe;
-      renderDiagnostics();
-      buildChart();
-      requestAnimationFrame(centerSelected);
+      replayBusy=false;
+      $('replay-toggle').disabled=!sourcePayload.selectedTrade?.['Entry Time'];
+      if(replayActive) initializeReplay();
+      refreshReplay();
     } catch (error) {
       if (generation !== loadGeneration) return;
       currentTimeframe = payload?.chartTimeframe || boot.run.timeframe;
       timeframeSelect.value = currentTimeframe;
       $('timeframe-note').textContent = 'Could not load ' + requestedTimeframe + ': ' + error.message;
       diag.textContent = 'ERROR: ' + error.message;
+      if(replayActive) { replayBusy=true; updateReplayControls(); $('replay-status').textContent='Replay could not load: '+error.message+' · select another trade to retry.'; }
     }
   }
 
@@ -1041,7 +1231,7 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 </script>
 </body>
 </html>"""
-    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded)
+    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS)
 
 
 class _LoopbackHTTPServer(ThreadingHTTPServer):
