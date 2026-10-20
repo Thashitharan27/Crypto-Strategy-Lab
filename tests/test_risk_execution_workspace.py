@@ -144,7 +144,7 @@ def test_ema_reversal_preset_shows_automatic_geometry_and_round_trips():
         config = window.build_config()
         assert infer_direction_mode(config.strategy.profiles) == "EMA_100_300_REVERSAL"
         workspace = window.risk_execution_workspace
-        assert "automatic fixed 1R" in workspace.summary_label.text()
+        assert "automatic 1R" in workspace.summary_label.text()
         assert workspace.target_card.isHidden()
         assert workspace.management_card.isHidden()
         assert not workspace.account_card.isHidden()
@@ -655,6 +655,10 @@ def test_ema_reversal_gap_control_visibility_and_config_round_trip():
         assert entry_control.value()==.5
         entry_control.setValue(.75)
         assert window.build_config().execution.ema_reversal_min_entry_ema300_atr==.75
+        ratio=window.execution_form.widgets["ema_reversal_target_r"]
+        assert ratio.value()==1.
+        ratio.setValue(2.5)
+        assert window.build_config().execution.ema_reversal_target_r==2.5
         control.setValue(1.25)
         assert window.build_config().execution.ema_reversal_min_gap_atr==1.25
         selector.setCurrentIndex(selector.findData("FVG_SIX_FACTOR"))

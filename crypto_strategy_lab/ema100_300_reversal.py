@@ -1,4 +1,4 @@
-"""Completed-candle EMA100-low / EMA300-high reversal with a fixed 1R exit."""
+"""Completed-candle EMA100-low / EMA300-high reversal with a fixed EMA target and configurable reward/risk."""
 from dataclasses import replace
 
 import numpy as np
@@ -64,8 +64,8 @@ class Ema100300ReversalMixin:
         context = super()._profile_context(i)
         if getattr(self, "signal_strategy_mode", None) != MODE or context is None:
             return context
-        # This preset owns its fixed 1R geometry, including position sizing.
-        profile = replace(context[3], reward_risk_ratio=1., stop_loss_multiple=1.,
+        # This preset owns its EMA target / reward-risk geometry and position sizing.
+        profile = replace(context[3], reward_risk_ratio=float(getattr(self.config, "ema_reversal_target_r", 1.)), stop_loss_multiple=1.,
                           position_sizing_stop_override_enabled=False,
                           partial_profit_enabled=False, partial_stop_enabled=False,
                           trailing_enabled=False, break_even_enabled=False,
@@ -110,10 +110,13 @@ class Ema100300ReversalMixin:
         if entry_minimum > 0 and (not np.isfinite(atr) or atr <= 0 or abs(entry-slow) < entry_minimum*atr):
             return {"passed": False, "applied": False,
                     "reason": "EMA300_ENTRY_TOO_CLOSE", "distance": None}
-        return {"passed": True, "applied": True, "reason": "EMA100_EQUAL_DISTANCE_STOP",
-                "distance": distance, "stop_price": 2*entry-target,
-                "level_price": target, "boundary_price": 2*entry-target,
-                "distance_atr": distance/self.atr_values[i] if self.atr_values[i] > 0 else np.nan,
+        reward_risk = float(getattr(self.config, "ema_reversal_target_r", 1.))
+        stop_distance = distance/reward_risk
+        stop_price = entry-stop_distance if side == "LONG" else entry+stop_distance
+        return {"passed": True, "applied": True, "reason": "EMA100_REWARD_RISK_STOP",
+                "distance": stop_distance, "stop_price": stop_price,
+                "level_price": target, "boundary_price": stop_price,
+                "distance_atr": stop_distance/self.atr_values[i] if self.atr_values[i] > 0 else np.nan,
                 "timeframe_minutes": self.config.strategy_timeframe_minutes}
 
     def _apply_sr_take_profit(self, i, pair):
@@ -142,6 +145,6 @@ class Ema100300ReversalMixin:
         if getattr(self, "signal_strategy_mode", None) == MODE:
             row["ema100_low"] = getattr(pair, "ema100_low", np.nan)
             row["ema300_high"] = getattr(pair, "ema300_high", np.nan)
-            row["ema_reversal_target_r"] = 1.
+            row["ema_reversal_target_r"] = float(getattr(self.config, "ema_reversal_target_r", 1.))
             row["ema_reversal_entry_position_rule"] = "SHORT_ABOVE_BOTH_LONG_BELOW_BOTH_V1"
         return row
