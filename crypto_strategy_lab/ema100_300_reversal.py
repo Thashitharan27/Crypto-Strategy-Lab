@@ -106,6 +106,10 @@ class Ema100300ReversalMixin:
         if minimum > 0 and (not np.isfinite(atr) or atr <= 0 or abs(target-slow) < minimum*atr):
             return {"passed": False, "applied": False,
                     "reason": "EMA100_300_GAP_TOO_SMALL", "distance": None}
+        entry_minimum = float(getattr(self.config, "ema_reversal_min_entry_ema300_atr", 0.5))
+        if entry_minimum > 0 and (not np.isfinite(atr) or atr <= 0 or abs(entry-slow) < entry_minimum*atr):
+            return {"passed": False, "applied": False,
+                    "reason": "EMA300_ENTRY_TOO_CLOSE", "distance": None}
         return {"passed": True, "applied": True, "reason": "EMA100_EQUAL_DISTANCE_STOP",
                 "distance": distance, "stop_price": 2*entry-target,
                 "level_price": target, "boundary_price": 2*entry-target,

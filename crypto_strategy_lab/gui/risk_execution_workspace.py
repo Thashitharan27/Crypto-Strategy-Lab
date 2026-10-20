@@ -139,6 +139,10 @@ class RiskExecutionWorkspace(QWidget):
         self.account["ema_reversal_min_gap_atr"].setRange(0., 100.)
         self.account["ema_reversal_min_gap_atr"].setSuffix(" × ATR")
         self.ema_gap_card.add_field("ema_reversal_min_gap_atr", "Minimum EMA gap", self.account["ema_reversal_min_gap_atr"])
+        self.account["ema_reversal_min_entry_ema300_atr"].setRange(0., 100.)
+        self.account["ema_reversal_min_entry_ema300_atr"].setSuffix(" × ATR")
+        self.account["ema_reversal_min_entry_ema300_atr"].setToolTip("Minimum distance from the actual next-open entry price, including slippage, to the last completed candle's EMA 300 (high). Set 0 to disable.")
+        self.ema_gap_card.add_field("ema_reversal_min_entry_ema300_atr", "Minimum entry distance from EMA 300", self.account["ema_reversal_min_entry_ema300_atr"])
         layout.addWidget(self.ema_gap_card)
 
         self.entry_card = FormCard(
@@ -892,6 +896,7 @@ class RiskExecutionWorkspace(QWidget):
                 "Short: EMA 300 > EMA 100, green → red → red; enter above both EMAs. "
                 "Long: EMA 300 < EMA 100, red → green → green; enter below both EMAs. "
                 f"Minimum EMA gap: {execution.ema_reversal_min_gap_atr:g} × ATR (0 = off). "
+                f"Minimum entry distance from EMA 300: {execution.ema_reversal_min_entry_ema300_atr:g} × ATR (0 = off). "
                 "Entry: next candle open. TP: last completed candle's EMA 100 (low), fixed at entry. "
                 "SL: equal distance in the opposite direction. Wrong-side targets are skipped. "
                 f"Account risk: {execution.risk_per_leg * base.risk_multiplier:.2%} per trade before costs. "
