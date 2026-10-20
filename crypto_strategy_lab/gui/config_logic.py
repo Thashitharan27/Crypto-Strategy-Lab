@@ -43,6 +43,11 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
     "fvg_confirmation_minutes": 1,
+    "fvg_target_mode": "FIXED_R",
+    "fvg_target_timeframe_minutes": 240,
+    "fvg_target_minimum_r": 1.5,
+    "fvg_target_no_level_policy": "REJECT_TRADE",
+    "fvg_target_buffer_atr": 0.05,
     "fvg_context_enabled": False,
     "fvg_context_timeframe_minutes": 240,
     "fvg_structure_swing_strength": 2,
@@ -287,6 +292,16 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
                 errors.append("FVG context timeframe must be an exact multiple of strategy timeframe.")
         except (TypeError, ValueError, KeyError):
             errors.append("FVG context timeframe must be a whole number.")
+    try:
+        from crypto_strategy_lab.fvg_htf_targets import validate_target_settings
+        validate_target_settings(values["fvg_target_mode"], int(values["fvg_target_timeframe_minutes"]),
+                                 float(values["fvg_target_minimum_r"]), values["fvg_target_no_level_policy"],
+                                 int(values["strategy_timeframe_minutes"]))
+        buffer = float(values["fvg_target_buffer_atr"])
+        if not math.isfinite(buffer) or buffer < 0:
+            raise ValueError("FVG target buffer must be finite and nonnegative")
+    except (TypeError, ValueError) as exc:
+        errors.append(str(exc))
     if values["fvg_confirmation_enabled"]:
         try:
             confirm = int(values["fvg_confirmation_minutes"])
@@ -395,6 +410,11 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         ),
         fvg_confirmation_enabled=bool(merged["fvg_confirmation_enabled"]),
         fvg_confirmation_minutes=int(merged["fvg_confirmation_minutes"]),
+        fvg_target_mode=str(merged["fvg_target_mode"]),
+        fvg_target_timeframe_minutes=int(merged["fvg_target_timeframe_minutes"]),
+        fvg_target_minimum_r=float(merged["fvg_target_minimum_r"]),
+        fvg_target_no_level_policy=str(merged["fvg_target_no_level_policy"]),
+        fvg_target_buffer_atr=float(merged["fvg_target_buffer_atr"]),
         fvg_context_enabled=bool(merged["fvg_context_enabled"]),
         fvg_context_timeframe_minutes=int(merged["fvg_context_timeframe_minutes"]),
         fvg_structure_swing_strength=int(merged["fvg_structure_swing_strength"]),

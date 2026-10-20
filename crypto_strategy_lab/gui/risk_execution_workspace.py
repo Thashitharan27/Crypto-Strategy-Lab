@@ -334,9 +334,23 @@ class RiskExecutionWorkspace(QWidget):
         self.target_card.add_field("ema_920_target_value", "Profit Target", self.ema_target_value)
         self.fvg_target_method = QLabel("Configured R before FVG move high / low")
         self.fvg_target_method.setStyleSheet("font-weight:600")
-        self.target_card.add_field("fvg_target_method", "Target Method", self.fvg_target_method)
+        self.target_card.add_field("fvg_target_mode", "FVG Target Method", self.account["fvg_target_mode"])
+        self.target_card.add_field("fvg_target_method", "Target Rule", self.fvg_target_method)
+        for name, label in (
+            ("fvg_target_timeframe_minutes", "Target FVG Timeframe"),
+            ("fvg_target_minimum_r", "Minimum Target Reward / Risk"),
+            ("fvg_target_no_level_policy", "If No Opposing FVG Exists"),
+        ):
+            self.target_card.add_field(name, label, self.account[name])
+        self.fvg_target_note = QLabel(
+            "Use the nearest untouched opposing FVG from completed higher-timeframe candles. "
+            "TP sits just before its near edge and stays fixed after entry. "
+            "Skip if that target is too close; the missing-FVG fallback applies only when no target exists."
+        )
+        self.fvg_target_note.setWordWrap(True)
+        self.target_card.add_control("fvg_target_note", self.fvg_target_note)
         self.target_card.add_field(
-            "fvg_target_buffer_atr", "Extreme Buffer", self.account["fvg_target_buffer_atr"]
+            "fvg_target_buffer_atr", "Buffer Before Target Level", self.account["fvg_target_buffer_atr"]
         )
         self.fib_target_method = self.account["fib_target_mode"]
         self.target_card.add_field("fib_target_method", "Target Method", self.fib_target_method)
@@ -451,6 +465,8 @@ class RiskExecutionWorkspace(QWidget):
         self.account["ema_cross_entry_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_minutes"].valueChanged.connect(self.refresh_summary_from_widgets)
+        self.account["fvg_target_mode"].currentIndexChanged.connect(self.refresh_visibility)
+        self.account["fvg_target_no_level_policy"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["di_ladder_enabled"].toggled.connect(self.refresh_visibility)
         self.account["di_ladder_mode"].currentIndexChanged.connect(self.refresh_visibility)
         builder = getattr(self.window, "rule_builder", None)
@@ -510,6 +526,7 @@ class RiskExecutionWorkspace(QWidget):
             self.account["atr_multiplier"].setSuffix(" × ATR")
         if hasattr(self.account["fvg_target_buffer_atr"], "setSuffix"):
             self.account["fvg_target_buffer_atr"].setSuffix(" × signal ATR")
+        self.account["fvg_target_minimum_r"].setSuffix(" R")
         if hasattr(self.account["fvg_confirmation_minutes"], "setSuffix"):
             self.account["fvg_confirmation_minutes"].setSuffix(" min")
         if hasattr(self.account["ema_cross_entry_confirmation_r"], "setSuffix"):
@@ -714,6 +731,14 @@ class RiskExecutionWorkspace(QWidget):
         for name in ("ema_920_target_method", "ema_920_target_value"):
             self.target_card.set_row_visible(name, ema_920)
         self.target_card.set_row_visible("fvg_target_method", fvg)
+        self.target_card.set_row_visible("fvg_target_mode", fvg)
+        htf_fvg = fvg and self.account["fvg_target_mode"].currentData() == "HTF_OPPOSING_FVG"
+        for name in ("fvg_target_timeframe_minutes", "fvg_target_minimum_r", "fvg_target_no_level_policy", "fvg_target_note"):
+            self.target_card.set_row_visible(name, htf_fvg)
+        self.fvg_target_method.setText(
+            "Nearest opposing HTF FVG near edge — fixed at entry" if htf_fvg
+            else "Configured R before FVG move high / low"
+        )
         self.target_card.set_row_visible("fvg_target_buffer_atr", fvg)
         fib_target_mode = str(self.account["fib_target_mode"].currentData() or "IMPULSE_EXTREME")
         self.target_card.set_row_visible("fib_target_method", fib)
@@ -731,7 +756,7 @@ class RiskExecutionWorkspace(QWidget):
             self.sr_dependency_note.setVisible(False)
         elif fvg:
             self.target_card.set_row_visible("sr_take_profit_mode", False)
-            self.target_card.set_row_visible("reward_risk_ratio", True)
+            self.target_card.set_row_visible("reward_risk_ratio", not htf_fvg or self.account["fvg_target_no_level_policy"].currentData() == "USE_FIXED_TP")
             if target_label is not None:
                 target_label.setText("FVG Profit Target")
             for name in (
@@ -938,6 +963,11 @@ class RiskExecutionWorkspace(QWidget):
                 )
         elif fvg:
             target = (
+                f"nearest opposing {self._timeframe_description(execution.fvg_target_timeframe_minutes)} FVG; "
+                f"TP {execution.fvg_target_buffer_atr:g}× signal ATR before its near edge; "
+                f"minimum {execution.fvg_target_minimum_r:g}R; fixed at entry; "
+                + ("skip if none" if execution.fvg_target_no_level_policy == "REJECT_TRADE" else "fixed-R swing-room fallback if none")
+            ) if execution.fvg_target_mode == "HTF_OPPOSING_FVG" else (
                 f"configured {base.reward_risk_ratio:g}R target; it must fit "
                 f"{execution.fvg_target_buffer_atr:g}× signal ATR before the FVG move high "
                 "for long or move low for short, otherwise reject"

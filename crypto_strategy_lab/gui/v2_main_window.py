@@ -126,6 +126,7 @@ EXECUTION_GROUPS = (
         "max_effective_leverage_per_leg", "max_combined_effective_leverage", "max_active_pairs",
     ), None),
     ("Take Profit", (
+        "fvg_target_mode", "fvg_target_timeframe_minutes", "fvg_target_minimum_r", "fvg_target_no_level_policy",
         "sr_take_profit_mode", "sr_take_profit_timeframe_minutes",
         "sr_take_profit_maximum_r", "sr_take_profit_minimum_r",
         "sr_take_profit_buffer_r", "fvg_target_buffer_atr", "fib_target_mode",
@@ -370,6 +371,9 @@ class DataclassForm(QWidget):
         "sr_take_profit_timeframe_minutes": (-1, 0, 60, 240, 1440),
         "sr_take_profit_mode": ("FIXED_R", "SR_CAPPED_R", "SR_LEVEL"),
         "fib_target_mode": ("IMPULSE_EXTREME", "FIXED_R"),
+        "fvg_target_mode": ("FIXED_R", "HTF_OPPOSING_FVG"),
+        "fvg_target_timeframe_minutes": (60, 240, 1440),
+        "fvg_target_no_level_policy": ("REJECT_TRADE", "USE_FIXED_TP"),
         "fib_structure_quality_mode": ("BASELINE", "CLEAN_ONLY", "WEIGHTED"),
         "sr_take_profit_no_level_policy": ("USE_FIXED_TP", "REJECT_TRADE"),
         "flip_rule_match_mode": ("ANY", "ALL"),

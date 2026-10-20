@@ -97,6 +97,12 @@ def test_saved_trade_context_round_trips_to_visualizer_without_recalculation():
     assert payload["checks"] == review["checks"]
     assert payload["signalTime"] == int(pd.Timestamp(review["signalTime"]).timestamp())
     assert payload["formationCandles"][-1]["time"] == payload["formedTime"]
+    zone = {"side": "SHORT", "bottom": 110., "top": 112.,
+            "confirmed_at": "2026-01-01T00:00:00+00:00", "timeframe_minutes": 60}
+    model.trades["fvg_target_htf_zone"] = json.dumps(zone)
+    target = model.fvg_six_factor_derivation(0)["targetZone"]
+    assert target["bottom"] == 110. and target["timeframe_minutes"] == 60
+    assert target["confirmedTime"] == int(pd.Timestamp(zone["confirmed_at"]).timestamp())
     # Earlier completed runs lack the additional anchors and remain readable.
     legacy = {k: v for k, v in review.items() if k not in {"formationCandles", "structurePivotTime", "structureBreakTime"}}
     model.trades = pd.DataFrame([{"fvg_six_factor_context": json.dumps(legacy)}])
@@ -105,7 +111,8 @@ def test_saved_trade_context_round_trips_to_visualizer_without_recalculation():
     assert model.fvg_six_factor_derivation(0)["status"] == "NOT_AVAILABLE"
 
 
-def test_production_engine_executes_next_open_and_persists_review():
+@pytest.mark.parametrize("target_mode", ["FIXED_R", "HTF_OPPOSING_FVG"])
+def test_production_engine_executes_next_open_and_persists_review(target_mode):
     from dataclasses import asdict, replace
     from crypto_strategy_lab.config import BacktestConfig
     from crypto_strategy_lab.strategy_profiles import StrategyProfile
@@ -120,6 +127,7 @@ def test_production_engine_executes_next_open_and_persists_review():
         strategy_profiles=native, use_intrabar_data=False,
         market_regime_method="ASSET_RETURN", enable_support_resistance_analysis=False,
         entry_timing_mode="NEXT_CANDLE_OPEN", enable_trade_telemetry=False,
+        fvg_target_mode=target_mode, fvg_target_timeframe_minutes=60, fvg_target_minimum_r=.5,
     )
     engine = RuleAwareDataLakeProductionBacktestEngine(data, config)
     engine.market_regime_values[:] = "SIDEWAYS"
@@ -132,6 +140,12 @@ def test_production_engine_executes_next_open_and_persists_review():
         assert row["fvg_stop_applied"]
         assert row["fvg_stop_boundary_price"] == review["stopBoundary"]
         assert all(review["checks"].values())
+        if target_mode == "HTF_OPPOSING_FVG":
+            zone = json.loads(row["fvg_target_htf_zone"])
+            assert zone["timeframe_minutes"] == 60
+            assert pd.Timestamp(zone["confirmed_at"]) <= pd.Timestamp(row["entry_time"])
+            assert row["fvg_target_r"] >= .5
+            assert row[row["side"].lower()+"_tp"] == pytest.approx(row["fvg_target_limit_price"])
 
 
 @pytest.mark.parametrize("side,opening,closing,expected", [

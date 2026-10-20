@@ -35,6 +35,14 @@ def test_short_asset_return_lookback_retains_state_context_floor() -> None:
     assert strategy_warmup_period(config) == pd.Timedelta(days=22, minutes=30)
 
 
+def test_htf_fvg_target_extends_warmup_for_complete_formation_history() -> None:
+    base = ResearchRunConfig()
+    config = replace(base, features=replace(base.features, bull_regime_lookback_days=1),
+                     execution=replace(base.execution, fvg_target_mode="HTF_OPPOSING_FVG",
+                                       fvg_target_timeframe_minutes=10080))
+    assert strategy_warmup_period(config) == pd.Timedelta(days=28, minutes=30)
+
+
 def test_asset_return_regime_extends_warmup_to_regime_lookback() -> None:
     base = ResearchRunConfig()
     config = replace(
