@@ -650,6 +650,11 @@ def test_ema_reversal_gap_control_visibility_and_config_round_trip():
         assert not workspace.ema_gap_card.isHidden()
         control=window.execution_form.widgets["ema_reversal_min_gap_atr"]
         assert control.value()==.5
+        entry_control=window.execution_form.widgets["ema_reversal_min_entry_ema300_atr"]
+        assert not entry_control.isHidden()
+        assert entry_control.value()==.5
+        entry_control.setValue(.75)
+        assert window.build_config().execution.ema_reversal_min_entry_ema300_atr==.75
         control.setValue(1.25)
         assert window.build_config().execution.ema_reversal_min_gap_atr==1.25
         selector.setCurrentIndex(selector.findData("FVG_SIX_FACTOR"))

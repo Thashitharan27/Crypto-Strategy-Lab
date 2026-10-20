@@ -113,7 +113,7 @@ FEATURE_GROUPS = (
 
 EXECUTION_GROUPS = (
     ("Entry Fill", (
-        "ema_reversal_min_gap_atr", "entry_timing_mode", "ema_920_trade_plan", "ema_320_flip_signals", "ema_320_exit_mode",
+        "ema_reversal_min_entry_ema300_atr", "ema_reversal_min_gap_atr", "entry_timing_mode", "ema_920_trade_plan", "ema_320_flip_signals", "ema_320_exit_mode",
         "ema_cross_entry_confirmation_enabled", "ema_cross_entry_confirmation_r",
         "fvg_confirmation_enabled", "fvg_confirmation_minutes",
         "fvg_context_enabled", "fvg_context_timeframe_minutes",

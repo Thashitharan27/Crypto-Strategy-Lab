@@ -31,7 +31,7 @@ def test_missing_next_candle_does_not_enter_at_a_later_open():
     from crypto_strategy_lab.ema100_300_reversal import Ema100300ReversalMixin
     p = Ema100300ReversalMixin()
     p.signal_strategy_mode = MODE
-    p.config = SimpleNamespace(strategy_timeframe_minutes=15)
+    p.config = SimpleNamespace(strategy_timeframe_minutes=15,ema_reversal_min_entry_ema300_atr=0.)
     p.times = pd.date_range("2026-01-01", periods=2, freq="30min")
     p._should_enter = lambda i: True
     assert p._entry_decision(0) is None
@@ -49,7 +49,7 @@ def test_entry_must_be_outside_both_emas_with_profitable_target(side,entry,targe
     from types import SimpleNamespace
     from crypto_strategy_lab.ema100_300_reversal import Ema100300ReversalMixin
     p = Ema100300ReversalMixin()
-    p.config = SimpleNamespace(strategy_timeframe_minutes=15)
+    p.config = SimpleNamespace(strategy_timeframe_minutes=15,ema_reversal_min_entry_ema300_atr=0.)
     p.signal_strategy_mode = MODE
     p.ema100_low_values = np.array([target])
     p.ema300_high_values = np.array([slow])
@@ -114,7 +114,7 @@ def test_minimum_ema_gap_rejects_clusters_and_can_be_disabled(side,target,slow,e
     from crypto_strategy_lab.ema100_300_reversal import Ema100300ReversalMixin
     p=Ema100300ReversalMixin()
     p.signal_strategy_mode=MODE
-    p.config=SimpleNamespace(strategy_timeframe_minutes=15,ema_reversal_min_gap_atr=minimum)
+    p.config=SimpleNamespace(strategy_timeframe_minutes=15,ema_reversal_min_gap_atr=minimum,ema_reversal_min_entry_ema300_atr=0.)
     p.ema100_low_values=np.array([target])
     p.ema300_high_values=np.array([slow])
     p.atr_values=np.array([atr])
@@ -139,7 +139,37 @@ def test_invalid_minimum_gap_is_rejected(value):
 def test_gap_threshold_equality_passes_and_native_adapter_keeps_setting():
     from crypto_strategy_lab.data_lake_config import ResearchRunConfig,ExecutionConfig
     from crypto_strategy_lab.research_adapters import native_simulator_config
-    config=ResearchRunConfig(execution=ExecutionConfig(ema_reversal_min_gap_atr=1.25))
+    config=ResearchRunConfig(execution=ExecutionConfig(ema_reversal_min_gap_atr=1.25,ema_reversal_min_entry_ema300_atr=.75))
     native=native_simulator_config(config.data,config.features,config.strategy,config.execution)
     assert native.ema_reversal_min_gap_atr == 1.25
+    assert native.ema_reversal_min_entry_ema300_atr == .75
     test_minimum_ema_gap_rejects_clusters_and_can_be_disabled("SHORT",98.,98.5,100.,0.5,1.,True)
+
+
+@pytest.mark.parametrize("side,entry,target,slow", [("SHORT",100.,98.,99.75),("LONG",100.,102.,100.25)])
+@pytest.mark.parametrize("minimum,atr,passed", [(.5,1.,False),(.25,1.,True),(.2,1.,True),(0.,float("nan"),True),(.5,float("nan"),False),(.5,0.,False)])
+def test_entry_distance_from_ema300(side,entry,target,slow,minimum,atr,passed):
+    from types import SimpleNamespace
+    from crypto_strategy_lab.ema100_300_reversal import Ema100300ReversalMixin
+    p=Ema100300ReversalMixin()
+    p.signal_strategy_mode=MODE
+    p.config=SimpleNamespace(strategy_timeframe_minutes=15,ema_reversal_min_gap_atr=0.,ema_reversal_min_entry_ema300_atr=minimum)
+    p.ema100_low_values=np.array([target])
+    p.ema300_high_values=np.array([slow])
+    p.atr_values=np.array([atr])
+    p._effective_trade_direction=lambda i:side
+    p._expected_entry_price=lambda i,j,d:entry
+    plan=p._sr_stop_plan(0,1)
+    assert plan["passed"] == passed
+    if not passed:
+        assert plan["reason"] == "EMA300_ENTRY_TOO_CLOSE"
+
+
+@pytest.mark.parametrize("value", [-1.,float("nan"),float("inf")])
+def test_invalid_entry_ema300_distance_is_rejected(value):
+    from crypto_strategy_lab.config import BacktestConfig
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig,ExecutionConfig
+    with pytest.raises(ValueError,match="EMA 300 entry distance"):
+        BacktestConfig(ema_reversal_min_entry_ema300_atr=value)
+    with pytest.raises(ValueError,match="EMA 300 entry distance"):
+        ResearchRunConfig(execution=ExecutionConfig(ema_reversal_min_entry_ema300_atr=value)).validate()

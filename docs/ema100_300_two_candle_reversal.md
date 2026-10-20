@@ -59,3 +59,16 @@ The check uses only the completed signal candle, alongside the existing entry
 position and EMA-order checks, and affects only this preset. This is an adjustable
 starting threshold, not a demonstrated performance improvement. Rerun backtests
 when changing it; completed runs retain their original trades.
+
+
+### Entry distance from EMA 300
+
+Risk & Execution also exposes **Minimum entry distance from EMA 300**, default
+**0.5 × ATR**. Require `abs(actual entry - EMA300(high)) >= minimum * ATR`,
+using the slippage-adjusted next-open entry price and the last completed signal
+candle's EMA and strategy ATR. Equality passes. A closer entry is rejected with
+`EMA300_ENTRY_TOO_CLOSE`; unavailable or nonpositive ATR also fails when enabled.
+Set **0** to disable this distance check independently of the EMA-to-EMA gap.
+Both filters must pass, along with EMA ordering and entry outside both lines.
+The default is a starting point for testing; no performance gain is established.
+Restart the tool and run a new backtest to apply the setting to new trades.
