@@ -34,6 +34,26 @@ def _window():
     return app, window
 
 
+def test_six_factor_separation_controls_show_only_for_that_preset():
+    app, window = _window()
+    try:
+        selector=window.rule_builder.direction_mode
+        workspace=window.risk_execution_workspace
+        for mode,visible in (("FVG_SIX_FACTOR",True),("FAIR_VALUE_GAP",False)):
+            index=selector.findData(mode)
+            assert index>=0
+            selector.setCurrentIndex(index)
+            selector.activated.emit(index)
+            app.processEvents()
+            workspace.refresh_visibility()
+            for name in ("fvg_min_clear_bars","fvg_min_move_away_atr"):
+                assert window.execution_form.widgets[name].isHidden() != visible
+        assert window.execution_form.widgets["fvg_min_clear_bars"].value()==3
+        assert window.execution_form.widgets["fvg_min_move_away_atr"].value()==.5
+    finally:
+        window.close()
+
+
 def test_risk_page_is_reorganized_around_one_execution_plan():
     app, window = _window()
     try:

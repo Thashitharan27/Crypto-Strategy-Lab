@@ -8,6 +8,8 @@ benchmark, cache identity, and ResearchRunner never accept v2 through
 """
 from __future__ import annotations
 
+import math
+
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
@@ -400,6 +402,8 @@ class ExecutionConfig:
     fvg_context_enabled: bool = False
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
+    fvg_min_clear_bars: int = 3
+    fvg_min_move_away_atr: float = 0.5
     fib_stop_buffer_atr: float = 0.05
     fib_target_mode: str = "IMPULSE_EXTREME"
     fib_fixed_target_r: float = 2.0
@@ -636,6 +640,10 @@ class ResearchRunConfig:
             raise ValueError("EMA cross entry confirmation R must be positive")
         if execution.fvg_structure_swing_strength < 1 or execution.fvg_structure_swing_strength > 50:
             raise ValueError("FVG structure swing strength must be between 1 and 50")
+        if not math.isfinite(execution.fvg_min_clear_bars) or int(execution.fvg_min_clear_bars) != execution.fvg_min_clear_bars or not 0 <= execution.fvg_min_clear_bars <= 10000:
+            raise ValueError("FVG minimum clear candles must be an integer between 0 and 10000")
+        if not math.isfinite(execution.fvg_min_move_away_atr) or execution.fvg_min_move_away_atr < 0:
+            raise ValueError("FVG minimum move-away ATR must be finite and nonnegative")
         if execution.fib_target_mode not in {"IMPULSE_EXTREME", "FIXED_R"}:
             raise ValueError("Fib target mode must be IMPULSE_EXTREME or FIXED_R")
         if execution.fib_fixed_target_r <= 0:

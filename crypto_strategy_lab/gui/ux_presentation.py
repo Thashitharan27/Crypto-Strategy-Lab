@@ -26,6 +26,8 @@ class FieldPresentation:
 
 PERCENT_FIELDS = {"risk_per_leg", "maker_fee", "taker_fee", "slippage", "percent_r"}
 FIELDS = {
+    "fvg_min_clear_bars": FieldPresentation("FVG Minimum Clear Candles", "Six-factor preset: completed candles strictly between formation and first touch. Zero disables this filter.", decimals=0),
+    "fvg_min_move_away_atr": FieldPresentation("FVG Minimum Move-away", "Six-factor preset: maximum intervening wick distance away from the gap, divided by formation ATR. Formation and revisit candles are excluded. Zero disables this filter.", unit=" ATR", decimals=2),
     "fib_structure_quality_mode": FieldPresentation("Fibonacci Impulse Quality Mode", "BASELINE preserves existing selection; CLEAN_ONLY only permits uninterrupted impulses; WEIGHTED penalizes extended and fragmented swings."),
     "initial_equity": FieldPresentation("Starting Equity", unit="$", decimals=2),
     "risk_per_leg": FieldPresentation(

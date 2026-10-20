@@ -117,7 +117,7 @@ EXECUTION_GROUPS = (
         "ema_cross_entry_confirmation_enabled", "ema_cross_entry_confirmation_r",
         "fvg_confirmation_enabled", "fvg_confirmation_minutes",
         "fvg_context_enabled", "fvg_context_timeframe_minutes",
-        "fvg_structure_swing_strength",
+        "fvg_structure_swing_strength", "fvg_min_clear_bars", "fvg_min_move_away_atr",
     ), None),
     ("Risk", (
         "initial_equity", "risk_mode", "fixed_r", "percent_r", "atr_multiplier",

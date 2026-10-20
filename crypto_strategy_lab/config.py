@@ -1,6 +1,8 @@
 """Current configuration contract for Crypto Strategy Lab."""
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -78,6 +80,8 @@ class BacktestConfig:
     fvg_context_enabled: bool = False
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
+    fvg_min_clear_bars: int = 3
+    fvg_min_move_away_atr: float = 0.5
     fib_half_swing_mode: bool = False
     fib_third_retest_entry: bool = False
     fib_ema_trend_gate: bool = False
@@ -175,6 +179,10 @@ class BacktestConfig:
             raise ValueError("EMA cross entry confirmation R must be positive")
         if self.fvg_structure_swing_strength < 1 or self.fvg_structure_swing_strength > 50:
             raise ValueError("FVG structure swing strength must be between 1 and 50")
+        if not math.isfinite(self.fvg_min_clear_bars) or int(self.fvg_min_clear_bars) != self.fvg_min_clear_bars or not 0 <= self.fvg_min_clear_bars <= 10000:
+            raise ValueError("FVG minimum clear candles must be an integer between 0 and 10000")
+        if not math.isfinite(self.fvg_min_move_away_atr) or self.fvg_min_move_away_atr < 0:
+            raise ValueError("FVG minimum move-away ATR must be finite and nonnegative")
         fib_target_mode = str(self.fib_target_mode).upper()
         object.__setattr__(self, "fib_target_mode", fib_target_mode)
         if fib_target_mode not in {"IMPULSE_EXTREME", "FIXED_R"}:

@@ -1,6 +1,7 @@
 """Pure helpers for the current GUI configuration contract."""
 from __future__ import annotations
 
+import math
 import copy
 import json
 from pathlib import Path
@@ -45,6 +46,8 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "fvg_context_enabled": False,
     "fvg_context_timeframe_minutes": 240,
     "fvg_structure_swing_strength": 2,
+    "fvg_min_clear_bars": 3,
+    "fvg_min_move_away_atr": 0.5,
     "fib_half_swing_mode": False,
     "fib_third_retest_entry": False,
     "fib_ema_trend_gate": False,
@@ -265,6 +268,15 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
             errors.append("FVG structure swing strength must be between 1 and 50.")
     except (TypeError, ValueError):
         errors.append("FVG structure swing strength must be an integer.")
+    try:
+        clear = float(values.get("fvg_min_clear_bars", 3))
+        if not math.isfinite(clear) or not clear.is_integer() or not 0 <= clear <= 10000:
+            errors.append("FVG minimum clear candles must be an integer between 0 and 10000.")
+        away = float(values.get("fvg_min_move_away_atr", 0.5))
+        if not math.isfinite(away) or away < 0:
+            errors.append("FVG minimum move-away ATR must be finite and nonnegative.")
+    except (TypeError, ValueError):
+        errors.append("FVG separation settings must be numeric.")
     if values.get("fvg_context_enabled", False):
         try:
             context = int(values["fvg_context_timeframe_minutes"])
@@ -386,6 +398,8 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         fvg_context_enabled=bool(merged["fvg_context_enabled"]),
         fvg_context_timeframe_minutes=int(merged["fvg_context_timeframe_minutes"]),
         fvg_structure_swing_strength=int(merged["fvg_structure_swing_strength"]),
+        fvg_min_clear_bars=int(merged["fvg_min_clear_bars"]),
+        fvg_min_move_away_atr=float(merged["fvg_min_move_away_atr"]),
         fib_half_swing_mode=bool(merged["fib_half_swing_mode"]),
         fib_third_retest_entry=bool(merged["fib_third_retest_entry"]),
         fib_ema_trend_gate=bool(merged["fib_ema_trend_gate"]),

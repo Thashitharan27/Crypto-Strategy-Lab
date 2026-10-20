@@ -17,7 +17,12 @@ def revisit_close_confirms(side, bottom, top, open_price, close_price):
     return bool(close_price < bottom and close_price < open_price)
 
 
-def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=None):
+def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=None,
+                       min_clear_bars=3, min_move_away_atr=0.5):
+    if not np.isfinite(min_clear_bars) or int(min_clear_bars) != min_clear_bars or min_clear_bars < 0:
+        raise ValueError("FVG minimum clear candles must be a nonnegative integer")
+    if not np.isfinite(min_move_away_atr) or min_move_away_atr < 0:
+        raise ValueError("FVG minimum move-away ATR must be finite and nonnegative")
     high, low, close, atr, open_ = [np.asarray(a, dtype=float) for a in (high, low, close, atr, open_)]
     if any(a.ndim != 1 or len(a) != len(close) for a in (high, low, close, atr, open_)):
         raise ValueError("six-factor candle arrays must be one-dimensional and equally sized")
@@ -83,13 +88,18 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
                 "Discount / premium half": bool(gap_mid <= midpoint if side == "LONG" else gap_mid >= midpoint),
                 "Structure break before formation": zone["break_index"] <= zone["formed"],
             }
-            if all(checks.values()):
-                accepted.append((zone, midpoint, checks))
+            separation = {"clearBars": i-zone["formed"]-1, "requiredClearBars": int(min_clear_bars),
+                          "moveAwayAtr": zone["move_away"] / atr[zone["formed"]],
+                          "requiredMoveAwayAtr": float(min_move_away_atr),
+                          "moveAwayPrice": zone["move_away"], "formationAtr": float(atr[zone["formed"]])}
+            separation["passed"] = bool(separation["clearBars"] >= min_clear_bars and separation["moveAwayAtr"] >= min_move_away_atr)
+            if all(checks.values()) and separation["passed"]:
+                accepted.append((zone, midpoint, checks, separation))
             # Every first touch consumes a zone, even if another check fails.
         active = survivors
-        sides = {zone["side"] for zone, _, _ in accepted}
+        sides = {candidate[0]["side"] for candidate in accepted}
         if len(sides) == 1:
-            zone, midpoint, checks = min(accepted, key=lambda candidate: candidate[0]["formed"])
+            zone, midpoint, checks, separation = min(accepted, key=lambda candidate: candidate[0]["formed"])
             side = zone["side"]
             signals[i] = side
             stops[side][i] = zone["stop"]
@@ -113,6 +123,7 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
             reviews[i] = {
                 "version": 1, "side": side, "bottom": zone["bottom"], "top": zone["top"],
                 "confirmationRule": "INSIDE_OR_DIRECTIONAL_REJECTION_V2",
+                "separationRule": "MIN_CLEAR_BARS_AND_MOVE_AWAY_V1", "separation": separation,
                 "formedTime": stamp(formed), "signalTime": stamp(i),
                 "formationCandles": [dict(time=stamp(j), high=float(high[j]), low=float(low[j])) for j in range(formed-2, formed+1)],
                 "structurePivotTime": stamp(zone["structure_pivot_index"]),
@@ -126,6 +137,8 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
         # Only earlier bars define the move extreme for a revisit decision.
         for zone in active:
             zone["extreme"] = max(zone["extreme"], high[i]) if zone["side"] == "LONG" else min(zone["extreme"], low[i])
+            distance = high[i]-zone["top"] if zone["side"] == "LONG" else zone["bottom"]-low[i]
+            zone["move_away"] = max(zone["move_away"], float(distance))
         if i < 2 or not np.isfinite(atr[i]) or atr[i] <= 0:
             continue
         for side in ("LONG", "SHORT"):
@@ -141,7 +154,7 @@ def six_factor_context(high, low, close, atr, *, open_, swing_strength=2, times=
             extreme = float(np.max(high[origin_i:i+1]) if side == "LONG" else np.min(low[origin_i:i+1]))
             active.append({"side": side, "bottom": float(bottom), "top": float(top), "formed": i,
                            "break_index": event["index"], "structure_level": event["level"], "structure_pivot_index": event["pivot_index"],
-                           "origin": event["origin"], "origin_index": origin_i, "extreme": extreme,
+                           "origin": event["origin"], "origin_index": origin_i, "extreme": extreme, "move_away": 0.0,
                            "stop": float(low[i-1] if side == "LONG" else high[i-1]),
                            "sr_aligned": bool(levels), "sr_level": float(levels[0]) if levels else None})
     return signals, features, stops, targets, reviews

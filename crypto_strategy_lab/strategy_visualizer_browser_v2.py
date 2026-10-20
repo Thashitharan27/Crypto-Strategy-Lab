@@ -717,6 +717,13 @@ button:disabled{opacity:.45;cursor:default}
       const facts=document.createElement('div'); facts.className='setup-facts';
       facts.textContent='Gap: '+formatPrice(fvg.bottom)+' – '+formatPrice(fvg.top)+'\\nConfirmation: '+fmtTime(fvg.signalTime)+'\\nEntry: '+String(trade['Entry Time'] || trade.entryTime || 'n/a')+'\\nFormation candles: 1 / 2 displacement / 3\\nOrange: BOS · Purple: S/R\\nRed half: premium · Green half: discount';
       facts.style.whiteSpace='pre-line'; panel.appendChild(facts);
+      if(fvg.separation) {
+        const spacing=document.createElement('div'); spacing.className='setup-check';
+        spacing.textContent='✓ Separation: '+fvg.separation.clearBars+' clear candles (minimum '+fvg.separation.requiredClearBars+') · '+Number(fvg.separation.moveAwayAtr).toFixed(2)+' ATR away (minimum '+fvg.separation.requiredMoveAwayAtr+')';
+        panel.appendChild(spacing);
+      } else {
+        const spacing=document.createElement('p'); spacing.className='muted'; spacing.textContent='Older run: separation filters were not recorded. Run a new backtest to apply them.'; panel.appendChild(spacing);
+      }
       if (!fvg.structureBreakTime) {
         const note=document.createElement('p'); note.className='muted'; note.textContent='Older run: exact BOS candle was not saved. The saved level is shown. New runs include exact anchors.'; panel.appendChild(note);
       }
