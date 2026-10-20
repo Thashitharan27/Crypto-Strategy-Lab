@@ -135,6 +135,12 @@ class RiskExecutionWorkspace(QWidget):
         plan_layout.addWidget(self.summary_label)
         layout.addWidget(self.plan_box)
 
+        self.ema_gap_card = FormCard("EMA 100/300 separation", note="Skip clustered EMAs. ATR measures recent candle volatility; 0 disables this filter.")
+        self.account["ema_reversal_min_gap_atr"].setRange(0., 100.)
+        self.account["ema_reversal_min_gap_atr"].setSuffix(" × ATR")
+        self.ema_gap_card.add_field("ema_reversal_min_gap_atr", "Minimum EMA gap", self.account["ema_reversal_min_gap_atr"])
+        layout.addWidget(self.ema_gap_card)
+
         self.entry_card = FormCard(
             "1. Entry Execution",
             note=(
@@ -826,6 +832,7 @@ class RiskExecutionWorkspace(QWidget):
             for name in fields:
                 self.advanced_card.set_row_visible(name, enabled)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
+        self.ema_gap_card.setVisible(automatic_reversal)
         for card in (self.entry_card, self.stop_card, self.target_card, self.ladder_card,
                      self.management_card, self.advanced_card):
             card.setVisible(not automatic_reversal)
@@ -884,6 +891,7 @@ class RiskExecutionWorkspace(QWidget):
                 "EMA 100 (low) / EMA 300 (high) — automatic fixed 1R plan. "
                 "Short: EMA 300 > EMA 100, green → red → red; enter above both EMAs. "
                 "Long: EMA 300 < EMA 100, red → green → green; enter below both EMAs. "
+                f"Minimum EMA gap: {execution.ema_reversal_min_gap_atr:g} × ATR (0 = off). "
                 "Entry: next candle open. TP: last completed candle's EMA 100 (low), fixed at entry. "
                 "SL: equal distance in the opposite direction. Wrong-side targets are skipped. "
                 f"Account risk: {execution.risk_per_leg * base.risk_multiplier:.2%} per trade before costs. "
