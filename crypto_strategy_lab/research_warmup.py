@@ -86,6 +86,9 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
         # user-visible signal; otherwise early candidates are falsely vetoed.
         bars = max(bars, 1605)
     duration = strategy_interval * bars
+    if any(r.get("_strategy_direction_mode") == "EMA_100_300_REVERSAL"
+           for p in strategy.profiles.values() for r in getattr(p, "entry_rules", ())):
+        duration = max(duration, strategy_interval * 305)
 
     momentum_hours = max(
         (int(profile.momentum_lookback_hours) for profile in strategy.profiles.values()),

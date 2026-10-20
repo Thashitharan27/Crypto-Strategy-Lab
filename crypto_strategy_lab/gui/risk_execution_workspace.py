@@ -825,6 +825,10 @@ class RiskExecutionWorkspace(QWidget):
             enabled = self.trade[controller].isChecked()
             for name in fields:
                 self.advanced_card.set_row_visible(name, enabled)
+        automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
+        for card in (self.entry_card, self.stop_card, self.target_card, self.ladder_card,
+                     self.management_card, self.advanced_card):
+            card.setVisible(not automatic_reversal)
         self.refresh_summary_from_widgets()
 
     @staticmethod
@@ -875,6 +879,17 @@ class RiskExecutionWorkspace(QWidget):
         return ", ".join(enabled) if enabled else "no optional trade management"
 
     def update_summary(self, execution, base) -> None:
+        if self._signal_strategy_mode() == "EMA_100_300_REVERSAL":
+            self.summary_label.setText(
+                "EMA 100 (low) / EMA 300 (high) — automatic fixed 1R plan. "
+                "Short: EMA 300 > EMA 100, green → red → red. "
+                "Long: EMA 300 < EMA 100, red → green → green. "
+                "Entry: next candle open. TP: last completed candle's EMA 100 (low), fixed at entry. "
+                "SL: equal distance in the opposite direction. Wrong-side targets are skipped. "
+                f"Account risk: {execution.risk_per_leg * base.risk_multiplier:.2%} per trade before costs. "
+                "Stop multipliers, separate sizing stops and optional trade management do not apply."
+            )
+            return
         effective_risk = float(execution.risk_per_leg) * float(base.risk_multiplier)
         risk_dollars = float(execution.initial_equity) * effective_risk
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)

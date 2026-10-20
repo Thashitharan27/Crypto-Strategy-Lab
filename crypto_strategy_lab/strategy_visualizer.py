@@ -1680,6 +1680,12 @@ class CompletedRunVisualizer:
         events.sort(key=lambda item: (item["time"], item["timeframe"], item["structure"]))
         return events
 
+    def _ema_source(self, period):
+        profiles = getattr(self, "manifest", {}).get("config", {}).get("strategy", {}).get("profiles", {})
+        reversal = any(r.get("_strategy_direction_mode") == "EMA_100_300_REVERSAL"
+                       for p in profiles.values() for r in p.get("entry_rules", []))
+        return ("low" if period == 100 else "high" if period == 300 else "close") if reversal else "close"
+
     def _overlays(
         self,
         market: pd.DataFrame,
@@ -1697,17 +1703,18 @@ class CompletedRunVisualizer:
 
         strategy_timeframe = str(self.seed.request.strategy_timeframe)
         selected_chart_timeframe = str(chart_timeframe or strategy_timeframe)
-        periods = (20, 50, 100, 200, 320)
+        periods = (20, 50, 100, 200, 300, 320)
         if selected_chart_timeframe == strategy_timeframe == "15m":
             periods += (1600,)
         for period in periods:
-            values = (_causal_ema(market["close"].to_numpy(float), period)
-                      if period in (320, 1600) else _ema(market["close"], period))
+            source = self._ema_source(period)
+            values = (_causal_ema(market[source].to_numpy(float), period)
+                      if period in (320, 1600) else _ema(market[source], period))
             data = _line_points(visible_times, values[visible_mask.to_numpy()])
             if data:
                 overlays.append(
                     {
-                        "name": f"EMA {period}",
+                        "name": f"EMA {period}" + (f" ({source})" if source != "close" else ""),
                         "kind": "ema",
                         "period": period,
                         "data": data,
@@ -2194,10 +2201,12 @@ class CompletedRunVisualizer:
                 "data": _line_points(market.loc[visible, "period_start"],
                                      values[visible.to_numpy()]),
             })
-        for period in (9, 20, 50, 100, 200, 320, 1600):
-            ema_values = _causal_ema(market["close"].to_numpy(float), period)
+        for period in (9, 20, 50, 100, 200, 300, 320, 1600):
+            source = self._ema_source(period)
+            ema_values = (_ema(market[source], period) if source != "close"
+                          else _causal_ema(market["close"].to_numpy(float), period))
             overlays.append({
-                "name": f"EMA {period}",
+                "name": f"EMA {period}" + (f" ({source})" if source != "close" else ""),
                 "kind": "ema",
                 "period": period,
                 "data": _line_points(

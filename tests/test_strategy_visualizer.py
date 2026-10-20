@@ -1014,6 +1014,24 @@ def test_snap_to_candle_handles_microsecond_datetime_index_resolution():
     assert snapped != int(times[-1].timestamp())
 
 
+def test_reversal_visualizer_uses_low_100_and_high_300_sources(tmp_path):
+    from crypto_strategy_lab.engine import _signal_ema
+    service, run_dir, manifest, _ = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    model.manifest.setdefault("config", {}).setdefault("strategy", {})["profiles"] = {
+        "sample": {"entry_rules": [{"_strategy_direction_mode": "EMA_100_300_REVERSAL"}]}}
+    payload = model.build_v2_diagnostic_payload(trade_index=0, chart_timeframe="15m")
+    request, _, interval = service.store.calls[-1]
+    frame = service.store.load_dataset(request, DatasetKind.KLINES, interval=interval)
+    visible = frame.period_start >= pd.Timestamp(model.seed.request.period_start)
+    overlays = {o["period"]:o for o in payload["overlays"] if o["kind"] == "ema"}
+    for period,source in ((100,"low"),(300,"high")):
+        expected = _signal_ema(frame[source].to_numpy(float),period)[visible.to_numpy()]
+        expected = expected[np.isfinite(expected)]
+        assert overlays[period]["name"] == f"EMA {period} ({source})"
+        np.testing.assert_array_equal([p["value"] for p in overlays[period]["data"]],expected)
+
+
 def test_v2_timeframes_use_native_indicator_values_and_warmup(tmp_path):
     from crypto_strategy_lab.fib_retracement import _causal_ema
     from crypto_strategy_lab.indicators import rsi
@@ -1041,7 +1059,7 @@ def test_v2_timeframes_use_native_indicator_values_and_warmup(tmp_path):
             expected = expected[np.isfinite(expected)]
             actual = [p["value"] for p in by_key[kind, period]["data"]]
             np.testing.assert_array_equal(actual, expected)
-        assert {o["period"] for o in payload["overlays"] if o["kind"] == "ema"} == {9,20,50,100,200,320,1600}
+        assert {o["period"] for o in payload["overlays"] if o["kind"] == "ema"} == {9,20,50,100,200,300,320,1600}
         assert payload["run"]["chartTimeframe"] == timeframe
         assert {item["interval"] for item in payload["run"]["availableChartTimeframes"]} == {"15m", "1h"}
         assert payload["selectedTrade"]["Side"] == "LONG"
