@@ -14,15 +14,15 @@ def reversal_directions(open_, close, ema100, ema300):
     if any(a.ndim != 1 or len(a) != len(close) for a in (open_, close, ema100, ema300)):
         raise ValueError("EMA reversal inputs must align")
     directions = np.full(len(close), None, dtype=object)
-    for i in range(2, len(close)):
-        if not (np.isfinite(open_[i-2:i+1]).all() and np.isfinite(close[i-2:i+1]).all()
+    for i in range(3, len(close)):
+        if not (np.isfinite(open_[i-3:i+1]).all() and np.isfinite(close[i-3:i+1]).all()
                 and np.isfinite(ema100[i]) and np.isfinite(ema300[i])):
             continue
-        green = close[i-2:i+1] > open_[i-2:i+1]
-        red = close[i-2:i+1] < open_[i-2:i+1]
-        if green[0] and red[1] and red[2] and ema300[i] > ema100[i]:
+        green = close[i-3:i+1] > open_[i-3:i+1]
+        red = close[i-3:i+1] < open_[i-3:i+1]
+        if green[0] and red[1] and red[2] and red[3] and ema300[i] > ema100[i]:
             directions[i] = "SHORT"
-        elif red[0] and green[1] and green[2] and ema300[i] < ema100[i]:
+        elif red[0] and green[1] and green[2] and green[3] and ema300[i] < ema100[i]:
             directions[i] = "LONG"
     return directions
 
@@ -39,9 +39,9 @@ class Ema100300ReversalMixin:
             self.open, self.close, self.ema100_low_values, self.ema300_high_values,
         )
         stamps = pd.DatetimeIndex(self.times)
-        expected = pd.Timedelta(minutes=2*self.config.strategy_timeframe_minutes)
-        for i in range(2, len(stamps)):
-            if stamps[i]-stamps[i-2] != expected:
+        expected = pd.Timedelta(minutes=3*self.config.strategy_timeframe_minutes)
+        for i in range(3, len(stamps)):
+            if stamps[i]-stamps[i-3] != expected:
                 self.ema100_300_directions[i] = None
 
     def _infer_signal_strategy_mode(self):

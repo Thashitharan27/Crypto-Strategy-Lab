@@ -1,6 +1,6 @@
-# EMA 100/300 — Two-Candle Reversal (Custom R)
+# EMA 100/300 — Three-Candle Reversal (Custom R)
 
-Choose **EMA 100/300 — Two-Candle Reversal (Custom R)** in Strategy Builder.
+Choose **EMA 100/300 — Three-Candle Reversal (Custom R)** in Strategy Builder.
 Choose the data period, strategy timeframe, intrabar detail and account risk,
 then run a new backtest. The automatic execution plan is shown in Risk &
 Execution. Save the configuration to reuse the preset.
@@ -10,10 +10,10 @@ The screenshot's indicator sources are used: EMA 100 of candle lows and EMA
 with the native CSL causal EMA formula and use completed candles only.
 
 - Short: EMA 300 is strictly above EMA 100, followed by the consecutive pattern
-  green → red → red. Enter at the open immediately after the second red candle
-  (the third candle after the original green).
-- Long: EMA 300 is strictly below EMA 100, with red → green → green. Enter at
-  the next open after the second green.
+  green → red → red → red. Enter at the open immediately after the third red candle
+  (the fourth candle after the original green).
+- Long: EMA 300 is strictly below EMA 100, with red → green → green → green. Enter at
+  the next open after the third green.
 
 The actual next-open entry, including entry slippage, must be **strictly above
 both EMAs for a short** or **strictly below both EMAs for a long**. Entries between
@@ -36,7 +36,7 @@ The preset owns its fixed stop, target and stop-based position sizing. It ignore
 profile stop/R multipliers, separate sizing-stop overrides, partial exits,
 break-even, trailing, timeout and TP extension. Account risk multipliers,
 market permissions, entry/veto rules, fees and leverage caps still apply.
-Only fresh complete patterns can enter; a third consecutive red/green candle
+Only fresh complete patterns can enter; a fourth consecutive red/green candle
 does not itself repeat the original setup. Existing active-trade limits apply.
 
 Completed trades save `ema100_low`, `ema300_high` and `ema_reversal_target_r`.
