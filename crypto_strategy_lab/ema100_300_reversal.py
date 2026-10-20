@@ -96,6 +96,11 @@ class Ema100300ReversalMixin:
                  else self.ema300_high_values[i] > target)
         if side not in {"LONG", "SHORT"} or not order or not np.isfinite(distance) or distance <= 0:
             return {"passed": False, "applied": False, "reason": "EMA100_TARGET_WRONG_SIDE", "distance": None}
+        slow = float(self.ema300_high_values[i])
+        outside = entry > max(target, slow) if side == "SHORT" else entry < min(target, slow)
+        if not outside:
+            return {"passed": False, "applied": False,
+                    "reason": "EMA100_300_ENTRY_POSITION_REJECTED", "distance": None}
         return {"passed": True, "applied": True, "reason": "EMA100_EQUAL_DISTANCE_STOP",
                 "distance": distance, "stop_price": 2*entry-target,
                 "level_price": target, "boundary_price": 2*entry-target,
@@ -129,4 +134,5 @@ class Ema100300ReversalMixin:
             row["ema100_low"] = getattr(pair, "ema100_low", np.nan)
             row["ema300_high"] = getattr(pair, "ema300_high", np.nan)
             row["ema_reversal_target_r"] = 1.
+            row["ema_reversal_entry_position_rule"] = "SHORT_ABOVE_BOTH_LONG_BELOW_BOTH_V1"
         return row

@@ -882,8 +882,8 @@ class RiskExecutionWorkspace(QWidget):
         if self._signal_strategy_mode() == "EMA_100_300_REVERSAL":
             self.summary_label.setText(
                 "EMA 100 (low) / EMA 300 (high) — automatic fixed 1R plan. "
-                "Short: EMA 300 > EMA 100, green → red → red. "
-                "Long: EMA 300 < EMA 100, red → green → green. "
+                "Short: EMA 300 > EMA 100, green → red → red; enter above both EMAs. "
+                "Long: EMA 300 < EMA 100, red → green → green; enter below both EMAs. "
                 "Entry: next candle open. TP: last completed candle's EMA 100 (low), fixed at entry. "
                 "SL: equal distance in the opposite direction. Wrong-side targets are skipped. "
                 f"Account risk: {execution.risk_per_leg * base.risk_multiplier:.2%} per trade before costs. "

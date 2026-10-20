@@ -15,6 +15,12 @@ with the native CSL causal EMA formula and use completed candles only.
 - Long: EMA 300 is strictly below EMA 100, with red → green → green. Enter at
   the next open after the second green.
 
+The actual next-open entry, including entry slippage, must be **strictly above
+both EMAs for a short** or **strictly below both EMAs for a long**. Entries between
+the lines or exactly on either required boundary are rejected, with reason
+`EMA100_300_ENTRY_POSITION_REJECTED`. EMA values come from the last completed
+signal candle; the future entry candle's final EMA values are not used.
+
 Green means close > open, red means close < open. A doji breaks the pattern.
 The EMA order is checked on the last completed confirmation candle; the signal
 does not require an EMA crossover. Missing strategy candles break the pattern.
@@ -33,6 +39,9 @@ Only fresh complete patterns can enter; a third consecutive red/green candle
 does not itself repeat the original setup. Existing active-trade limits apply.
 
 Completed trades save `ema100_low`, `ema300_high` and `ema_reversal_target_r`.
+New runs also save `ema_reversal_entry_position_rule` to identify this rule.
+Older completed runs keep their original trades; run a new backtest to apply
+the corrected position requirement.
 The V2 visualizer starts with EMA 100 (low) in blue and EMA 300 (high) in red.
 Other strategies retain their close-price EMA calculations. Selecting another
 chart timeframe recalculates those displayed EMAs on that chart timeframe;
