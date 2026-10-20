@@ -502,8 +502,17 @@ class FairValueGapMixin:
             self._record_skipped_signal(indicator_i, "FVG_CONFIRMATION_DIRECTION_MISMATCH")
             return
 
+        # Array-backed execution uses UTC without timezone metadata. Keep the
+        # delayed fill on the strategy clock so exit windows can compare it.
+        strategy_time = pd.Timestamp(self.times[i])
+        entry_time = pd.Timestamp(candle["confirmed_at"])
+        entry_time = (
+            entry_time.tz_convert("UTC").tz_localize(None)
+            if strategy_time.tzinfo is None
+            else entry_time.tz_convert(strategy_time.tzinfo)
+        )
         decision.update(
-            actual_entry_timestamp=candle["confirmed_at"],
+            actual_entry_timestamp=entry_time,
             entry_schedule_status="FVG_INTRABAR_CONFIRMED",
             fill_price=float(candle["close"]),
             fvg_confirmation_open=float(candle["open"]),

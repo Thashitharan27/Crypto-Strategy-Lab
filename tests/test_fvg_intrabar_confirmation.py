@@ -106,4 +106,27 @@ def test_fvg_long_confirmation_enters_at_confirmed_15m_close():
     assert execution_i == 1
     assert schedule["fill_price_source"] == "FVG_INTRABAR_CONFIRMATION"
     assert schedule["fill_price"] == 104.0
-    assert schedule["actual_entry_timestamp"] == pd.Timestamp("2026-01-01T01:15:00Z")
+    assert schedule["actual_entry_timestamp"] == pd.Timestamp("2026-01-01T01:15:00")
+
+
+def test_fvg_confirmation_fill_preserves_timezone_aware_strategy_clock():
+    p = _probe([101.0, 102.0, 104.0])
+    p.times = pd.DatetimeIndex(p.times).tz_localize("UTC").tz_convert("Asia/Colombo")
+    p.pending_next_open_entry = p._entry_decision(0)
+    p._execute_pending_next_open_entry(1)
+    entry = p.opened[0][1]["actual_entry_timestamp"]
+    assert entry == pd.Timestamp("2026-01-01T01:15:00Z")
+    assert str(entry.tzinfo) == str(p.times.tz)
+
+
+def test_fvg_five_minute_fill_can_start_naive_array_exit_window():
+    p = _probe([101.0, 99.0, 98.0])
+    p.config.fvg_confirmation_minutes = 5
+    p.pending_next_open_entry = p._entry_decision(0)
+    p._execute_pending_next_open_entry(1)
+    entry = p.opened[0][1]["actual_entry_timestamp"]
+    start = max(entry, pd.Timestamp(p.times[1]))
+    assert start == pd.Timestamp("2026-01-01T01:05:00")
+    window = p.intrabar_data.fast_window(start, pd.Timestamp(p.times[2]))
+    assert window.first_timestamp == start
+    assert p.opened[0][1]["fill_price"] == 101.0
