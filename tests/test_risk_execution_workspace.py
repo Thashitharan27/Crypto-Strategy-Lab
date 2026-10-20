@@ -54,6 +54,45 @@ def test_six_factor_separation_controls_show_only_for_that_preset():
         window.close()
 
 
+def test_first_minute_shortcut_sets_execution_data_and_round_trips():
+    from crypto_strategy_lab.data_lake_config import normalize_data_lake_config
+
+    app, window = _window()
+    try:
+        selector = window.rule_builder.direction_mode
+        selector.setCurrentIndex(selector.findData("FVG_SIX_FACTOR"))
+        window.strategy_tf.setCurrentText("15m")
+        window.intrabar_tf.setCurrentIndex(window.intrabar_tf.findData(None))
+        window.execution_form.widgets["fvg_confirmation_minutes"].setValue(5)
+        workspace = window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert not workspace.first_minute_confirmation.isHidden()
+        workspace.first_minute_confirmation.click()
+        app.processEvents()
+        config = window.build_config()
+        config.validate()
+        assert config.execution.fvg_confirmation_enabled
+        assert config.execution.fvg_confirmation_minutes == 1
+        assert config.execution.entry_timing_mode == "NEXT_CANDLE_OPEN"
+        assert config.data.use_intrabar_data
+        assert config.data.intrabar_timeframe_minutes == 1
+        assert "First 1m candle only" in workspace.summary_label.text()
+        restored = normalize_data_lake_config(config.to_dict())
+        window.apply_config(restored)
+        assert window.build_config().execution.fvg_confirmation_minutes == 1
+        # Loading an existing longer confirmation is still lossless.
+        from dataclasses import replace
+        longer = replace(restored, execution=replace(restored.execution, fvg_confirmation_minutes=5))
+        window.apply_config(longer)
+        assert window.build_config().execution.fvg_confirmation_minutes == 5
+        selector.setCurrentIndex(selector.findData("DI"))
+        workspace.refresh_visibility()
+        assert workspace.first_minute_confirmation.isHidden()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_risk_page_is_reorganized_around_one_execution_plan():
     app, window = _window()
     try:

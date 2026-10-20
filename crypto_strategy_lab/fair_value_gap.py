@@ -401,7 +401,7 @@ class FairValueGapMixin:
         data = getattr(self, "intrabar_data", None)
         if data is None:
             return None
-        minutes = int(getattr(self.config, "fvg_confirmation_minutes", 15))
+        minutes = int(getattr(self.config, "fvg_confirmation_minutes", 1))
         intrabar_minutes = int(getattr(self.config, "intrabar_timeframe_minutes", 1))
         if minutes <= 0 or intrabar_minutes <= 0 or minutes % intrabar_minutes:
             return None
