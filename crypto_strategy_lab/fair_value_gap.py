@@ -670,6 +670,7 @@ class FairValueGapMixin:
         atr = float(self.atr_values[i])
         entry = self._fvg_expected_entry_price(i, execution_i, direction)
         risk = float(stop_plan["distance"])
+        profile = self._profile_context(i)[3]
         if getattr(self.config, "fvg_target_mode", "FIXED_R") == "HTF_OPPOSING_FVG":
             from crypto_strategy_lab.fvg_htf_targets import nearest_opposing_zone
             zones = self._fvg_target_zones_at_entry(i)
@@ -682,6 +683,8 @@ class FairValueGapMixin:
                 target_r = room / risk if risk > 0 else np.nan
                 if not np.isfinite(target_r) or target_r < float(self.config.fvg_target_minimum_r):
                     return {"passed": False, "reason": "FVG_HTF_TARGET_INSUFFICIENT_ROOM"}
+                if getattr(profile, "partial_profit_enabled", False) and target_r <= float(profile.tp1_r):
+                    return {"passed": False, "reason": "FVG_HTF_TARGET_BEFORE_PARTIAL_TP"}
                 return {"passed": True, "reason": reason, "target_r": target_r,
                         "available_r": target_r, "level_price": edge, "limit_price": limit,
                         "mode": "HTF_OPPOSING_FVG", "zone": zone}
@@ -698,11 +701,13 @@ class FairValueGapMixin:
         )
         room = target_limit - entry if direction == "LONG" else entry - target_limit
         available_r = room / risk if risk > 0 else np.nan
-        profile = self._profile_context(i)[3]
         target_r = float(profile.reward_risk_ratio)
         if (getattr(self.config, "fvg_target_mode", "FIXED_R") == "HTF_OPPOSING_FVG"
                 and target_r < float(self.config.fvg_target_minimum_r)):
             return {"passed": False, "reason": "FVG_HTF_TARGET_INSUFFICIENT_ROOM"}
+        if (getattr(self.config, "fvg_target_mode", "FIXED_R") == "HTF_OPPOSING_FVG"
+                and getattr(profile, "partial_profit_enabled", False) and target_r <= float(profile.tp1_r)):
+            return {"passed": False, "reason": "FVG_HTF_TARGET_BEFORE_PARTIAL_TP"}
         if (
             not np.isfinite(available_r) or not np.isfinite(target_r) or target_r <= 0
             or available_r + 1e-12 < target_r

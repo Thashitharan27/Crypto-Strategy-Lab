@@ -32,6 +32,8 @@ If there is no opposing target zone, **Skip Trade** rejects the setup.
 and its original swing-room requirement. This fallback does not bypass an
 opposing gap that is too close or contains the entry.
 The fixed-R fallback must also meet the selected minimum reward/risk.
+If partial take profit is enabled, the final target must lie beyond its first
+partial target; otherwise the setup is skipped.
 
 Run a new backtest after selecting the mode. Completed trades record the target
 mode and exact chosen zone in `fvg_target_htf_zone`, including its boundaries,

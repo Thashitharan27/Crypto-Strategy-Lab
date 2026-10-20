@@ -126,6 +126,16 @@ def test_confirmation_wick_consumes_target_before_delayed_fill():
     assert p._fvg_target_zones_at_entry(0)
 
 
+def test_htf_target_cannot_precede_configured_partial_take_profit():
+    p = probe()
+    p._profile_context = lambda i: (None, None, None, SimpleNamespace(
+        reward_risk_ratio=3., partial_profit_enabled=True, tp1_r=2.5))
+    assert p._fvg_target_plan(0)["reason"] == "FVG_HTF_TARGET_BEFORE_PARTIAL_TP"
+    p.fvg_target_htf_snapshots = [()]
+    p.config.fvg_target_no_level_policy = "USE_FIXED_TP"
+    assert p._fvg_target_plan(0)["passed"]
+
+
 def test_target_settings_round_trip_and_reject_bad_timeframe_and_minimum():
     config = ResearchRunConfig()
     config = replace(config, execution=replace(config.execution, fvg_target_mode="HTF_OPPOSING_FVG",
