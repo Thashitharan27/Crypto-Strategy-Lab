@@ -76,7 +76,7 @@ class BacktestConfig:
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
-    fvg_confirmation_minutes: int = 15
+    fvg_confirmation_minutes: int = 1
     fvg_context_enabled: bool = False
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2

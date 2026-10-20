@@ -42,7 +42,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "ema_cross_entry_confirmation_enabled": False,
     "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
-    "fvg_confirmation_minutes": 15,
+    "fvg_confirmation_minutes": 1,
     "fvg_context_enabled": False,
     "fvg_context_timeframe_minutes": 240,
     "fvg_structure_swing_strength": 2,

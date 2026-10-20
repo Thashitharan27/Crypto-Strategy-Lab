@@ -163,8 +163,21 @@ class RiskExecutionWorkspace(QWidget):
             "fvg_confirmation_enabled", self.account["fvg_confirmation_enabled"]
         )
         self.entry_card.add_field(
-            "fvg_confirmation_minutes", "FVG Confirmation Candle", self.account["fvg_confirmation_minutes"]
+            "fvg_confirmation_minutes", "First Confirmation Candle", self.account["fvg_confirmation_minutes"]
         )
+        self.first_minute_confirmation = QToolButton()
+        self.first_minute_confirmation.setText("Use first 1m confirmation")
+        self.first_minute_confirmation.clicked.connect(self._use_first_minute_confirmation)
+        self.entry_card.add_control("first_minute_confirmation", self.first_minute_confirmation)
+        self.fvg_confirmation_note = QLabel(
+            "Check only the first completed confirmation candle after the normal entry time. "
+            "Long: close above open. Short: close below open. Enter at its close; "
+            "skip an opposite or doji candle without waiting for another. "
+            "The existing stop and target-room checks still apply. "
+            "The 1m shortcut also selects 1m intrabar data in Setup."
+        )
+        self.fvg_confirmation_note.setWordWrap(True)
+        self.entry_card.add_control("fvg_confirmation_note", self.fvg_confirmation_note)
         self.entry_card.add_control(
             "fvg_context_enabled", self.account["fvg_context_enabled"]
         )
@@ -437,6 +450,7 @@ class RiskExecutionWorkspace(QWidget):
         self.account["ema_920_trade_plan"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["ema_cross_entry_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_enabled"].toggled.connect(self.refresh_visibility)
+        self.account["fvg_confirmation_minutes"].valueChanged.connect(self.refresh_summary_from_widgets)
         self.account["di_ladder_enabled"].toggled.connect(self.refresh_visibility)
         self.account["di_ladder_mode"].currentIndexChanged.connect(self.refresh_visibility)
         builder = getattr(self.window, "rule_builder", None)
@@ -452,6 +466,14 @@ class RiskExecutionWorkspace(QWidget):
 
         self.refresh_visibility()
         self.refresh_summary_from_widgets()
+
+    def _use_first_minute_confirmation(self) -> None:
+        self.window.intrabar_tf.setCurrentText("1m")
+        self.account["fvg_confirmation_minutes"].setValue(1)
+        timing = self.account["entry_timing_mode"]
+        timing.setCurrentIndex(timing.findData("NEXT_CANDLE_OPEN"))
+        self.account["fvg_confirmation_enabled"].setChecked(True)
+        self.refresh_visibility()
 
     def _prepare_widgets(self) -> None:
         for name, text in {
@@ -535,6 +557,8 @@ class RiskExecutionWorkspace(QWidget):
             cross_plan and self.account["ema_cross_entry_confirmation_enabled"].isChecked(),
         )
         self.entry_card.set_row_visible("fvg_confirmation_enabled", fvg)
+        self.entry_card.set_row_visible("first_minute_confirmation", fvg)
+        self.entry_card.set_row_visible("fvg_confirmation_note", fvg)
         self.entry_card.set_row_visible("fvg_structure_swing_strength", fvg)
         for field in ("fvg_min_clear_bars", "fvg_min_move_away_atr"):
             self.entry_card.set_row_visible(field, self._signal_strategy_mode() == "FVG_SIX_FACTOR")
@@ -871,7 +895,11 @@ class RiskExecutionWorkspace(QWidget):
                 "from the original hypothetical next-open entry"
             )
             if ema_cross_confirmation
-            else f"{int(execution.fvg_confirmation_minutes)}m directional confirmation close"
+            else (
+                f"First {int(execution.fvg_confirmation_minutes)}m candle only — "
+                "long close > open / short close < open; fill at confirmation close, "
+                "otherwise skip (no waiting)"
+            )
             if fvg and execution.fvg_confirmation_enabled
             else "Next Candle Open — Causal"
             if timing == "NEXT_CANDLE_OPEN"

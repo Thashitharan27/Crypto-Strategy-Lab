@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 from types import SimpleNamespace
 
 from crypto_strategy_lab.fair_value_gap import FairValueGapMixin
@@ -130,3 +131,32 @@ def test_fvg_five_minute_fill_can_start_naive_array_exit_window():
     window = p.intrabar_data.fast_window(start, pd.Timestamp(p.times[2]))
     assert window.first_timestamp == start
     assert p.opened[0][1]["fill_price"] == 101.0
+
+
+@pytest.mark.parametrize("side,first_close,enters", [
+    ("LONG", 101.0, True), ("LONG", 99.0, False), ("LONG", 100.0, False),
+    ("SHORT", 99.0, True), ("SHORT", 101.0, False), ("SHORT", 100.0, False),
+])
+def test_first_minute_confirmation_does_not_wait_for_a_later_candle(side, first_close, enters):
+    p = _probe([101.0, 102.0, 104.0])
+    p.config.strategy_timeframe_minutes = 15
+    p.config.intrabar_timeframe_minutes = 1
+    p.config.fvg_confirmation_minutes = 1
+    p._selected_direction = lambda i: side
+    times = pd.date_range("2026-01-01T01:00:00Z", periods=15, freq="1min")
+    closes = np.array([first_close] + ([105.0] * 14 if side == "LONG" else [95.0] * 14))
+    opens = np.full(15, 100.0)
+    p.intrabar_data = IntrabarExecutionData(
+        times, pd.Timedelta(minutes=1), opens,
+        np.maximum(opens, closes), np.minimum(opens, closes), closes,
+    )
+    p.pending_next_open_entry = p._entry_decision(0)
+    p._execute_pending_next_open_entry(1)
+    assert bool(p.opened) == enters
+    assert p.pending_next_open_entry is None
+    if enters:
+        schedule = p.opened[0][1]
+        assert schedule["actual_entry_timestamp"] == pd.Timestamp("2026-01-01T01:01:00")
+        assert schedule["fill_price"] == first_close
+    else:
+        assert p.skipped == [(0, "FVG_CONFIRMATION_DIRECTION_MISMATCH")]
