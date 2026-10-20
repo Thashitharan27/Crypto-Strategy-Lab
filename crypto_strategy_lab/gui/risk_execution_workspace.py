@@ -335,6 +335,13 @@ class RiskExecutionWorkspace(QWidget):
         self.fvg_target_method = QLabel("Configured R before FVG move high / low")
         self.fvg_target_method.setStyleSheet("font-weight:600")
         self.target_card.add_field("fvg_target_mode", "FVG Target Method", self.account["fvg_target_mode"])
+        self.account["fvg_reject_ema100_in_tp"].setText("Reject trades with EMA 100 between entry and TP")
+        self.account["fvg_reject_ema100_in_tp"].setToolTip(
+            "Uses EMA 100 from the last completed strategy candle. Rejects longs and shorts "
+            "when EMA is inside the actual entry-to-final-TP price range, including its edges. "
+            "Checked after confirmation using the selected target mode."
+        )
+        self.target_card.add_control("fvg_reject_ema100_in_tp", self.account["fvg_reject_ema100_in_tp"])
         self.target_card.add_field("fvg_target_method", "Target Rule", self.fvg_target_method)
         for name, label in (
             ("fvg_target_timeframe_minutes", "Target FVG Timeframe"),
@@ -732,6 +739,7 @@ class RiskExecutionWorkspace(QWidget):
             self.target_card.set_row_visible(name, ema_920)
         self.target_card.set_row_visible("fvg_target_method", fvg)
         self.target_card.set_row_visible("fvg_target_mode", fvg)
+        self.target_card.set_row_visible("fvg_reject_ema100_in_tp", fvg)
         htf_fvg = fvg and self.account["fvg_target_mode"].currentData() == "HTF_OPPOSING_FVG"
         for name in ("fvg_target_timeframe_minutes", "fvg_target_minimum_r", "fvg_target_no_level_policy", "fvg_target_note"):
             self.target_card.set_row_visible(name, htf_fvg)
@@ -1015,6 +1023,8 @@ class RiskExecutionWorkspace(QWidget):
                     else f"fixed {base.reward_risk_ratio:g}R target"
                 )
 
+        if fvg and execution.fvg_reject_ema100_in_tp:
+            target += "; reject EMA 100 inside entry-to-TP box (completed strategy candle)"
         multiplier = (
             f" · risk multiplier {base.risk_multiplier:g}×"
             if abs(float(base.risk_multiplier) - 1.0) > 1e-12

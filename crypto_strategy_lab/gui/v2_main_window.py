@@ -126,7 +126,7 @@ EXECUTION_GROUPS = (
         "max_effective_leverage_per_leg", "max_combined_effective_leverage", "max_active_pairs",
     ), None),
     ("Take Profit", (
-        "fvg_target_mode", "fvg_target_timeframe_minutes", "fvg_target_minimum_r", "fvg_target_no_level_policy",
+        "fvg_target_mode", "fvg_target_timeframe_minutes", "fvg_target_minimum_r", "fvg_target_no_level_policy", "fvg_reject_ema100_in_tp",
         "sr_take_profit_mode", "sr_take_profit_timeframe_minutes",
         "sr_take_profit_maximum_r", "sr_take_profit_minimum_r",
         "sr_take_profit_buffer_r", "fvg_target_buffer_atr", "fib_target_mode",

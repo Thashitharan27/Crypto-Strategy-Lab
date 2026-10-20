@@ -153,10 +153,38 @@ def test_native_adapter_preserves_target_mode_and_nondefault_buffer():
     config = ResearchRunConfig()
     execution = replace(config.execution, fvg_target_mode="HTF_OPPOSING_FVG",
                         fvg_target_timeframe_minutes=60, fvg_target_buffer_atr=.2,
-                        fvg_target_minimum_r=2., fvg_target_no_level_policy="USE_FIXED_TP")
+                        fvg_target_minimum_r=2., fvg_target_no_level_policy="USE_FIXED_TP",
+                        fvg_reject_ema100_in_tp=True)
     native = native_simulator_config(config.data, config.features, config.strategy, execution)
     assert native.fvg_target_mode == "HTF_OPPOSING_FVG"
     assert native.fvg_target_timeframe_minutes == 60
     assert native.fvg_target_buffer_atr == .2
     assert native.fvg_target_minimum_r == 2.
     assert native.fvg_target_no_level_policy == "USE_FIXED_TP"
+    assert native.fvg_reject_ema100_in_tp
+
+
+@pytest.mark.parametrize("side,ema,reject", [
+    ("LONG", 103., True), ("LONG", 100., True), ("LONG", 106., True),
+    ("LONG", 107., False), ("LONG", 99., False),
+    ("SHORT", 97., True), ("SHORT", 94., True), ("SHORT", 100., True),
+    ("SHORT", 93., False), ("SHORT", 101., False),
+])
+def test_ema100_filter_uses_actual_profit_box_not_swing_room(side, ema, reject):
+    p = probe(side)
+    p.ema_100_values = np.array([ema, 99999.])
+    target = {"target_r": 3., "limit_price": 120. if side == "LONG" else 80.}
+    passed, reason = p._fvg_ema100_tp_filter(0, 1, target, "passed")
+    assert passed != reject
+    assert reason == ("FVG_EMA100_INSIDE_TP_BOX" if reject else "passed")
+
+
+def test_ema_filter_uses_confirmed_entry_and_rejects_missing_ema():
+    p = probe()
+    p.ema_100_values = np.array([100.5])
+    target = {"target_r": 3.}
+    assert not p._fvg_ema100_tp_filter(0, 1, target, "passed")[0]
+    p._pending_fvg_confirmation_price = 101.
+    assert p._fvg_ema100_tp_filter(0, 1, target, "passed")[0]
+    p.ema_100_values[0] = np.nan
+    assert p._fvg_ema100_tp_filter(0, 1, target, "passed")[1] == "FVG_EMA100_UNAVAILABLE"

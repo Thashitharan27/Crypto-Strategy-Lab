@@ -754,7 +754,24 @@ class FairValueGapMixin:
         target = self._fvg_target_plan(i, execution_i)
         if not target["passed"]:
             return False, str(target["reason"])
+        if getattr(self.config, "fvg_reject_ema100_in_tp", False):
+            return self._fvg_ema100_tp_filter(i, execution_i, target, reason)
         return True, reason
+
+    def _fvg_ema100_tp_filter(self, i, execution_i, target, passed_reason):
+        values = getattr(self, "ema_100_values", ())
+        ema = float(values[i]) if i < len(values) else np.nan
+        direction = self._effective_trade_direction(i)
+        entry = self._fvg_expected_entry_price(i, execution_i, direction)
+        stop = self._sr_stop_plan(i, execution_i)
+        # Fixed-R limit_price is the swing-room boundary, not the actual TP.
+        distance = float(stop["distance"])
+        tp = entry + (1 if direction == "LONG" else -1) * float(target["target_r"]) * distance
+        if not all(np.isfinite(v) for v in (ema, entry, tp)):
+            return False, "FVG_EMA100_UNAVAILABLE"
+        if min(entry, tp) <= ema <= max(entry, tp):
+            return False, "FVG_EMA100_INSIDE_TP_BOX"
+        return True, passed_reason
 
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):
         indicator_i = schedule["indicator_index"] if schedule else i
