@@ -20,10 +20,10 @@ def candles():
     return high, low, close, np.ones(len(close)), open_
 
 
-def run(arrays, end=None):
+def run(arrays, end=None, **settings):
     high, low, close, atr, open_ = [a[:end] for a in arrays]
     times = pd.date_range("2026-01-01", periods=len(close), freq="15min", tz="UTC")
-    return six_factor_context(high, low, close, atr, open_=open_, times=times)
+    return six_factor_context(high, low, close, atr, open_=open_, times=times, **settings)
 
 
 def test_six_factors_are_causal_with_saved_long_and_short_decisions():
@@ -172,3 +172,78 @@ def test_opposite_wick_candle_is_rejected_by_signal_engine():
         assert review["confirmationRule"] == "INSIDE_OR_DIRECTIONAL_REJECTION_V2"
         return
     pytest.fail("fixture must contain a directional outside-close rejection")
+
+
+
+def test_separation_counts_only_intervening_candles_and_consumes_early_touches():
+    arrays = candles()
+    baseline = run(arrays, min_clear_bars=0, min_move_away_atr=0)
+    strict = run(arrays, min_clear_bars=3, min_move_away_atr=0)
+    early = [(i,r) for i,r in enumerate(baseline[4]) if r and r["separation"]["clearBars"] < 3]
+    assert early
+    assert any(r["separation"]["clearBars"] == 0 for _,r in early)
+    for i, review in early:
+        separation = review["separation"]
+        formed = pd.Timestamp(review["formedTime"])
+        signal = pd.Timestamp(review["signalTime"])
+        assert separation["clearBars"] == int((signal-formed)/pd.Timedelta(minutes=15))-1
+        assert not any(r and r["side"]==review["side"] and r["formedTime"]==review["formedTime"] for r in strict[4][i:])
+        if separation["clearBars"] == 0:
+            assert separation["moveAwayAtr"] == 0
+    for review in strict[4]:
+        if review:
+            assert review["separation"]["clearBars"] >= 3
+
+
+def test_move_away_uses_prior_candles_and_formation_atr_only():
+    arrays=candles()
+    baseline=run(arrays,min_clear_bars=0,min_move_away_atr=0)
+    for i,review in enumerate(baseline[4]):
+        if not review or review["separation"]["moveAwayAtr"] <= 0:
+            continue
+        formed=int((pd.Timestamp(review["formedTime"])-pd.Timestamp("2026-01-01",tz="UTC"))/pd.Timedelta(minutes=15))
+        expected=max(arrays[0][formed+1:i])-review["top"] if review["side"]=="LONG" else review["bottom"]-min(arrays[1][formed+1:i])
+        expected=max(0,expected)/arrays[3][formed]
+        assert review["separation"]["moveAwayAtr"] == pytest.approx(expected)
+        equal=run(arrays,i+1,min_clear_bars=0,min_move_away_atr=expected)
+        assert equal[4][i] and equal[4][i]["formedTime"]==review["formedTime"]
+        changed=[a.copy() for a in arrays]
+        # A very large revisit wick cannot authorize insufficient prior separation.
+        if review["side"]=="LONG": changed[0][i]+=100
+        else: changed[1][i]-=100
+        rejected=run(changed,i+1,min_clear_bars=0,min_move_away_atr=expected+0.001)
+        result=rejected[4][i]
+        assert not result or result["formedTime"]!=review["formedTime"] or result["side"]!=review["side"]
+        return
+    pytest.fail("fixture needs a separated revisit")
+
+
+def test_default_separation_measurements_are_saved_and_satisfy_both_filters():
+    reviews=[r for r in run(candles())[4] if r]
+    assert reviews
+    for review in reviews:
+        sep=review["separation"]
+        assert sep["requiredClearBars"]==3 and sep["requiredMoveAwayAtr"]==0.5
+        assert sep["clearBars"]>=3 and sep["moveAwayAtr"]>=0.5 and sep["passed"]
+
+
+@pytest.mark.parametrize("bars,away",[(-1,.5),(1.5,.5),(3,-.1),(3,float('nan'))])
+def test_invalid_separation_settings_rejected(bars,away):
+    from crypto_strategy_lab.config import BacktestConfig
+    with pytest.raises(ValueError,match="FVG"):
+        BacktestConfig(fvg_min_clear_bars=bars,fvg_min_move_away_atr=away)
+
+
+def test_separation_settings_round_trip_through_native_adapter():
+    from dataclasses import replace, asdict
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig, build_data_lake_backtest_config
+    from crypto_strategy_lab.research_adapters import native_simulator_config
+    from crypto_strategy_lab.gui.config_logic import build_backtest_config
+    native=build_backtest_config({"fvg_min_clear_bars":5,"fvg_min_move_away_atr":0.75},require_paths=False)
+    assert native.fvg_min_clear_bars==5 and native.fvg_min_move_away_atr==0.75
+    base=ResearchRunConfig()
+    configured=replace(base,execution=replace(base.execution,fvg_min_clear_bars=5,fvg_min_move_away_atr=.75))
+    configured.validate()
+    restored=build_data_lake_backtest_config(asdict(configured))
+    adapted=native_simulator_config(restored.data,restored.features,restored.strategy,restored.execution)
+    assert adapted.fvg_min_clear_bars==5 and adapted.fvg_min_move_away_atr==.75

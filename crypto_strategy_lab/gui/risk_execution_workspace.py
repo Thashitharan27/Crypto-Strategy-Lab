@@ -177,6 +177,10 @@ class RiskExecutionWorkspace(QWidget):
             self.account["fvg_structure_swing_strength"],
         )
         layout.addWidget(self.entry_card)
+        self.entry_card.add_field("fvg_min_clear_bars", "FVG Minimum Clear Candles", self.account["fvg_min_clear_bars"])
+        self.account["fvg_min_clear_bars"].setToolTip("Six-factor FVG only. Completed candles strictly between formation and first touch; 0 disables this filter.")
+        self.entry_card.add_field("fvg_min_move_away_atr", "FVG Minimum Move-away (ATR)", self.account["fvg_min_move_away_atr"])
+        self.account["fvg_min_move_away_atr"].setToolTip("Six-factor FVG only. Furthest wick distance away from the near gap edge, on intervening candles, divided by formation ATR. Excludes formation and revisit. 0 disables this filter.")
 
         # Strategy-specific signal controls are grouped by pipeline stage.
         # The underlying widgets stay authoritative; no duplicate state is introduced.
@@ -532,6 +536,8 @@ class RiskExecutionWorkspace(QWidget):
         )
         self.entry_card.set_row_visible("fvg_confirmation_enabled", fvg)
         self.entry_card.set_row_visible("fvg_structure_swing_strength", fvg)
+        for field in ("fvg_min_clear_bars", "fvg_min_move_away_atr"):
+            self.entry_card.set_row_visible(field, self._signal_strategy_mode() == "FVG_SIX_FACTOR")
         self.entry_card.set_row_visible(
             "fvg_confirmation_minutes",
             fvg and self.account["fvg_confirmation_enabled"].isChecked(),

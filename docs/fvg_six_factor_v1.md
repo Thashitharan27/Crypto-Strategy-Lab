@@ -11,6 +11,24 @@ is unchanged. All six checks are required in this initial preset.
 
 ## Decision rules
 
+The six-factor preset also requires **separation before first revisit**. Under
+Risk & Execution / Entry Fill, use **FVG Minimum Clear Candles** (default 3)
+and **FVG Minimum Move-away (ATR)** (default 0.5). These are initial adjustable
+research defaults, not fitted or validated thresholds. Set either to zero to
+disable that filter; zero for both restores the prior separation behaviour.
+
+Clear candles are completed candles strictly between candle 3 (formation) and
+the first touching candle: an immediate next-candle revisit has zero. Three
+clear candles therefore means the earliest eligible first touch is four bars
+after formation. The move-away measure is the maximum high above a bullish
+gap's top, or maximum distance below a bearish gap's bottom, on those intervening
+candles, divided by ATR at formation. Formation and revisit candles never
+contribute. Both requirements must pass. An early/shallow first touch consumes
+the zone and cannot turn into a later eligible revisit. The visualizer side
+panel shows measured and required values for new accepted trades. Older runs
+are unchanged and need rerunning to apply these filters. The original First
+Revisit preset does not use the new filters.
+
 - A bullish gap is the space between candle 1's high and candle 3's low;
   bearish is mirrored. A gap becomes available after candle 3 closes.
 - Only its first later touching candle is eligible. Touches consume gaps even

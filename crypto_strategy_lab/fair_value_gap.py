@@ -553,6 +553,8 @@ class FairValueGapMixin:
                     self.high, self.low, self.close, self.atr_values, open_=self.open,
                     swing_strength=int(getattr(self.config, "fvg_structure_swing_strength", 2)),
                     times=self.times,
+                    min_clear_bars=getattr(self.config, "fvg_min_clear_bars", 3),
+                    min_move_away_atr=getattr(self.config, "fvg_min_move_away_atr", 0.5),
                 )
             if bool(getattr(self.config, "fvg_context_enabled", False)):
                 self.fvg_htf_context = higher_timeframe_fvg_context_alignment(
