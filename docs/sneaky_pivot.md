@@ -25,16 +25,22 @@ not a reproduction of its discretionary stock-market results.
   recent older confirmed swing beyond each boundary. Swings use two candles
   on each side by default; only confirmed information is used. A missing candle
   clears context; incomplete days cannot provide levels.
-- Initial red candle near support for long; initial green near resistance for
+- Initial red candle testing the previous-day low for long; initial green testing
+  the previous-day high for
   short. Body at least 50% of candle range and 0.5 prior ATR(14). Its extreme
-  must lie within 0.30 ATR of the nearest qualifying level.
+  must touch/cross that day boundary and lie within 0.30 ATR of it. An older
+  swing alone is not an entry-test level.
 - Wait for the first opposite-color candle within three subsequent bars.
-  Cancel on a breach beyond the defended initial/level extreme plus 0.05 ATR.
+  Cancel if the older swing stop is touched before entry, including ambiguous
+  1m candles touching both the stop and breakout trigger.
 - Enter only if the following 15m candle breaks the reversal high (long) or
   low (short). Use the first crossing 1m candle, including an adverse gap.
   An unfilled order expires after that one bar. Complete 1m coverage is required.
-- Stop beyond the initial candle, reversal candle and defended level, with
-  0.05 ATR buffer. Freeze the initial ATR and geometry. TP is the opposite
+- Stop exactly at the saved older confirmed swing low for longs, or swing high
+  for shorts, outside the previous-day range. Skip setups without that swing
+  or whose initial/reversal candle already touches it. Freeze this anchor at
+  the initial test; do not replace it with a later swing or candle low/high.
+  TP is the opposite
   previous-day boundary. Reject wrong-side targets/stops and direction flips.
   No extra minimum-R filter applies. Size risk using the actual stop distance.
 - One open position; discard setups starting during an earlier position.
@@ -47,7 +53,8 @@ not a reproduction of its discretionary stock-market results.
 ## Settings
 
 Risk & Execution exposes level tolerance, minimum body in ATR, confirmation
-wait, holding minutes, swing strength and stop buffer. The body/range threshold
+wait, holding minutes and swing strength. The shared zone stop-buffer setting
+does not apply to this strategy. The body/range threshold
 stays 50%. Holding minutes must cover the entire confirmation/breakout window.
 Default entry selection disables daily scheduling and other confirmation
 presets. Existing explicit Entry/Veto rules and market permissions still apply.
@@ -63,3 +70,7 @@ the exploratory trade list rather than modifying it.
 Prior-day levels, strong-body thresholds, proximity, waiting window and hold
 limit are explicit research choices where the video uses judgment. No settings
 were optimized against the historical sample.
+
+Completed runs retain their original trades and stops. Rerun the strategy to
+use the previous-day-test / older-swing-stop rules. The visualizer labels
+older saved setups without a stop source as using the legacy defended-level rule.

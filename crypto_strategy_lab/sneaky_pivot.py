@@ -78,7 +78,7 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
         surviving=[]; candidates=[]
         for p in pending:
             side=p["side"];long=side=="LONG"
-            if (l[i]<p["stop"] if long else h[i]>p["stop"]):
+            if (l[i]<=p["stop"] if long else h[i]>=p["stop"]):
                 continue
             if (c[i]>o[i] if long else c[i]<o[i]):
                 zone={"bottom":min(p["low"],l[i],p["level"]),"top":max(p["high"],h[i],p["level"]),
@@ -87,7 +87,9 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
                 candidates.append({"version":1,"strategy":MODE,"side":side,"zone":zone,
                     "opposingZone":{"bottom":p["rangeLow"],"top":p["rangeHigh"],"pivotTime":p["rangeStart"],"confirmedTime":p["rangeEnd"]},
                     "signalTime":t.isoformat(),"target":p["rangeHigh"] if long else p["rangeLow"],
-                    "trigger":float(h[i] if long else l[i]),"stop":float(zone["bottom"]-buffer*p["atr"] if long else zone["top"]+buffer*p["atr"]),
+                    "trigger":float(h[i] if long else l[i]),"stop":p["stop"],
+                    "stopSource":"Older swing low" if long else "Older swing high",
+                    "stopSwingTime":p["stopSwingTime"],
                     "setupStart":p["start"],"level":p["level"],"levelName":p["levelName"],"setupAtr":p["atr"],
                     "levels":p["levels"],"levelsSource":"Saved at setup"})
             elif i-p["index"] < wait:
@@ -101,15 +103,19 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
             av=float(atr[i-1]);body=abs(c[i]-o[i])
             if body>=body_atr*av and body>=.5*(h[i]-l[i]):
                 side="LONG" if c[i]<o[i] else "SHORT";long=side=="LONG"
-                levels=[("Previous range low" if long else "Previous range high",prior["low"] if long else prior["high"])]
+                level=prior["low"] if long else prior["high"]
                 older=[p for p in pivots[side] if p["time"]<previous and (p["price"]<prior["low"] if long else p["price"]>prior["high"])]
-                if older:levels.append(("Older swing low" if long else "Older swing high",older[-1]["price"]))
-                near=[p for p in levels if abs((l[i] if long else h[i])-p[1])<=tolerance*av]
-                if near:
-                    name,level=min(near,key=lambda p:abs((l[i] if long else h[i])-p[1]))
+                # The day boundary is the entry test; the outside swing is
+                # exclusively the stop anchor. Never substitute one for the other.
+                touches=l[i]<=level<=h[i]
+                near=abs((l[i] if long else h[i])-level)<=tolerance*av
+                swing=older[-1] if older else None
+                intact=swing is not None and (l[i]>swing["price"] if long else h[i]<swing["price"])
+                if touches and near and intact:
+                    name="Previous range low" if long else "Previous range high"
                     pending.append({"levels":snapshot_levels(prior,pivots,previous),"rangeStart":previous.isoformat(),"rangeEnd":day.isoformat(),"index":i,"side":side,"start":t.isoformat(),"level":float(level),"levelName":name,"atr":av,
                         "low":float(l[i]),"high":float(h[i]),"rangeLow":prior["low"],"rangeHigh":prior["high"],
-                        "stop":min(l[i],level)-buffer*av if long else max(h[i],level)+buffer*av})
+                        "stop":float(swing["price"]),"stopSwingTime":swing["time"].isoformat()})
         # Confirmed pivots can only affect future candles/days.
         j=i-strength
         if j-strength>=segment:
@@ -177,6 +183,12 @@ class SneakyPivotMixin:
             raise ValueError("Sneaky Pivot breakout requires complete 1m coverage")
         long=setup["side"]=="LONG";trigger=setup["trigger"]
         for timestamp,opening,high,low in candles:
+            # Cancel before filling on ambiguous minutes touching both levels.
+            # A breakout already present at the minute open has known ordering.
+            invalidated=low<=setup["stop"] if long else high>=setup["stop"]
+            open_break=opening>trigger if long else opening<trigger
+            if invalidated and not open_break:
+                return
             if high>trigger if long else low<trigger:
                 raw=max(opening,trigger) if long else min(opening,trigger)
                 decision.update(fill_price=raw,actual_entry_timestamp=timestamp,entry_schedule_status="SNEAKY_BREAKOUT_FILLED")
@@ -213,5 +225,5 @@ class SneakyPivotMixin:
         entry=self._expected_entry_price(i,execution_i,side);stop=setup["stop"]
         sign=1 if side=="LONG" else -1;risk=sign*(entry-stop);reward=sign*(setup["target"]-entry)
         if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0:return reject
-        return {"passed":True,"applied":True,"reason":"SNEAKY_DEFENDED_LEVEL_STOP","distance":risk,"stop_price":stop,
+        return {"passed":True,"applied":True,"reason":"SNEAKY_OLDER_SWING_STOP","distance":risk,"stop_price":stop,
                 "boundary_price":stop,"level_price":setup["target"],"distance_atr":risk/setup["setupAtr"],"timeframe_minutes":15}
