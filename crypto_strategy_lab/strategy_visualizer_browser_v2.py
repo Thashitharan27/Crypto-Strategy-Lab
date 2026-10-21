@@ -558,7 +558,8 @@ button:disabled{opacity:.45;cursor:default}
     $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error) || currentReview()?.decision!=='Take';
     $('manual-close').disabled=manualCloseLocked();$('manual-pick-exit').disabled=manualCloseLocked();
     const closed=currentReview()?.manualExit;
-    $('manual-exit-status').textContent=closed?'Manual position closed ('+(closed.reason || 'Manual')+') · '+(closed.exitTime!=null?'Exit time '+fmtTime(closed.exitTime):'Exit candle '+fmtTime(closed.candleTime))+' UTC · '+formatPrice(closed.price)+' · Gross '+closed.grossR.toFixed(2)+' R ('+closed.returnPercent.toFixed(2)+'%) · before fees/slippage.'+(closed.ambiguous?' Both levels touched: conservative SL used.':''):confirmed?'Manual position open. Close at the latest closed candle, pick an exit, or advance until TP/SL is reached.':'';
+    const closedKnown=closed && (closed.availableAt ?? closed.candleTime+replayInterval)<=replayCutoff;
+    $('manual-exit-status').textContent=closed && !closedKnown?'Previously reviewed manual position; advance to its exit candle to reveal the result.':closed?'Manual position closed ('+(closed.reason || 'Manual')+') · '+(closed.exitTime!=null?'Exit time '+fmtTime(closed.exitTime):'Exit candle '+fmtTime(closed.candleTime))+' UTC · '+formatPrice(closed.price)+' · Gross '+closed.grossR.toFixed(2)+' R ('+closed.returnPercent.toFixed(2)+'%) · before fees/slippage.'+(closed.ambiguous?' Both levels touched: conservative SL used.':''):confirmed?'Manual position open. Close at the latest closed candle, pick an exit, or advance until TP/SL is reached.':'';
     const record=currentReview();
     $('manual-history').hidden=!record?.planHistory?.length;
     const history=$('manual-history-content');history.replaceChildren();
