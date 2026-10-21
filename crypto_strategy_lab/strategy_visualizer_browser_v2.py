@@ -190,6 +190,8 @@ button:disabled{opacity:.45;cursor:default}
         <label>Entry <input id="manual-entry" type="number" step="any" min="0" aria-label="Manual entry price"></label><button data-pick-level="entry">Pick entry</button>
         <label>SL <input id="manual-stop" type="number" step="any" min="0" aria-label="Manual stop-loss price"></label><button data-pick-level="stop">Pick SL</button>
         <label>TP <input id="manual-target" type="number" step="any" min="0" aria-label="Manual take-profit price"></label><button data-pick-level="target">Pick TP</button>
+        <button id="manual-move">Move box</button><span id="manual-time"></span>
+        <button id="manual-confirm">Confirm manual entry</button>
         <button id="manual-save">Save plan</button><button id="manual-reset">Use auto levels</button>
         <span id="manual-plan-status" role="status"></span>
         <details id="manual-history" hidden><summary>Saved plan changes</summary><div id="manual-history-content"></div></details>
@@ -333,6 +335,8 @@ button:disabled{opacity:.45;cursor:default}
   let replayBusy = false;
   let manualPlanDraft = null;
   let manualPick = null;
+  let manualEntryTime = null;
+  let manualEntryMessage = '';
   let reviewRecords = [];
   let reviewStorageAvailable = true;
   const normalViewsSeen = new Set();
@@ -371,21 +375,28 @@ button:disabled{opacity:.45;cursor:default}
   }
   function automaticPlan() {
     const trade=sourcePayload?.selectedTrade || {};
-    return {entry:Number(trade.Entry),stop:Number(trade.Stop),target:Number(trade.Target)};
+    const time=Date.parse(trade['Entry Time'] || '')/1000;
+    const bar=(sourcePayload?.candles || []).find(item=>item.time<=time && time<item.time+replayInterval);
+    return {entry:Number(trade.Entry),stop:Number(trade.Stop),target:Number(trade.Target),entryTime:bar?.time ?? time};
   }
   function manualPlanLocked() {
-    return replayBusy || replayRevealed || replayOutcomeVisible || currentReview()?.netR!=null;
+    return replayBusy || replayRevealed || Boolean(currentReview()?.manualEntry);
   }
   function loadManualPlan(plan) {
     for(const key of ['entry','stop','target']) $('manual-'+key).value=plan[key] ?? '';
+    manualEntryTime=plan.entryTime ?? automaticPlan().entryTime;
+    manualEntryMessage='';
     manualPick=null; chartWrap.style.cursor=''; refreshManualPlan();
   }
   function refreshManualPlan() {
     if(manualPlanLocked()) {manualPick=null;chartWrap.style.cursor='';}
     manualPlanDraft=cslManualPlan($('manual-entry').value,$('manual-stop').value,$('manual-target').value,sourcePayload?.selectedTrade?.Side);
+    manualPlanDraft.entryTime=manualEntryTime;
     const saved=currentReview()?.manualPlan;
-    const dirty=!saved || ['entry','stop','target'].some(key=>saved[key]!==manualPlanDraft[key]);
-    const status=manualPlanDraft.error || ('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Unsaved preview — choose Take/Skip/Unsure or Save plan.':'Saved manual plan.')+' Prices only; entry time stays at the automated entry. No manual fills or results are simulated.');
+    const dirty=!saved || ['entry','stop','target','entryTime'].some(key=>saved[key]!==manualPlanDraft[key]);
+    const confirmed=currentReview()?.manualEntry;
+    $('manual-time').textContent='Entry candle: '+fmtTime(manualEntryTime)+' UTC';
+    const status=manualPlanDraft.error || (confirmed?'Manual entry confirmed at '+fmtTime(confirmed.candleTime)+' UTC.':('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Unsaved preview — choose Take/Skip/Unsure or Save plan.':'Saved manual plan.')))+' '+manualEntryMessage+' Move box selects a visible candle; prices stay unchanged. Confirmation records your decision, not a simulated fill or manual P&L.';
     $('manual-plan-status').textContent=manualPick?'Click the chart to place '+manualPick+'.':status;
     $('manual-plan-status').style.color=manualPlanDraft.error?'#fda4af':'#b9d7f5';
     const locked=manualPlanLocked();
@@ -393,6 +404,8 @@ button:disabled{opacity:.45;cursor:default}
     for(const button of document.querySelectorAll('[data-pick-level]')) button.disabled=locked;
     $('manual-save').disabled=locked || Boolean(manualPlanDraft.error) || !currentReview()?.decision;
     $('manual-reset').disabled=locked;
+    $('manual-move').disabled=locked;
+    $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error) || currentReview()?.decision!=='Take';
     const record=currentReview();
     $('manual-history').hidden=!record?.planHistory?.length;
     const history=$('manual-history-content');history.replaceChildren();
@@ -402,7 +415,7 @@ button:disabled{opacity:.45;cursor:default}
     }
     for(const revision of (record?.planHistory || []).slice(-20)) {
       const line=document.createElement('p');
-      line.textContent=String(revision.replayTime)+' · '+(revision.futureSeen?'After advancing / previously viewed':'Pre-entry plan')+(revision.outcomePreviouslyShown?' (outcome previously shown)':'')+' · Entry '+formatPrice(revision.entry)+' · SL '+formatPrice(revision.stop)+' · TP '+formatPrice(revision.target);history.appendChild(line);
+      line.textContent=String(revision.replayTime)+' · '+(revision.futureSeen?'After advancing / previously viewed':'Pre-entry plan')+(revision.outcomePreviouslyShown?' (outcome previously shown)':'')+' · Entry '+formatPrice(revision.entry)+' · Candle '+(revision.entryTime!=null?fmtTime(revision.entryTime):'automatic')+' · SL '+formatPrice(revision.stop)+' · TP '+formatPrice(revision.target);history.appendChild(line);
     }
   }
   function storeManualPlan() {
@@ -432,7 +445,7 @@ button:disabled{opacity:.45;cursor:default}
       button.setAttribute('aria-pressed',String(record?.decision===button.dataset.replayDecision));
     }
     $('replay-notes').disabled=replayBusy || locked;
-    for(const id of ['replay-step','replay-play','replay-reveal']) $(id).disabled=replayBusy || !record || replayRevealed || replayOutcomeVisible;
+    for(const id of ['replay-step','replay-play','replay-reveal']) $(id).disabled=replayBusy || !record || replayRevealed;
     $('replay-restart').disabled=replayBusy;
     let message=String(sourcePayload?.selectedTrade?.Side || '')+' entry preview · '+fmtTime(replayCutoff)+' · '+(record ? 'Your choice: '+record.decision : 'Record Take, Skip or Unsure to unlock future candles.');
     if(record?.revealedAt && !replayAdvanced && !replayRevealed) message+=' Previously reviewed; original judgement retained.';
@@ -487,12 +500,11 @@ button:disabled{opacity:.45;cursor:default}
     if(replayActive && !manualPlanLocked()) {
       refreshManualPlan(); if(manualPlanDraft.error) return; storeManualPlan();
     }
-    if(replayBusy || !replayActive || replayRevealed || replayOutcomeVisible || !markFutureSeen()) return;
+    if(replayBusy || !replayActive || replayRevealed || !markFutureSeen()) return;
     const next=(sourcePayload.candles || []).find(bar=>bar.time+replayInterval>replayCutoff);
     if(!next) { stopReplay(); $('replay-status').textContent='End of available candles. Export your review to retain it.'; return; }
     replayCutoff=next.time+replayInterval; replayAdvanced=true;
     refreshReplay();
-    if(replayOutcomeVisible) stopReplay();
   }
   function updateTradeLabels() {
     [...tradeSelect.options].forEach((option,index)=>option.textContent=replayActive ? 'Trade '+(index+1)+' · outcome hidden' : boot.trades[index].label);
@@ -523,10 +535,24 @@ button:disabled{opacity:.45;cursor:default}
   for(const key of ['entry','stop','target']) $('manual-'+key).addEventListener('input',()=>{
     if(manualPlanLocked()) return;
     stopReplay();
+    manualEntryMessage='';
     refreshManualPlan(); resetPriceScale();
   });
   $('manual-save').addEventListener('click',()=>{if(!manualPlanLocked()){storeManualPlan();updateReplayControls();redrawOverlays();}});
   $('manual-reset').addEventListener('click',()=>{if(!manualPlanLocked()){loadManualPlan(automaticPlan());resetPriceScale();}});
+  $('manual-move').addEventListener('click',()=>{
+    if(manualPlanLocked()) return;
+    stopReplay();manualPick='candle';chartWrap.style.cursor='crosshair';refreshManualPlan();
+  });
+  $('manual-confirm').addEventListener('click',()=>{
+    if(manualPlanLocked() || currentReview()?.decision!=='Take') return;
+    stopReplay();refreshManualPlan();if(manualPlanDraft.error)return;
+    storeManualPlan();const record=currentReview();
+    const result=cslConfirmManualEntry(record,sourcePayload.candles || [],replayCutoff,replayInterval,new Date().toISOString());
+    if(result.error) {manualEntryMessage=result.error;refreshManualPlan();return;}
+    reviewRecords=reviewRecords.map(item=>item===record?result:item);saveReviews();
+    manualEntryMessage='';updateReplayControls();redrawOverlays();
+  });
   document.querySelectorAll('[data-pick-level]').forEach(button=>button.addEventListener('click',()=>{
     if(manualPlanLocked()) return;
     stopReplay();manualPick=button.dataset.pickLevel;chartWrap.style.cursor='crosshair';refreshManualPlan();
@@ -538,7 +564,7 @@ button:disabled{opacity:.45;cursor:default}
   $('replay-step').addEventListener('click',()=>{stopReplay();stepReplay();});
   $('replay-play').addEventListener('click',()=>{
     if(replayTimer) {stopReplay();return;}
-    if(replayBusy || !currentReview() || replayOutcomeVisible || replayRevealed) return;
+    if(replayBusy || !currentReview() || replayRevealed) return;
     replayTimer=setInterval(stepReplay,Number($('replay-speed').value)); $('replay-play').textContent='Pause';
   });
   $('replay-speed').addEventListener('change',()=>{if(replayTimer){stopReplay();$('replay-play').click();}});
@@ -556,10 +582,11 @@ button:disabled{opacity:.45;cursor:default}
     const records=reviewRecords.filter(record=>record?.runId===boot.run.runId && record?.symbol===boot.run.symbol);
     const scored=records.filter(record=>record.netR!=null && Number.isFinite(Number(record.netR)));
     const sum=list=>list.reduce((total,record)=>total+Number(record.netR),0);
-    const report={version:2,runId:boot.run.runId,symbol:boot.run.symbol,exportedAt:new Date().toISOString(),
+    const report={version:3,runId:boot.run.runId,symbol:boot.run.symbol,exportedAt:new Date().toISOString(),
       summary:{reviewed:records.length,revealed:scored.length,automaticNetR:sum(scored),manualTakeNetR:sum(scored.filter(r=>r.decision==='Take')),skippedNetR:sum(scored.filter(r=>r.decision==='Skip')),unsureNetR:sum(scored.filter(r=>r.decision==='Unsure'))},
       manualPlans:records.filter(record=>record.manualPlan).length,
-      interpretation:'R totals use original automated trade outcomes. Manual entry/SL/TP plans and timestamped revisions are recorded only; no manual fills, P&L, fees, portfolio sizing or overlapping positions are resimulated.',reviews:records};
+      confirmedManualEntries:records.filter(record=>record.manualEntry).length,
+      interpretation:'R totals use original automated trade outcomes. Manual plans include a selected candle and timestamped revisions. Manual entry confirmations are user decisions validated against a closed candle range; exact intrabar fill time is unknown. No manual P&L, fees, portfolio sizing or overlapping positions are resimulated.',reviews:records};
     const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
     const link=document.createElement('a'); link.href=url; link.download='csl-manual-replay-reviews.json'; document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
@@ -1126,9 +1153,9 @@ button:disabled{opacity:.45;cursor:default}
     const stop=Number(trade.Stop ?? trade.stop);
     const target=Number(trade.Target ?? trade.target);
     const exitPrice=Number(trade.Exit ?? trade.exit);
-    const x1=chart.timeScale().timeToCoordinate(Number(open.time));
+    const x1=chart.timeScale().timeToCoordinate(manual ? manualPlanDraft.entryTime : Number(open.time));
     const endTime=exit ? Number(exit.time) : Number(payload.selectedTradeViewEnd);
-    const x2=replayActive && !replayOutcomeVisible ? Number(x1)+100 : chart.timeScale().timeToCoordinate(endTime);
+    const x2=manual || (replayActive && !replayOutcomeVisible) ? Number(x1)+100 : chart.timeScale().timeToCoordinate(endTime);
     const entryY=candles.priceToCoordinate(entry);
     const stopY=candles.priceToCoordinate(stop);
     const targetY=candles.priceToCoordinate(target);
@@ -1222,6 +1249,14 @@ button:disabled{opacity:.45;cursor:default}
     candles.setData(payload.candles || []);
     chart.subscribeClick(event=>{
       if(!replayActive || !manualPick || manualPlanLocked() || !event.point || event.point.y<0 || event.point.y>chart.panes()[0].getHeight()) return;
+      if(manualPick==='candle') {
+        const time=Number(event.time);
+        const first=automaticPlan().entryTime;
+        if(event.time==null || !Number.isFinite(time) || time<first || !(payload.candles || []).some(bar=>bar.time===time)) {
+          manualEntryMessage='Choose a visible candle at or after the automatic entry.';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();return;
+        }
+        manualEntryTime=time;manualEntryMessage='';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();resetPriceScale();return;
+      }
       const price=candles.coordinateToPrice(event.point.y);
       if(price==null || !Number.isFinite(price) || price<=0) return;
       $('manual-'+manualPick).value=Number(price.toPrecision(12));

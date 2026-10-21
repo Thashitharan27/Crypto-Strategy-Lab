@@ -65,6 +65,51 @@ def source():
     }
 
 
+def test_moving_only_entry_candle_records_a_separate_revision():
+    result=evaluate_manual('''
+const original={entry:100,stop:90,target:120,entryTime:120};
+const first=cslRecordManualPlan({decision:'Take'},original,original,{recordedAt:'first'});
+const moved=cslRecordManualPlan(first,{...original,entryTime:180},original,{recordedAt:'moved',futureSeen:true});
+console.log(JSON.stringify({first,moved}));
+''')
+    assert len(result['moved']['planHistory'])==2
+    assert result['first']['manualPlan']['entryTime']==120
+    assert result['moved']['manualPlan']['entryTime']==180
+    assert result['moved']['originalPlan']['entryTime']==120
+    assert result['moved']['planHistory'][-1]['futureSeen']
+
+
+@pytest.mark.parametrize('cutoff,price,valid',[(179,100,False),(180,100,True),(180,80,False),(180,95,True),(180,105,True)])
+def test_manual_confirmation_requires_closed_selected_candle_and_reachable_price(cutoff,price,valid):
+    result=evaluate_manual(f'''
+const record={{decision:'Take',manualPlan:{{entry:{price},stop:90,target:120,entryTime:120}},planHistory:[{{recordedAt:'saved'}}]}};
+const bars=[{{time:120,open:99,high:105,low:95,close:103}},{{time:180,open:100,high:200,low:1,close:100}}];
+const result=cslConfirmManualEntry(record,bars,{cutoff},60,'confirmed');
+console.log(JSON.stringify({{record,result}}));
+''')
+    assert ('error' not in result['result'])==valid
+    assert 'manualEntry' not in result['record']
+    if valid:
+        entry=result['result']['manualEntry']
+        assert entry['candleTime']==120
+        assert entry['entry']==price
+        assert entry['planSavedAt']=='saved'
+        assert entry['candle']['high']==105
+        assert 'unknown' in entry['confirmation']
+
+
+def test_manual_confirmation_is_single_and_flags_previously_seen_results():
+    result=evaluate_manual('''
+const record={manualPlan:{entry:100,stop:90,target:120,entryTime:120},netR:-1,revealedAt:'earlier',outcomePreviouslyShown:true};
+const first=cslConfirmManualEntry(record,[{time:120,open:100,high:105,low:95,close:101}],180,60,'now');
+console.log(JSON.stringify({first,again:cslConfirmManualEntry(first,[],240,60,'later')}));
+''')
+    assert 'error' in result['again']
+    assert result['first']['manualEntry']['automaticOutcomeShown']
+    assert result['first']['manualEntry']['outcomePreviouslyShown']
+    assert result['first']['manualEntry']['futureSeen']
+
+
 def project(data, cutoff=120, entry=120, reveal=False, advanced=False):
     node = shutil.which("node")
     if not node:

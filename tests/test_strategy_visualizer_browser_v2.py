@@ -46,9 +46,11 @@ def test_replay_manual_plan_controls_history_and_chart_preview():
     assert 'chart.subscribeClick(event=>' in html
     assert 'candles.coordinateToPrice(event.point.y)' in html
     assert 'Planned entry ' in html and 'Planned SL ' in html and 'Planned TP ' in html
-    assert 'entry time stays at the automated entry' in html
-    assert 'No manual fills or results are simulated.' in html
-    assert 'version:2' in html
+    assert 'Move box' in html and 'Confirm manual entry' in html
+    assert 'manual ? manualPlanDraft.entryTime : Number(open.time)' in html
+    assert "payload.candles || []).some(bar=>bar.time===time)" in html
+    assert 'not a simulated fill or manual P&L' in html
+    assert 'version:3' in html
     assert 'Saved plan changes' in html
     assert "(record?.planHistory || []).slice(-20)" in html
 
@@ -103,7 +105,7 @@ def test_v2_html_includes_trade_box_and_correct_summary_keys():
 
     assert 'id="trade-box-layer"' in html
     assert "function drawTradeBox()" in html
-    assert "timeToCoordinate(Number(open.time))" in html
+    assert "timeToCoordinate(manual ? manualPlanDraft.entryTime : Number(open.time))" in html
     assert "trade.Entry ?? trade.entry" in html
     assert "trade['Entry Time'] || trade.entryTime" in html
 
