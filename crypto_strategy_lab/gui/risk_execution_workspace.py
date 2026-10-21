@@ -149,7 +149,7 @@ class RiskExecutionWorkspace(QWidget):
         self.ema_gap_card.add_field("ema_reversal_target_r", "Reward / risk (TP stays at EMA 100)", self.account["ema_reversal_target_r"])
         layout.addWidget(self.ema_gap_card)
 
-        self.sd_card = FormCard("Supply & demand retest", note="Confirmed swing zones. Touch → bounce away → later directional retest; entry at the next open. 0 stop buffer means the exact zone edge.")
+        self.sd_card = FormCard("Supply & demand retest", note="Strategy-owned stop and target. See the Effective Plan for entry conditions. 0 stop buffer uses the exact defended boundary.")
         for name,label in (("sd_swing_strength","Swing candles on each side"),("sd_stop_buffer_atr","Stop buffer beyond zone (ATR)"),("sd_minimum_r","Minimum reward / risk")):
             self.sd_card.add_field(name,label,self.account[name])
         self.account["sd_swing_strength"].setRange(1,20)
@@ -161,6 +161,12 @@ class RiskExecutionWorkspace(QWidget):
         self.account["ls_displacement_atr"].setRange(.01,100.)
         self.account["ls_base_bars"].setRange(1,20)
         self.account["ls_max_wait_bars"].setRange(1,500)
+        for name,label in (("sp_level_tolerance_atr","Distance to level (ATR)"),("sp_body_atr","Minimum initial body (ATR)"),("sp_confirmation_bars","Wait for reversal (candles)"),("sp_hold_minutes","Maximum hold from setup (minutes)")):
+            self.sd_card.add_field(name,label,self.account[name])
+        self.account["sp_level_tolerance_atr"].setRange(0.,10.)
+        self.account["sp_body_atr"].setRange(.01,100.)
+        self.account["sp_confirmation_bars"].setRange(1,20)
+        self.account["sp_hold_minutes"].setRange(75,100000)
         layout.addWidget(self.sd_card)
 
         self.entry_card = FormCard(
@@ -859,10 +865,15 @@ class RiskExecutionWorkspace(QWidget):
                 self.advanced_card.set_row_visible(name, enabled)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
         liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
-        supply_demand = self._signal_strategy_mode() in {"SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST"}
+        sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
+        supply_demand = self._signal_strategy_mode() in {"SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT"}
         self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
             self.sd_card.set_row_visible(name,liquidity)
+        if sneaky:self.sd_card.setTitle("Sneaky Pivot — all day")
+        self.sd_card.set_row_visible("sd_minimum_r",not sneaky)
+        for name in ("sp_level_tolerance_atr","sp_body_atr","sp_confirmation_bars","sp_hold_minutes"):
+            self.sd_card.set_row_visible(name,sneaky)
         self.sd_card.setVisible(supply_demand)
         self.ema_gap_card.setVisible(automatic_reversal)
         for card in (self.entry_card, self.stop_card, self.target_card, self.ladder_card,
@@ -918,6 +929,9 @@ class RiskExecutionWorkspace(QWidget):
         return ", ".join(enabled) if enabled else "no optional trade management"
 
     def update_summary(self, execution, base) -> None:
+        if self._signal_strategy_mode() == "SNEAKY_PIVOT":
+            self.summary_label.setText(f"All-day 15m Sneaky Pivot; previous complete UTC-day high/low and older confirmed swings. Initial body ≥50% of range and {execution.sp_body_atr:g} ATR, within {execution.sp_level_tolerance_atr:g} ATR of a level. First reversal within {execution.sp_confirmation_bars} candles; break its high/low during the next candle using 1m data. SL beyond defended extreme + {execution.sd_stop_buffer_atr:g} ATR; TP opposite prior-day boundary. Hold cap {execution.sp_hold_minutes} minutes from setup. One open trade; no session restriction or minimum-R filter.")
+            return
         if self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST":
             self.summary_label.setText(
                 f"Liquidity sweep: confirmed HH/HL trend for longs, LH/LL for shorts; {execution.sd_swing_strength} swing candles each side. "

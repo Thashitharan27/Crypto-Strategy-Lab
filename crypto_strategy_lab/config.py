@@ -82,6 +82,10 @@ class BacktestConfig:
     ls_equal_tolerance_atr: float = 0.15
     ls_displacement_atr: float = 1.0
     ls_base_bars: int = 3
+    sp_level_tolerance_atr: float = 0.3
+    sp_body_atr: float = 0.5
+    sp_confirmation_bars: int = 3
+    sp_hold_minutes: int = 1440
     ls_max_wait_bars: int = 20
     sd_swing_strength: int = 2
     sd_stop_buffer_atr: float = 0.05
@@ -185,6 +189,8 @@ class BacktestConfig:
     def __post_init__(self) -> None:
         from crypto_strategy_lab.supply_demand_retest import validate_settings
         validate_settings(self.sd_swing_strength,self.sd_stop_buffer_atr,self.sd_minimum_r)
+        from crypto_strategy_lab.sneaky_pivot import validate_settings as validate_sneaky
+        validate_sneaky(self.sp_level_tolerance_atr,self.sp_body_atr,self.sp_confirmation_bars,self.sp_hold_minutes)
         from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
         validate_liquidity(self.ls_equal_tolerance_atr,self.ls_displacement_atr,self.ls_base_bars,self.ls_max_wait_bars)
         if not math.isfinite(self.ema_reversal_min_gap_atr) or self.ema_reversal_min_gap_atr < 0:

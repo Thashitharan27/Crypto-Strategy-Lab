@@ -622,7 +622,7 @@ button:disabled{opacity:.45;cursor:default}
         Object.assign(label.style,{left:(start+3)+'px',top:Math.max(2,y-22)+'px'}); fvgLayer.appendChild(label);
       }
     }
-    for(const [zone,name,color] of [[sd.zone,sd.side==='LONG'?'Demand entry zone':'Supply entry zone','#22c55e30'],[sd.opposingZone,'Opposing swing / target','#ef444430']]) {
+    for(const [zone,name,color] of [[sd.zone,sd.strategy==='SNEAKY_PIVOT'?'Defended setup range':(sd.side==='LONG'?'Demand entry zone':'Supply entry zone'),'#22c55e30'],[sd.opposingZone,sd.strategy==='SNEAKY_PIVOT'?'Previous UTC day range':'Opposing swing / target','#ef444430']]) {
       const a=candles.priceToCoordinate(zone.top), b=candles.priceToCoordinate(zone.bottom);
       if(a==null || b==null) continue;
       const start=Math.max(0,xAt(zone.pivotTime,0));
@@ -632,7 +632,7 @@ button:disabled{opacity:.45;cursor:default}
       const label=document.createElement('span'); label.className='fvg-note'; label.textContent=name+' '+formatPrice(zone.bottom)+' – '+formatPrice(zone.top);
       Object.assign(label.style,{left:(start+5)+'px',top:Math.max(2,a-22)+'px'}); fvgLayer.appendChild(label);
     }
-    for(const [time,text] of (sd.strategy==='LIQUIDITY_SWEEP_RETEST' ? [[sd.sweepTime,'Liquidity sweep'],[sd.zone.bounceTime,'Displacement'],[sd.signalTime,'Zone retest']] : [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']])) {
+    for(const [time,text] of (sd.strategy==='SNEAKY_PIVOT' ? [[sd.zone.touchTime,'Initial level test'],[sd.zone.bounceTime,'Reversal candle'],[sd.signalTime,'Breakout armed']] : sd.strategy==='LIQUIDITY_SWEEP_RETEST' ? [[sd.sweepTime,'Liquidity sweep'],[sd.zone.bounceTime,'Displacement'],[sd.signalTime,'Zone retest']] : [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']])) {
       if(time==null) continue;
       const label=document.createElement('span'); label.className='fvg-note'; label.textContent=text;
       Object.assign(label.style,{left:Math.max(2,xAt(time,0))+'px',top:Math.max(4,(candles.priceToCoordinate(sd.zone.top) ?? 30)+8)+'px'}); fvgLayer.appendChild(label);
@@ -757,11 +757,12 @@ button:disabled{opacity:.45;cursor:default}
       fvgReview.hidden=false; $('setup-panel').hidden=false; $('review-setup').hidden=false;
       $('review-setup').setAttribute('aria-pressed',String(reviewMode));
       $('setup-panel').setAttribute('aria-label','Supply and demand setup explanation');
-      fvgReview.textContent=(sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
+      fvgReview.textContent=(sd.strategy==='SNEAKY_PIVOT'?'Sneaky Pivot':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
       const panel=$('setup-panel'); panel.replaceChildren();
-      const title=document.createElement('h3'); title.textContent=sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
+      const title=document.createElement('h3'); title.textContent=sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
       const facts=document.createElement('p'); facts.style.whiteSpace='pre-line';
       facts.textContent='Zone confirmed: '+fmtTime(sd.zone.confirmedTime)+'\\nFirst touch: '+fmtTime(sd.zone.touchTime)+'\\nBounce: '+fmtTime(sd.zone.bounceTime)+'\\nRetest: '+fmtTime(sd.signalTime)+'\\nTarget swing: '+formatPrice(sd.target)+'\\nEntry is the next candle open. Zones are saved decision-time evidence.';
+      if(sd.strategy==='SNEAKY_PIVOT') facts.textContent='Initial test: '+fmtTime(sd.zone.touchTime)+'; reversal: '+fmtTime(sd.signalTime)+'; '+String(sd.levelName)+' '+formatPrice(sd.level)+'; breakout trigger '+formatPrice(sd.trigger)+'; stop '+formatPrice(sd.stop)+'; fixed target '+formatPrice(sd.target)+'. Enter only on a breakout during the next 15m candle using 1m data. Previous-day levels are fixed at setup; no session restriction.';
       if(sd.sweepTime!=null) {
         const sweep=document.createElement('p'); sweep.textContent='Equal-level pool: '+formatPrice(sd.liquidity.bottom)+' – '+formatPrice(sd.liquidity.top)+'; swept '+fmtTime(sd.sweepTime)+'. A later displacement confirms the entry zone.'; panel.appendChild(sweep);
       }
