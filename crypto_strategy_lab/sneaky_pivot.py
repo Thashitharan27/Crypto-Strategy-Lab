@@ -5,6 +5,36 @@ import pandas as pd
 MODE = "SNEAKY_PIVOT"
 
 
+def snapshot_levels(prior, pivots, previous):
+    """Four distinct roles; absent outside swings stay explicitly unavailable."""
+    levels=[{"role":"rangeHigh","label":"Previous day high","price":prior["high"]},
+            {"role":"rangeLow","label":"Previous day low","price":prior["low"]}]
+    for side,role,label in (("SHORT","swingHigh","Older swing high"),("LONG","swingLow","Older swing low")):
+        older=[p for p in pivots[side] if p["time"]<previous and
+               (p["price"]>prior["high"] if side=="SHORT" else p["price"]<prior["low"])]
+        levels.append({"role":role,"label":label,"price":older[-1]["price"] if older else None})
+    return levels
+
+
+def historical_levels(frame, setup_start, strength=2):
+    """Display-only reconstruction for older runs that did not save all levels."""
+    cutoff=pd.Timestamp(setup_start);previous=cutoff.normalize()-pd.Timedelta(days=1)
+    frame=frame[pd.to_datetime(frame.period_start,utc=True)<cutoff].copy()
+    times=pd.DatetimeIndex(pd.to_datetime(frame.period_start,utc=True))
+    # Match the engine's missing-candle reset before rebuilding context.
+    gaps=np.flatnonzero((times[1:]-times[:-1])!=pd.Timedelta(minutes=15))
+    if len(gaps):frame=frame.iloc[gaps[-1]+1:];times=times[gaps[-1]+1:]
+    prior=frame[(times>=previous)&(times<cutoff.normalize())]
+    if len(prior)!=96:return None
+    pivots={"LONG":[],"SHORT":[]}
+    for side,key,compare in (("LONG","low",np.less),("SHORT","high",np.greater)):
+        prices=frame[key].to_numpy(float)
+        for j in range(strength,len(frame)-strength):
+            if compare(prices[j],np.r_[prices[j-strength:j],prices[j+1:j+strength+1]]).all():
+                pivots[side].append({"time":times[j],"price":float(prices[j])})
+    return snapshot_levels({"high":float(prior.high.max()),"low":float(prior.low.min())},pivots,previous)
+
+
 def validate_settings(tolerance, body, wait, hold):
     if not np.isfinite(tolerance) or tolerance < 0:
         raise ValueError("Sneaky Pivot level tolerance must be finite and non-negative")
@@ -58,7 +88,8 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
                     "opposingZone":{"bottom":p["rangeLow"],"top":p["rangeHigh"],"pivotTime":p["rangeStart"],"confirmedTime":p["rangeEnd"]},
                     "signalTime":t.isoformat(),"target":p["rangeHigh"] if long else p["rangeLow"],
                     "trigger":float(h[i] if long else l[i]),"stop":float(zone["bottom"]-buffer*p["atr"] if long else zone["top"]+buffer*p["atr"]),
-                    "setupStart":p["start"],"level":p["level"],"levelName":p["levelName"],"setupAtr":p["atr"]})
+                    "setupStart":p["start"],"level":p["level"],"levelName":p["levelName"],"setupAtr":p["atr"],
+                    "levels":p["levels"],"levelsSource":"Saved at setup"})
             elif i-p["index"] < wait:
                 surviving.append(p)
         pending=surviving
@@ -76,7 +107,7 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
                 near=[p for p in levels if abs((l[i] if long else h[i])-p[1])<=tolerance*av]
                 if near:
                     name,level=min(near,key=lambda p:abs((l[i] if long else h[i])-p[1]))
-                    pending.append({"rangeStart":previous.isoformat(),"rangeEnd":day.isoformat(),"index":i,"side":side,"start":t.isoformat(),"level":float(level),"levelName":name,"atr":av,
+                    pending.append({"levels":snapshot_levels(prior,pivots,previous),"rangeStart":previous.isoformat(),"rangeEnd":day.isoformat(),"index":i,"side":side,"start":t.isoformat(),"level":float(level),"levelName":name,"atr":av,
                         "low":float(l[i]),"high":float(h[i]),"rangeLow":prior["low"],"rangeHigh":prior["high"],
                         "stop":min(l[i],level)-buffer*av if long else max(h[i],level)+buffer*av})
         # Confirmed pivots can only affect future candles/days.

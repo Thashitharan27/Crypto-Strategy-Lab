@@ -66,6 +66,9 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #chart{position:absolute;inset:0;z-index:1}
 #fib-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
 #fvg-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+#day-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
+.utc-day-line{position:absolute;top:0;border-left:1px dashed #8295ab88}
+.utc-day-label{position:absolute;top:4px;font-size:11px;color:#b5c6d8;background:#101923dd;padding:3px 6px;border-radius:3px;white-space:nowrap}
 #fvg-review{padding:8px 16px;background:#122a31;border-bottom:1px solid #2d5862;font-size:12px;line-height:1.6}
 #fvg-review[hidden]{display:none}
 .fvg-zone{position:absolute;background:#22d3ee35;border:2px solid #22d3ee}
@@ -162,6 +165,7 @@ button:disabled{opacity:.45;cursor:default}
     <span class="toolbar-spacer"></span>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
+    <label><input id="day-separators" type="checkbox" checked> UTC days</label>
   </div>
   <div id="reviewbar">
     <label for="trade">Review trade</label><select id="trade"></select>
@@ -184,6 +188,7 @@ button:disabled{opacity:.45;cursor:default}
   <details id="diagnostics"><summary>Trade diagnostics (expand)</summary><div id="diag">Loading…</div></details>
   <div id="workspace"><div id="chart-wrap">
     <div id="chart"></div>
+    <div id="day-layer"></div>
     <div id="fib-layer"></div>
     <div id="fvg-layer"></div>
     <div id="trade-box-layer"></div>
@@ -549,6 +554,13 @@ button:disabled{opacity:.45;cursor:default}
       low=Math.min(low,fvg.impulseOrigin,fvg.impulseExtreme,fvg.bottom);
       high=Math.max(high,fvg.impulseOrigin,fvg.impulseExtreme,fvg.top);
     }
+    if(payload?.supplyDemandDerivation?.strategy==='SNEAKY_PIVOT') {
+      for(const level of (payload.supplyDemandDerivation.levels || [])) {
+        if(level.price==null) continue;
+        const price=Number(level.price);
+        if(Number.isFinite(price)) {low=Math.min(low,price);high=Math.max(high,price);}
+      }
+    }
     if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) return null;
     const span=high-low;
     const pad=Math.max(span*.08,Math.abs(high)*.0005);
@@ -568,10 +580,67 @@ button:disabled{opacity:.45;cursor:default}
   }
 
   function redrawOverlays() {
+    drawDaySeparators();
     drawFibOverlay();
     drawFvgOverlay();
     drawTradeBox();
     layoutOverlayLabels();
+  }
+
+  function drawDaySeparators() {
+    const layer=$('day-layer'); layer.replaceChildren();
+    if(!chart || !$('day-separators').checked) return;
+    const height=chart.panes()[0].getHeight(),right=chartWrap.clientWidth-76;
+    const visible=chart.timeScale().getVisibleRange();
+    let day=null,lastLabel=-Infinity;
+    for(const bar of (payload?.candles || [])) {
+      const current=Math.floor(bar.time/86400);
+      if(current===day) continue;
+      day=current;
+      if(bar.time%86400!==0) continue;
+      if(visible && (bar.time<visible.from || bar.time>visible.to)) continue;
+      const x=chart.timeScale().timeToCoordinate(bar.time);
+      if(x==null || x<0 || x>right) continue;
+      const line=document.createElement('div');line.className='utc-day-line';
+      Object.assign(line.style,{left:x+'px',height:height+'px'});layer.appendChild(line);
+      if(x-lastLabel<120) continue;
+      const label=document.createElement('span');label.className='utc-day-label';
+      label.textContent=new Date(current*86400000).toISOString().slice(0,10)+' UTC';
+      label.style.left=Math.min(x+5,Math.max(0,right-118))+'px';layer.appendChild(label);lastLabel=x;
+    }
+  }
+
+  function drawSneakyLevels(sd,xAt,height) {
+    const right=Math.max(0,chartWrap.clientWidth-76);
+    const start=Math.max(0,xAt(sd.opposingZone.pivotTime,0));
+    const colors={rangeHigh:'#fb7185',rangeLow:'#34d399',swingHigh:'#fbbf24',swingLow:'#60a5fa'};
+    let labelBottom=-2;
+    const levels=(sd.levels || []).filter(level=>level.price!=null).slice().sort((a,b)=>Number(b.price)-Number(a.price));
+    for(const level of levels) {
+      if(level.price==null) continue;
+      const y=candles.priceToCoordinate(Number(level.price));
+      if(y==null || y<0 || y>height) continue;
+      const color=colors[level.role] || '#cbd5e1';
+      const line=document.createElement('div');line.className='fvg-level sneaky-level';
+      Object.assign(line.style,{left:start+'px',top:y+'px',width:Math.max(0,right-start)+'px',borderColor:color,borderTopStyle:level.role.startsWith('swing')?'dashed':'solid'});fvgLayer.appendChild(line);
+      const label=document.createElement('span');label.className='fvg-note sneaky-level-label';
+      label.textContent=level.label+' · '+formatPrice(level.price);
+      const labelY=Math.min(height-25,Math.max(2,y-25,labelBottom+4));
+      Object.assign(label.style,{left:'12px',top:labelY+'px',color,background:'#101923ed',borderLeft:'3px solid '+color});fvgLayer.appendChild(label);
+      labelBottom=labelY+label.offsetHeight;
+    }
+    // Small candle-outline area only; do not shade the full previous-day range.
+    const x=Math.max(0,xAt(sd.zone.touchTime,0)),end=xAt(sd.signalTime,right);
+    const top=candles.priceToCoordinate(sd.zone.top),bottom=candles.priceToCoordinate(sd.zone.bottom);
+    if(top!=null && bottom!=null) {
+      const box=document.createElement('div');box.className='fvg-zone';
+      Object.assign(box.style,{left:x+'px',top:top+'px',width:Math.max(3,end-x)+'px',height:Math.max(2,bottom-top)+'px',background:'transparent',borderColor:'#a5d8ff'});fvgLayer.appendChild(box);
+    }
+    const events=[[sd.zone.touchTime,'1 · Level test'],[sd.zone.bounceTime,'2 · Reversal / breakout armed']];
+    events.forEach(([time,text],index)=>{
+      const label=document.createElement('span');label.className='fvg-note';label.textContent=text;
+      Object.assign(label.style,{left:Math.max(12,Math.min(right-250,xAt(time,0)))+'px',top:Math.max(35,height-72+index*27)+'px'});fvgLayer.appendChild(label);
+    });
   }
 
   function formatPrice(value) {
@@ -585,7 +654,7 @@ button:disabled{opacity:.45;cursor:default}
     const boxes=[];
     const height=chart?.panes()[0]?.getHeight() || chartWrap.clientHeight;
     const width=Math.max(1,chartWrap.clientWidth-80);
-    for (const label of chartWrap.querySelectorAll('.fvg-note,.trade-label')) {
+    for (const label of chartWrap.querySelectorAll('.fvg-note:not(.sneaky-level-label),.trade-label')) {
       const w=label.offsetWidth, h=label.offsetHeight;
       const x=Math.max(2,Math.min(width-w,parseFloat(label.style.left)||0));
       const preferred=Math.max(2,Math.min(height-h-2,parseFloat(label.style.top)||0));
@@ -610,6 +679,7 @@ button:disabled{opacity:.45;cursor:default}
       return found==null ? fallback : (chart.timeScale().timeToCoordinate(found) ?? fallback);
     }
     const end=xAt(sd.signalTime,chartWrap.clientWidth-76);
+    if(sd.strategy==='SNEAKY_PIVOT') {drawSneakyLevels(sd,xAt,height);return;}
     if(sd.liquidity) {
       const price=(Number(sd.liquidity.bottom)+Number(sd.liquidity.top))/2;
       const y=candles.priceToCoordinate(price);
@@ -763,6 +833,10 @@ button:disabled{opacity:.45;cursor:default}
       const facts=document.createElement('p'); facts.style.whiteSpace='pre-line';
       facts.textContent='Zone confirmed: '+fmtTime(sd.zone.confirmedTime)+'\\nFirst touch: '+fmtTime(sd.zone.touchTime)+'\\nBounce: '+fmtTime(sd.zone.bounceTime)+'\\nRetest: '+fmtTime(sd.signalTime)+'\\nTarget swing: '+formatPrice(sd.target)+'\\nEntry is the next candle open. Zones are saved decision-time evidence.';
       if(sd.strategy==='SNEAKY_PIVOT') facts.textContent='Initial test: '+fmtTime(sd.zone.touchTime)+'; reversal: '+fmtTime(sd.signalTime)+'; '+String(sd.levelName)+' '+formatPrice(sd.level)+'; breakout trigger '+formatPrice(sd.trigger)+'; stop '+formatPrice(sd.stop)+'; fixed target '+formatPrice(sd.target)+'. Enter only on a breakout during the next 15m candle using 1m data. Previous-day levels are fixed at setup; no session restriction.';
+      if(sd.strategy==='SNEAKY_PIVOT') {
+        const levels=document.createElement('p'); levels.style.whiteSpace='pre-line';
+        levels.textContent=(sd.levelsSource || 'Saved at setup')+'\\n'+(sd.levels || []).map(level=>level.label+': '+(level.price==null?'Unavailable in the pre-setup history':formatPrice(level.price))).join('\\n');panel.appendChild(levels);
+      }
       if(sd.sweepTime!=null) {
         const sweep=document.createElement('p'); sweep.textContent='Equal-level pool: '+formatPrice(sd.liquidity.bottom)+' – '+formatPrice(sd.liquidity.top)+'; swept '+fmtTime(sd.sweepTime)+'. A later displacement confirms the entry zone.'; panel.appendChild(sweep);
       }
@@ -1308,6 +1382,7 @@ button:disabled{opacity:.45;cursor:default}
     candles?.applyOptions({});
   });
   $('reset-price').addEventListener('click',resetPriceScale);
+  $('day-separators').addEventListener('change',drawDaySeparators);
   if (!window.LightweightCharts) {
     diag.textContent = 'ERROR: Lightweight Charts failed to load.';
     return;

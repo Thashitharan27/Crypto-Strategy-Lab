@@ -22,6 +22,20 @@ class _Model:
         return f"{index + 1}/2 · trade"
 
 
+def test_sneaky_four_levels_and_utc_day_separators():
+    html=build_browser_visualizer_v2_html(_Model(),'sneaky')
+    assert 'id="day-separators" type="checkbox" checked' in html
+    assert 'function drawDaySeparators()' in html
+    assert 'Math.floor(bar.time/86400)' in html
+    assert 'bar.time%86400!==0' in html
+    assert "addEventListener('change',drawDaySeparators)" in html
+    assert 'function drawSneakyLevels(sd,xAt,height)' in html
+    assert "rangeHigh:'#fb7185',rangeLow:'#34d399',swingHigh:'#fbbf24',swingLow:'#60a5fa'" in html
+    assert "if(sd.strategy==='SNEAKY_PIVOT') {drawSneakyLevels(sd,xAt,height);return;}" in html
+    assert 'Unavailable in the pre-setup history' in html
+    assert "payload.supplyDemandDerivation.levels || []" in html
+
+
 def test_supply_demand_overlay_and_details_use_saved_evidence():
     html = build_browser_visualizer_v2_html(_Model(), "sd")
     assert "function drawSupplyDemandOverlay(sd)" in html

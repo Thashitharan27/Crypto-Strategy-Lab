@@ -973,6 +973,24 @@ class CompletedRunVisualizer:
             value=json.loads(raw) if isinstance(raw,str) else dict(raw)
             if not isinstance(value,dict) or value.get("version")!=1 or value.get("side") not in {"LONG","SHORT"} or _finite(value.get("target")) is None:
                 return {"status":"NOT_AVAILABLE"}
+            if value.get("strategy")=="SNEAKY_PIVOT" and "levels" not in value:
+                # Legacy trades saved only the selected boundary. Reconstruct
+                # display context from the same warmup, strictly before setup.
+                from .sneaky_pivot import historical_levels
+                try:
+                    start=_utc(value["setupStart"])
+                    history_start=_utc(self.seed.request.period_start)-strategy_warmup_period(self.seed.config)
+                    frame=self._market_frame(history_start,start,chart_timeframe="15m")
+                    value["levels"]=historical_levels(frame,start,self.seed.config.execution.sd_swing_strength)
+                    value["levelsSource"]="Reconstructed historical context (legacy run)"
+                except (ValueError,KeyError,AttributeError,OSError):
+                    value["levels"]=None
+                if not value.get("levels"):
+                    value["levels"]=[{"role":"rangeHigh","label":"Previous day high","price":value["opposingZone"]["top"]},
+                                     {"role":"rangeLow","label":"Previous day low","price":value["opposingZone"]["bottom"]},
+                                     {"role":"swingHigh","label":"Older swing high","price":None},
+                                     {"role":"swingLow","label":"Older swing low","price":None}]
+                    value["levelsSource"]="Saved range only; older swing context unavailable"
             value["signalTime"]=_unix_seconds(_utc(value["signalTime"]))
             if value.get("sweepTime") is not None:
                 value["sweepTime"]=_unix_seconds(_utc(value["sweepTime"]))
