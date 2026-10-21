@@ -16,8 +16,9 @@ entry** hides the result again but retains the original judgement and marks it
 as previously reviewed. Selecting another trade keeps replay active and starts
 that trade at entry. Turning replay off restores the normal completed-run view.
 
-The chart shows entry/stop/target as a fixed-width plan before the outcome is
-known; that box width does not represent the eventual trade duration. FVG
+The manual entry/stop/target box grows to the latest replay candle; once a
+confirmed position closes it ends at that exit candle. Unconfirmed boxes remain
+previews and do not trigger TP/SL exits. FVG
 evidence is shown only after its confirmation candle closes. Fib geometry is
 shown only when the saved swing-end timestamp establishes it was known; legacy
 Fib geometry without that timestamp is omitted while blind. Alternate chart
@@ -47,12 +48,15 @@ cleaner comparison.
 
 ## Drawing tools and smooth playback
 
-Use **Draw** in the chart toolbar for trend lines, rays, horizontal/vertical
+Use the vertical drawing toolbar on the left of the chart for trend lines, rays, horizontal/vertical
 lines, rectangles, Fibonacci retracements, price/time measurements and text
 notes. Select a tool and click one anchor for a horizontal/vertical line or
 note, or two anchors for other tools. Enter note text before placing a note.
 The mouse previews the second anchor. Escape cancels the unfinished drawing.
-Choose a color before drawing. Drawings stay attached to time and price while
+Open **Drawing settings** (gear icon) for color, note text, saved drawing
+selection, redraw, delete, clear and export. Close the panel to regain chart
+space. The active icon is highlighted; an on-chart hint explains the next
+anchor click. Choose a color before drawing. Drawings stay attached to time and price while
 panning, zooming or changing chart timeframe.
 
 Select an item under **Saved drawings** to delete it or use **Redraw selected**
@@ -93,7 +97,8 @@ then **Confirm manual entry** after the chosen candle closes and reaches your
 price. One review/confirmed setup is stored per day, separately from automatic
 trade reviews; return to that date to inspect its saved plan. History records
 whether candles had already been advanced before planning. This remains a
-manual review, with no simulated manual SL/TP outcomes or P&L.
+manual review. Confirmed positions can close manually or at replay TP/SL levels,
+with gross R recorded separately from automatic results.
 
 **Export reviews** includes these records with `reviewType: manual-day`, the UTC
 `day`, plan history and optional manual entry confirmation. `manualDayReviews`
@@ -135,9 +140,37 @@ seen. A candle range validates price reachability, not an exact intrabar fill
 sequence or order execution. Later plans remain visibly tagged as made after
 advancing; this is not a blind prospective execution backtest.
 
-The automated entry remains the initial replay anchor. Manual SL/TP outcomes,
-fees and P&L are not simulated. At reveal the exit label says **Auto exit**, and
-all reported R totals still use original automated results. Export format
+The automated entry remains the initial replay anchor. Automatic comparison
+totals still use original automated results. Export format
 version 3 adds the manual plan's `entryTime`, optional `manualEntry` confirmation
 and `confirmedManualEntries` count, preserving earlier choice/note/outcome
 fields. Unconfirmed plans remain plans, not entered trades.
+
+## Close and track a manual position
+
+After **Confirm manual entry**, **Close manual position** records the latest
+fully closed candle's closing price. **Pick exit** lets you select another
+visible, fully closed candle and a price within its range, at or after the
+entry candle. A closed position cannot be closed or edited a second time.
+
+Advancing replay also checks confirmed positions against their saved TP and SL.
+The first subsequent closed candle that touches either closes the position and
+pauses playback. An opening gap beyond a level exits at that opening price.
+When both levels are touched inside one candle, SL wins conservatively unless
+the opening price establishes that TP occurred first. Automatic checks skip the
+entry candle because its full OHLC cannot establish which extremes preceded
+the manual entry; a same-candle user-picked exit is retained with that ambiguity.
+Confirming a historical entry after advancing checks all already-known later
+candles and may immediately record the earlier TP/SL hit.
+
+The risk/reward box expands through the latest replay candle while open and
+freezes at the recorded exit candle. Green becomes darker when the latest price
+is on the profit side of entry; red becomes darker on the loss side, with the
+direction reversed for shorts. After closure the color uses the exit price.
+
+The status shows exit price/time, percentage return and **gross R**, calculated
+against the initial entry-to-stop distance. Fees, slippage, portfolio sizing
+and position overlap are excluded. Reviews export `manualExit` evidence,
+exit reason/method and gross R, plus a separate `manualResults` total. Existing
+automatic `netR` and Take-only comparison totals are unchanged. Browser storage
+and export preserve both user closes and TP/SL exits across review sessions.

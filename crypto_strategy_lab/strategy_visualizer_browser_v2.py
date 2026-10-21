@@ -98,12 +98,24 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #drawing-tools{flex-basis:100%}
 #drawing-tools input{background:#0c1420;color:#e6edf3;border:1px solid #475569;border-radius:4px;padding:4px}
 #drawing-status{font-size:12px;color:#b9d7f5}
+#workspace{position:relative}
+#drawing-rail{width:44px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;padding:6px 3px;background:#111c29;border-right:1px solid #334155;overflow-y:auto}
+#drawing-rail button{width:38px;min-height:34px;padding:5px;border-color:transparent;flex-shrink:0}
+#drawing-rail button[aria-pressed=true]{color:#60a5fa;background:#203b58;border-color:#4689d0}
+#drawing-rail svg{width:22px;height:22px;display:block;margin:auto;stroke:currentColor;fill:none;stroke-width:1.7}
+#drawing-settings{position:absolute;left:52px;top:6px;z-index:15;width:270px;max-height:calc(100% - 16px);overflow:auto;background:#142233;border:1px solid #475569;border-radius:6px;box-shadow:0 6px 22px #0008}
+#drawing-settings[hidden]{display:none}
+#drawing-settings #drawing-tools{display:flex;flex-direction:column;align-items:stretch;margin:0;border:0}
+#drawing-settings select,#drawing-settings input{max-width:100%;box-sizing:border-box}
+#drawing-hint{position:absolute;z-index:8;top:8px;left:8px;background:#142233e8;color:#b9d7f5;border:1px solid #475569;border-radius:4px;padding:6px 10px;font-size:12px;pointer-events:none}
 .fib-band{position:absolute;box-sizing:border-box;border-top:1px solid rgba(255,255,255,.18)}
 .fib-level-label{position:absolute;transform:translateY(-50%);padding:2px 5px;border-radius:3px;font:10px/1.2 Segoe UI,Arial,sans-serif;font-weight:700;white-space:nowrap;color:#f8fafc;background:rgba(15,23,32,.90);border:1px solid rgba(148,163,184,.44);box-shadow:0 1px 3px rgba(0,0,0,.32)}
 .fib-anchor{position:absolute;height:1px;transform-origin:0 50%;background:rgba(148,163,184,.65)}
 .trade-rect{position:absolute;box-sizing:border-box;border-radius:2px}
 .trade-rect.risk{background:rgba(219,68,68,.22);border:1px solid rgba(255,105,105,.9)}
 .trade-rect.reward{background:rgba(38,166,91,.23);border:1px solid rgba(83,220,141,.9)}
+.trade-rect.reward.current-profit{background:rgba(12,145,80,.48);border-color:#34d399}
+.trade-rect.risk.current-loss{background:rgba(180,36,52,.48);border-color:#fb7185}
 .trade-label{position:absolute;padding:2px 5px;border-radius:3px;font:11px/1.2 Segoe UI,Arial,sans-serif;white-space:nowrap}
 .trade-label.entry{background:rgba(43,108,176,.96);color:#fff}
 .trade-label.exit{background:rgba(184,132,50,.96);color:#fff}
@@ -211,6 +223,8 @@ button:disabled{opacity:.45;cursor:default}
         <label>TP <input id="manual-target" type="number" step="any" min="0" aria-label="Manual take-profit price"></label><button data-pick-level="target">Pick TP</button>
         <button id="manual-move">Move box</button><span id="manual-time"></span>
         <button id="manual-confirm">Confirm manual entry</button>
+        <button id="manual-close">Close manual position</button><button id="manual-pick-exit">Pick exit</button>
+        <span id="manual-exit-status" role="status"></span>
         <button id="manual-save">Save plan</button><button id="manual-reset">Use auto levels</button>
         <span id="manual-plan-status" role="status"></span>
         <details id="manual-history" hidden><summary>Saved plan changes</summary><div id="manual-history-content"></div></details>
@@ -232,7 +246,10 @@ button:disabled{opacity:.45;cursor:default}
     </div>
   </div>
   <details id="diagnostics"><summary>Trade diagnostics (expand)</summary><div id="diag">Loading…</div></details>
-  <div id="workspace"><div id="chart-wrap">
+  <div id="workspace"><nav id="drawing-rail" aria-label="Drawing toolbar"></nav>
+    <aside id="drawing-settings" aria-label="Drawing settings" hidden><button id="drawing-settings-close" aria-label="Close drawing settings">Close ✕</button></aside>
+    <div id="chart-wrap">
+    <div id="drawing-hint" role="status" hidden></div>
     <div id="chart"></div>
     <div id="day-layer"></div>
     <div id="fib-layer"></div>
@@ -400,6 +417,17 @@ button:disabled{opacity:.45;cursor:default}
   const drawingKey='csl-drawings-v1:'+boot.run.runId+':'+boot.run.symbol;
   let drawings=[],drawingUndo=[],drawingPoints=[],drawingHover=null,drawingEditId=null;
   let drawingStorageOk=true;
+  $('drawing-settings').appendChild($('drawing-tools'));
+  const drawingIcons={cursor:'M5 3l14 8-7 2-3 7z',trend:'M3 20L21 4',ray:'M4 20L21 3M4 17v3h3',hline:'M2 12h20',vline:'M12 2v20',rect:'M4 5h16v14H4z',fib:'M3 4h18M3 9h18M3 14h18M3 20h18',measure:'M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4',text:'M4 5h16M12 5v15M8 20h8'};
+  for(const option of $('drawing-tool').options){
+    const button=document.createElement('button');button.type='button';button.dataset.drawingTool=option.value;button.title=option.text;button.setAttribute('aria-label',option.text);
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');
+    const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d',drawingIcons[option.value]);svg.appendChild(path);button.appendChild(svg);
+    button.addEventListener('click',()=>{$('drawing-tool').value=option.value;$('drawing-tool').dispatchEvent(new Event('change'));});$('drawing-rail').appendChild(button);
+  }
+  const settingsButton=document.createElement('button');settingsButton.textContent='⚙';settingsButton.title='Drawing settings';settingsButton.setAttribute('aria-label','Drawing settings');settingsButton.addEventListener('click',()=>{$('drawing-settings').hidden=!$('drawing-settings').hidden;});$('drawing-rail').appendChild(settingsButton);
+  const undoButton=document.createElement('button');undoButton.textContent='↶';undoButton.title='Undo drawing';undoButton.setAttribute('aria-label','Undo last drawing');undoButton.addEventListener('click',()=>$('drawing-undo').click());$('drawing-rail').appendChild(undoButton);
+  $('drawing-settings-close').addEventListener('click',()=>{$('drawing-settings').hidden=true;});
   try {const saved=JSON.parse(localStorage.getItem(drawingKey)||'[]');if(Array.isArray(saved))drawings=saved.filter(item=>item && Array.isArray(item.points) && item.points.length && item.points.every(p=>Number.isFinite(p.time) && Number.isFinite(p.price) && p.price>0));}catch{drawingStorageOk=false;}
   function drawingControls() {
     const selected=$('drawing-selected').value;
@@ -409,6 +437,10 @@ button:disabled{opacity:.45;cursor:default}
     $('drawing-delete').disabled=!$('drawing-selected').value;$('drawing-edit').disabled=!$('drawing-selected').value;
     $('drawing-undo').disabled=!drawingUndo.length;
     $('drawing-status').textContent=($('drawing-tool').value==='cursor'?'Drawings saved in this browser.':drawingPoints.length?'Click the second anchor.':'Click a price-chart anchor.')+(drawingStorageOk?'':' Storage unavailable; export to keep drawings.');
+    for(const button of document.querySelectorAll('[data-drawing-tool]'))button.setAttribute('aria-pressed',String(button.dataset.drawingTool===$('drawing-tool').value));
+    $('drawing-hint').hidden=$('drawing-tool').value==='cursor';
+    $('drawing-hint').textContent=$('drawing-tool').selectedOptions[0].text+' · '+(drawingPoints.length?'Click second anchor · Esc to cancel':'Click chart to place · Esc to cancel');
+    undoButton.disabled=!drawingUndo.length;
   }
   function saveDrawings(next) {
     drawingUndo.push(drawings);if(drawingUndo.length>30)drawingUndo.shift();drawings=next;
@@ -487,6 +519,19 @@ button:disabled{opacity:.45;cursor:default}
   function manualPlanLocked() {
     return replayBusy || replayRevealed || Boolean(currentReview()?.manualEntry);
   }
+  function manualCloseLocked() {return replayBusy || !replayActive || replayRevealed || !currentReview()?.manualEntry || Boolean(currentReview()?.manualExit);}
+  function closeManualPosition(requested=null) {
+    if(manualCloseLocked())return;
+    stopReplay();const record=currentReview();
+    const result=cslCloseManualPosition(record,sourcePayload.candles || [],replayCutoff,replayInterval,new Date().toISOString(),requested);
+    if(result.error){manualEntryMessage=result.error;manualPick=null;chartWrap.style.cursor='';refreshManualPlan();return;}
+    reviewRecords=reviewRecords.map(item=>item===record?result:item);saveReviews();manualEntryMessage='';manualPick=null;chartWrap.style.cursor='';updateReplayControls();redrawOverlays();
+  }
+  function advanceManualPosition() {
+    const record=currentReview();if(!record?.manualEntry || record.manualExit)return;
+    const updated=cslAdvanceManualPosition(record,sourcePayload.candles || [],replayCutoff,replayInterval,new Date().toISOString());
+    if(updated!==record){reviewRecords=reviewRecords.map(item=>item===record?updated:item);saveReviews();stopReplay();}
+  }
   function loadManualPlan(plan) {
     for(const key of ['entry','stop','target']) $('manual-'+key).value=plan[key] ?? '';
     manualEntryTime=plan.entryTime ?? automaticPlan().entryTime;
@@ -494,14 +539,14 @@ button:disabled{opacity:.45;cursor:default}
     manualPick=null; chartWrap.style.cursor=''; refreshManualPlan();
   }
   function refreshManualPlan() {
-    if(manualPlanLocked()) {manualPick=null;chartWrap.style.cursor='';}
+    if(manualPlanLocked() && manualPick!=='exit' || manualPick==='exit' && manualCloseLocked()) {manualPick=null;chartWrap.style.cursor='';}
     manualPlanDraft=cslManualPlan($('manual-entry').value,$('manual-stop').value,$('manual-target').value,sourcePayload?.selectedTrade?.Side);
     manualPlanDraft.entryTime=manualEntryTime;
     const saved=currentReview()?.manualPlan;
     const dirty=!saved || ['entry','stop','target','entryTime'].some(key=>saved[key]!==manualPlanDraft[key]);
     const confirmed=currentReview()?.manualEntry;
     $('manual-time').textContent='Entry candle: '+fmtTime(manualEntryTime)+' UTC';
-    const status=manualPlanDraft.error || (confirmed?'Manual entry confirmed at '+fmtTime(confirmed.candleTime)+' UTC.':('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Unsaved preview — choose Take/Skip/Unsure or Save plan.':'Saved manual plan.')))+' '+manualEntryMessage+' Move box selects a visible candle; prices stay unchanged. Confirmation records your decision, not a simulated fill or manual P&L.';
+    const status=manualPlanDraft.error || (confirmed?'Manual entry confirmed at '+fmtTime(confirmed.candleTime)+' UTC.':('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Unsaved preview — choose Take/Skip/Unsure or Save plan.':'Saved manual plan.')))+' '+manualEntryMessage+' Move box selects a visible candle; prices stay unchanged. Manual results are gross R before fees/slippage. TP/SL checks start after the entry candle; ties use SL.';
     $('manual-plan-status').textContent=manualPick?'Click the chart to place '+manualPick+'.':status;
     $('manual-plan-status').style.color=manualPlanDraft.error?'#fda4af':'#b9d7f5';
     const locked=manualPlanLocked();
@@ -511,6 +556,10 @@ button:disabled{opacity:.45;cursor:default}
     $('manual-reset').disabled=locked;
     $('manual-move').disabled=locked;
     $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error) || currentReview()?.decision!=='Take';
+    $('manual-close').disabled=manualCloseLocked();$('manual-pick-exit').disabled=manualCloseLocked();
+    const closed=currentReview()?.manualExit;
+    const closedKnown=closed && (closed.availableAt ?? closed.candleTime+replayInterval)<=replayCutoff;
+    $('manual-exit-status').textContent=closed && !closedKnown?'Previously reviewed manual position; advance to its exit candle to reveal the result.':closed?'Manual position closed ('+(closed.reason || 'Manual')+') · '+(closed.exitTime!=null?'Exit time '+fmtTime(closed.exitTime):'Exit candle '+fmtTime(closed.candleTime))+' UTC · '+formatPrice(closed.price)+' · Gross '+closed.grossR.toFixed(2)+' R ('+closed.returnPercent.toFixed(2)+'%) · before fees/slippage.'+(closed.ambiguous?' Both levels touched: conservative SL used.':''):confirmed?'Manual position open. Close at the latest closed candle, pick an exit, or advance until TP/SL is reached.':'';
     const record=currentReview();
     $('manual-history').hidden=!record?.planHistory?.length;
     const history=$('manual-history-content');history.replaceChildren();
@@ -588,6 +637,7 @@ button:disabled{opacity:.45;cursor:default}
         record.exitReason=sourcePayload.selectedTrade['Exit Reason'] ?? null;
         saveReviews();
       }
+      advanceManualPosition();
     } else {
       payload=sourcePayload;
       normalViewsSeen.add(replayKey());
@@ -709,7 +759,11 @@ button:disabled{opacity:.45;cursor:default}
     const result=cslConfirmManualEntry(record,sourcePayload.candles || [],replayCutoff,replayInterval,new Date().toISOString());
     if(result.error) {manualEntryMessage=result.error;refreshManualPlan();return;}
     reviewRecords=reviewRecords.map(item=>item===record?result:item);saveReviews();
-    manualEntryMessage='';updateReplayControls();redrawOverlays();
+    manualEntryMessage='';advanceManualPosition();updateReplayControls();redrawOverlays();
+  });
+  $('manual-close').addEventListener('click',()=>closeManualPosition());
+  $('manual-pick-exit').addEventListener('click',()=>{
+    if(manualCloseLocked())return;stopReplay();$('drawing-tool').value='cursor';drawingPoints=[];drawingHover=null;drawingControls();manualPick='exit';chartWrap.style.cursor='crosshair';refreshManualPlan();
   });
   document.querySelectorAll('[data-pick-level]').forEach(button=>button.addEventListener('click',()=>{
     if(manualPlanLocked()) return;
@@ -752,7 +806,8 @@ button:disabled{opacity:.45;cursor:default}
       summary:{reviewed:records.length,revealed:scored.length,automaticNetR:sum(scored),manualTakeNetR:sum(scored.filter(r=>r.decision==='Take')),skippedNetR:sum(scored.filter(r=>r.decision==='Skip')),unsureNetR:sum(scored.filter(r=>r.decision==='Unsure'))},
       manualPlans:records.filter(record=>record.manualPlan).length,
       confirmedManualEntries:records.filter(record=>record.manualEntry).length,
-      interpretation:'R totals use original automated trade outcomes. Manual plans include a selected candle and timestamped revisions. Manual entry confirmations are user decisions validated against a closed candle range; exact intrabar fill time is unknown. No manual P&L, fees, portfolio sizing or overlapping positions are resimulated.',reviews:records};
+      manualResults:{closed:records.filter(record=>record.manualExit).length,grossR:records.reduce((total,record)=>total+Number(record.manualExit?.grossR || 0),0)},
+      interpretation:'Automatic R totals use original automated outcomes. manualResults contains gross R from confirmed manual entries and user exits or replay TP/SL hits. Level checks start after the entry candle; both levels touched uses SL unless a gap opening establishes order. Fees, slippage, portfolio sizing and overlapping positions are not simulated.',reviews:records};
     const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
     const link=document.createElement('a'); link.href=url; link.download='csl-manual-replay-reviews.json'; document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
@@ -1336,7 +1391,12 @@ button:disabled{opacity:.45;cursor:default}
     const exitPrice=Number(trade.Exit ?? trade.exit);
     const x1=chart.timeScale().timeToCoordinate(manual ? manualPlanDraft.entryTime : Number(open.time));
     const endTime=exit ? Number(exit.time) : Number(payload.selectedTradeViewEnd);
-    const x2=manual || (replayActive && !replayOutcomeVisible) ? Number(x1)+100 : chart.timeScale().timeToCoordinate(endTime);
+    const manualExit=manual && currentReview()?.manualExit;
+    const visibleManualExit=manualExit && manualExit.candleTime+replayInterval<=replayCutoff;
+    const lastVisible=(payload.candles || []).at(-1);
+    const manualEnd=visibleManualExit?manualExit.candleTime:lastVisible?.time;
+    const endX=manual?chart.timeScale().timeToCoordinate(manualEnd):null;
+    const x2=manual && endX!=null?Math.max(Number(x1)+8,Number(endX)+chart.timeScale().options().barSpacing/2):(replayActive && !replayOutcomeVisible)?Number(x1)+100:chart.timeScale().timeToCoordinate(endTime);
     const entryY=candles.priceToCoordinate(entry);
     const stopY=candles.priceToCoordinate(stop);
     const targetY=candles.priceToCoordinate(target);
@@ -1345,7 +1405,7 @@ button:disabled{opacity:.45;cursor:default}
 
     const left=Math.min(Number(x1),Number(x2));
     const right=Math.max(Number(x1),Number(x2));
-    const width=Math.max(48,right-left);
+    const width=Math.max(manual?8:48,right-left);
 
     function rect(a,b,className){
       if ([a,b].some(v => v == null || !Number.isFinite(Number(v)))) return;
@@ -1357,11 +1417,14 @@ button:disabled{opacity:.45;cursor:default}
       el.style.height=Math.max(2,Math.abs(Number(b)-Number(a)))+'px';
       tradeBoxLayer.appendChild(el);
     }
-    rect(entryY,stopY,'risk');
-    rect(entryY,targetY,'reward');
+    const currentPrice=visibleManualExit?manualExit.price:lastVisible?.close;
+    const signedMove=(String(trade.Side).toUpperCase()==='SHORT'?-1:1)*(Number(currentPrice)-entry);
+    rect(entryY,stopY,'risk'+(manual && signedMove<0?' current-loss':''));
+    rect(entryY,targetY,'reward'+(manual && signedMove>0?' current-profit':''));
     const manualLabels=[];
     manualLabels.push([addTradeLabel(left+4,entryY,'entry',(manual?'Planned entry ':'Entry ')+formatPrice(trade.Entry ?? trade.entry)),entryY,'#60a5fa']);
-    if (exit && Number.isFinite(exitPrice))
+    if(visibleManualExit)addTradeLabel(right+6,candles.priceToCoordinate(manualExit.price),'exit',(manualExit.reason || 'Manual close')+' '+formatPrice(manualExit.price)+' · '+manualExit.grossR.toFixed(2)+' R gross');
+    if (!visibleManualExit && exit && Number.isFinite(exitPrice))
       addTradeLabel(Math.max(left+4,right-90),exitY,'exit',(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
 
     const boundaryX=right+6;
@@ -1432,6 +1495,10 @@ button:disabled{opacity:.45;cursor:default}
     replaySeries.push({series:candles,kind:'candles',data:payload.candles || []});
     chart.subscribeClick(event=>{
       if(drawingClick(event))return;
+      if(manualPick==='exit'){
+        if(manualCloseLocked())return;
+        const point=drawingPoint(event);if(point)closeManualPosition({time:point.time,price:point.price});return;
+      }
       if(!replayActive || !manualPick || manualPlanLocked() || !event.point || event.point.y<0 || event.point.y>chart.panes()[0].getHeight()) return;
       if(manualPick==='candle') {
         const time=Number(event.time);
