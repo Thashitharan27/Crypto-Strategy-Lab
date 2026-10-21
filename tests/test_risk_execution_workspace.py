@@ -50,9 +50,12 @@ def test_sneaky_pivot_selection_and_settings_round_trip():
         assert window.intrabar_tf.currentData()=='1m'
         for name in ('sp_level_tolerance_atr','sp_body_atr','sp_confirmation_bars','sp_hold_minutes'):
             assert not window.execution_form.widgets[name].isHidden()
+        assert not window.execution_form.widgets['sd_stop_buffer_atr'].isHidden()
+        window.execution_form.widgets['sd_stop_buffer_atr'].setValue(.15)
         window.execution_form.widgets['sp_level_tolerance_atr'].setValue(.2)
         config=window.build_config()
         assert config.execution.sp_level_tolerance_atr==.2
+        assert config.execution.sd_stop_buffer_atr==pytest.approx(.15)
         assert 'All-day 15m Sneaky Pivot' in workspace.summary_label.text()
         assert window.execution_form.widgets['sd_minimum_r'].isHidden()
     finally:

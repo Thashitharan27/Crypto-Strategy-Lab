@@ -36,9 +36,10 @@ not a reproduction of its discretionary stock-market results.
 - Enter only if the following 15m candle breaks the reversal high (long) or
   low (short). Use the first crossing 1m candle, including an adverse gap.
   An unfilled order expires after that one bar. Complete 1m coverage is required.
-- Stop exactly at the saved older confirmed swing low for longs, or swing high
-  for shorts, outside the previous-day range. Skip setups without that swing
-  or whose initial/reversal candle already touches it. Freeze this anchor at
+- Stop below the saved older confirmed swing low for longs, or above the swing
+  high for shorts, by `sd_stop_buffer_atr × setup ATR` (default 0.05).
+  Set the buffer to zero for the exact swing price. The swing is outside the previous-day range. Skip setups without that swing
+  or whose initial/reversal candle already touches it. Freeze this anchor and preceding completed candle ATR at
   the initial test; do not replace it with a later swing or candle low/high.
   TP is the opposite
   previous-day boundary. Reject wrong-side targets/stops and direction flips.
