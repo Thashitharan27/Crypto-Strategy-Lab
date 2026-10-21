@@ -12,7 +12,7 @@ def pytest_sessionfinish(session, exitstatus):
         return
     from PySide6.QtCore import QCoreApplication, QEvent
     from PySide6.QtWidgets import QApplication
-    from shiboken6 import isValid
+    from shiboken6 import delete, isValid
 
     app = QApplication.instance()
     if app is None:
@@ -27,3 +27,7 @@ def pytest_sessionfinish(session, exitstatus):
     gc.collect()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+    # PySide's implicit application destruction also runs too late in Python
+    # finalization. Invalidate its wrappers explicitly while modules are live.
+    delete(app)
+    gc.collect()
