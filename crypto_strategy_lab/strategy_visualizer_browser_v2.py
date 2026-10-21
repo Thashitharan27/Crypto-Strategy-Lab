@@ -402,7 +402,7 @@ button:disabled{opacity:.45;cursor:default}
     }
     for(const revision of (record?.planHistory || []).slice(-20)) {
       const line=document.createElement('p');
-      line.textContent=String(revision.replayTime)+' · '+(revision.futureSeen?'After advancing / previously viewed':'Pre-entry plan')+' · Entry '+formatPrice(revision.entry)+' · SL '+formatPrice(revision.stop)+' · TP '+formatPrice(revision.target);history.appendChild(line);
+      line.textContent=String(revision.replayTime)+' · '+(revision.futureSeen?'After advancing / previously viewed':'Pre-entry plan')+(revision.outcomePreviouslyShown?' (outcome previously shown)':'')+' · Entry '+formatPrice(revision.entry)+' · SL '+formatPrice(revision.stop)+' · TP '+formatPrice(revision.target);history.appendChild(line);
     }
   }
   function storeManualPlan() {
@@ -743,7 +743,7 @@ button:disabled{opacity:.45;cursor:default}
     const boxes=[];
     const height=chart?.panes()[0]?.getHeight() || chartWrap.clientHeight;
     const width=Math.max(1,chartWrap.clientWidth-80);
-    for (const label of chartWrap.querySelectorAll('.fvg-note:not(.sneaky-level-label),.trade-label')) {
+    for (const label of chartWrap.querySelectorAll('.fvg-note:not(.sneaky-level-label),.trade-label:not(.manual-price-label)')) {
       const w=label.offsetWidth, h=label.offsetHeight;
       const x=Math.max(2,Math.min(width-w,parseFloat(label.style.left)||0));
       const preferred=Math.max(2,Math.min(height-h-2,parseFloat(label.style.top)||0));
@@ -974,6 +974,7 @@ button:disabled{opacity:.45;cursor:default}
     label.style.top=Math.max(2,Number(y)-10)+'px';
     label.textContent=text;
     tradeBoxLayer.appendChild(label);
+    return label;
   }
 
   function resolveFibAnchorTimes(fib, items, entryTime) {
@@ -1150,15 +1151,38 @@ button:disabled{opacity:.45;cursor:default}
     }
     rect(entryY,stopY,'risk');
     rect(entryY,targetY,'reward');
-    addTradeLabel(left+4,entryY,'entry',(manual?'Planned entry ':'Entry ')+formatPrice(trade.Entry ?? trade.entry));
+    const manualLabels=[];
+    manualLabels.push([addTradeLabel(left+4,entryY,'entry',(manual?'Planned entry ':'Entry ')+formatPrice(trade.Entry ?? trade.entry)),entryY,'#60a5fa']);
     if (exit && Number.isFinite(exitPrice))
       addTradeLabel(Math.max(left+4,right-90),exitY,'exit',(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
 
     const boundaryX=right+6;
     if (Number.isFinite(target))
-      addTradeLabel(boundaryX,targetY,'tp',(manual?'Planned TP ':'Target ')+formatPrice(trade.Target ?? trade.target));
+      manualLabels.push([addTradeLabel(boundaryX,targetY,'tp',(manual?'Planned TP ':'Target ')+formatPrice(trade.Target ?? trade.target)),targetY,'#34d399']);
     if (Number.isFinite(stop))
-      addTradeLabel(boundaryX,stopY,'sl',(manual?'Planned SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop));
+      manualLabels.push([addTradeLabel(boundaryX,stopY,'sl',(manual?'Planned SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)),stopY,'#fb7185']);
+    if(manual) {
+      // Preserve price ordering, with leaders to the exact price when labels
+      // need more room than the entry/stop separation provides.
+      const labels=manualLabels.filter(([label])=>label).sort((a,b)=>a[1]-b[1]);
+      const height=chart.panes()[0].getHeight(),plotRight=chartWrap.clientWidth-76;
+      let nextY=2;
+      for(const [label,y] of labels) {
+        label.classList.add('manual-price-label');
+        const top=Math.max(nextY,y-10);label.style.top=top+'px';
+        label.style.left=Math.max(2,plotRight-label.offsetWidth-4)+'px';
+        nextY=top+label.offsetHeight+4;
+      }
+      const shift=Math.max(0,nextY-height);
+      for(const [label,y,color] of labels) {
+        const top=Math.max(2,parseFloat(label.style.top)-shift);label.style.top=top+'px';
+        const x=parseFloat(label.style.left),center=top+label.offsetHeight/2;
+        const line=document.createElement('div');line.className='fvg-level';
+        Object.assign(line.style,{left:Math.min(left,x)+'px',top:y+'px',width:Math.max(3,Math.abs(x-left))+'px',borderColor:color});tradeBoxLayer.appendChild(line);
+        const leader=document.createElement('div');
+        Object.assign(leader.style,{position:'absolute',left:x+'px',top:Math.min(y,center)+'px',height:Math.abs(y-center)+'px',borderLeft:'1px solid '+color});tradeBoxLayer.appendChild(leader);
+      }
+    }
 
   }
 
