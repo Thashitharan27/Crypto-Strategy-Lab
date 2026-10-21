@@ -18,6 +18,7 @@ def candles(short=False, days=3):
             o[j]=12;c[j]=10.2;h[j]=12.1;l[j]=10
             o[j+1]=10.3;c[j+1]=11;h[j+1]=11.2;l[j+1]=10.1
             o[j+2]=11;h[j+2]=12;l[j+2]=10.9;c[j+2]=11.5
+    h[10]=25;l[20]=5  # Older, confirmed swings outside the next day's range.
     if short:o,h,l,c=30-o,30-l,30-h,30-c
     return ts,o,h,l,c,np.ones(n)
 
@@ -25,18 +26,18 @@ def candles(short=False, days=3):
 @pytest.mark.parametrize('short',[False,True])
 def test_all_day_signal_frozen_geometry_and_causality(short):
     args=candles(short);s=sneaky_setups(*args)
-    setup=s[97];assert setup is not None
+    setup=s[193];assert setup is not None
     assert setup['side']==('SHORT' if short else 'LONG')
     assert setup['target']==(10 if short else 20)
-    assert setup['stop']==pytest.approx(20.05 if short else 9.95)
+    assert setup['stop']==pytest.approx(25 if short else 5)
     assert setup['trigger']==pytest.approx(18.8 if short else 11.2)
     # Prefixes include day boundary, initial test, confirmation and breakout.
-    for end in [95,96,97,98,99,120,len(args[0])]:
+    for end in [95,96,97,192,193,194,195,len(args[0])]:
         assert sneaky_setups(*(x[:end] for x in args))==s[:end]
     # Not restricted to midnight: move the setup to 06:00, using same prior day.
     ts,o,h,l,c,atr=candles(short)
-    for x in (o,h,l,c):x[120:123]=x[96:99];x[96:99]=15
-    assert sneaky_setups(ts,o,h,l,c,atr)[121] is not None
+    for x in (o,h,l,c):x[216:219]=x[192:195];x[192:195]=15
+    assert sneaky_setups(ts,o,h,l,c,atr)[217] is not None
 
 
 def test_four_saved_levels_and_legacy_reconstruction_match_without_future_data():
@@ -57,8 +58,27 @@ def test_four_saved_levels_and_legacy_reconstruction_match_without_future_data()
 
 
 def test_missing_outer_swings_are_explicit_not_substituted_with_range():
-    setup=sneaky_setups(*candles())[97]
-    assert [x['price'] for x in setup['levels'] if x['role'].startswith('swing')]==[None,None]
+    args=candles();args[2][10]=20;args[3][20]=10
+    assert sneaky_setups(*args)[193] is None
+
+
+@pytest.mark.parametrize('short',[False,True])
+@pytest.mark.parametrize('test',['touch','near_miss','older_swing_only','stop_breached'])
+def test_entry_tests_day_boundary_but_stop_uses_frozen_older_swing(short,test):
+    ts,o,h,l,c,atr=candles()
+    if test=='near_miss':l[192]=10.1
+    if test=='older_swing_only':o[192]=7;c[192]=5.2;h[192]=7.1;l[192]=5
+    if test=='stop_breached':l[193]=5
+    if short:o,h,l,c=30-o,30-l,30-h,30-c
+    setup=sneaky_setups(ts,o,h,l,c,atr)[193]
+    if test!='touch':
+        assert setup is None
+        return
+    assert setup['level']==(20 if short else 10)
+    assert setup['stop']==(25 if short else 5)
+    assert setup['stopSource']==('Older swing high' if short else 'Older swing low')
+    assert pd.Timestamp(setup['stopSwingTime'])==ts[20]
+    assert setup['trigger']==pytest.approx(18.8 if short else 11.2)
 
 
 def test_legacy_visualizer_recovers_four_roles_without_rewriting_trade():
@@ -82,14 +102,14 @@ def test_legacy_visualizer_recovers_four_roles_without_rewriting_trade():
 
 @pytest.mark.parametrize('change',['gap','weak','wrong_colour','break_level','no_prior_day'])
 def test_missing_stage(change):
-    ts,o,h,l,c,atr=candles(days=2)
+    ts,o,h,l,c,atr=candles(days=3)
     if change=='gap':ts=ts[:80].append(ts[80:]+pd.Timedelta(minutes=15))
-    if change=='weak':o[96]=10.3
-    if change=='wrong_colour':c[97]=10.2
-    if change=='break_level':l[97]=9
-    if change=='no_prior_day':ts=ts[1:];o,h,l,c,atr=[x[1:] for x in (o,h,l,c,atr)]
+    if change=='weak':o[192]=10.3
+    if change=='wrong_colour':c[193]=10.2
+    if change=='break_level':l[193]=5
+    if change=='no_prior_day':ts=ts.delete(120);o,h,l,c,atr=[np.delete(x,120) for x in (o,h,l,c,atr)]
     s=sneaky_setups(ts,o,h,l,c,atr)
-    assert not s[96 if change=='no_prior_day' else 97]
+    assert not s[192 if change=='no_prior_day' else 193]
 
 
 def test_settings_round_trip_and_requirements():
@@ -107,7 +127,7 @@ def test_settings_round_trip_and_requirements():
 
 
 @pytest.mark.parametrize('short',[False,True])
-@pytest.mark.parametrize('event',['fill','no_break','missing'])
+@pytest.mark.parametrize('event',['fill','no_break','missing','stop_first','ambiguous_stop','gap_stop'])
 def test_native_breakout_fill_saved_evidence_and_timeout(short,event):
     from crypto_strategy_lab.config import BacktestConfig
     from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
@@ -120,7 +140,18 @@ def test_native_breakout_fill_saved_evidence_and_timeout(short,event):
     frame=pd.DataFrame(dict(timestamp=ts,open=o,high=h,low=l,close=c,volume=np.ones(len(ts))))
     minute=frame.loc[frame.index.repeat(15)].reset_index(drop=True)
     minute.timestamp=pd.date_range(ts[0],periods=len(minute),freq='1min',tz='UTC')
-    if event=='missing':minute=minute.drop(index=98*15+4)
+    if event=='missing':minute=minute.drop(index=194*15+4)
+    if event in ('stop_first','ambiguous_stop','gap_stop'):
+        for j in range(194,len(ts),96):
+            idx=j*15
+            if short:
+                minute.loc[idx,'high']=25
+                if event=='stop_first':minute.loc[idx,['low','close']]=19
+                if event=='gap_stop':minute.loc[idx,['open','close']]=18.5
+            else:
+                minute.loc[idx,'low']=5
+                if event=='stop_first':minute.loc[idx,['high','close']]=11
+                if event=='gap_stop':minute.loc[idx,['open','close']]=11.5
     profiles,_=compile_profiles(direction_mode=MODE,market_permissions=MARKET_PERMISSIONS)
     config=BacktestConfig(strategy_timeframe_minutes=15,intrabar_timeframe_minutes=1,
         strategy_profiles={k:StrategyProfile(**asdict(p)) for k,p in profiles.items()},
@@ -132,7 +163,7 @@ def test_native_breakout_fill_saved_evidence_and_timeout(short,event):
         with pytest.raises(ValueError,match='complete 1m'):engine.run()
         return
     trades=engine.run()
-    if event=='no_break':
+    if event in ('no_break','stop_first','ambiguous_stop'):
         assert len(trades)==0
         return
     assert len(trades)>0
@@ -143,6 +174,7 @@ def test_native_breakout_fill_saved_evidence_and_timeout(short,event):
         assert pd.Timestamp(setup['signalTime'])+pd.Timedelta(minutes=15)<=pd.Timestamp(row.entry_time)<pd.Timestamp(setup['signalTime'])+pd.Timedelta(minutes=30)
         assert getattr(row,row.side.lower()+'_tp')==setup['target']
         assert getattr(row,row.side.lower()+'_sl')==pytest.approx(setup['stop'])
+        if event=='gap_stop':assert getattr(row,row.side.lower()+'_final_exit_reason')=='SL'
         assert pd.Timestamp(row.exit_time)<=pd.Timestamp(setup['setupStart'])+pd.Timedelta(minutes=75)
 
 
