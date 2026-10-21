@@ -71,6 +71,9 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #chart{position:absolute;inset:0;z-index:1}
 #fib-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
 #fvg-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+#sr-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
+.sr-zone{position:absolute;border-top:1px solid;border-bottom:1px solid;box-sizing:border-box}
+.sr-zone span{position:absolute;left:8px;top:0;font:11px Segoe UI;background:#142532;color:#d8e9f5;padding:2px 4px;white-space:nowrap}
 #day-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
 .utc-day-line{position:absolute;top:0;border-left:1px dashed #8295ab88}
 .utc-day-label{position:absolute;top:4px;font-size:11px;color:#b5c6d8;background:#101923dd;padding:3px 6px;border-radius:3px;white-space:nowrap}
@@ -192,6 +195,9 @@ button:disabled{opacity:.45;cursor:default}
     <span class="toolbar-spacer"></span>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
+    <label title="Previous UTC day confirmed swing zones; visual reference only"><input id="sr-zones" type="checkbox"> Previous-day S/R</label>
+    <select id="sr-width" aria-label="S/R zone width"><option value="1">Narrow zones</option><option value="2" selected>Normal zones</option><option value="4">Wide zones</option></select>
+    <span id="sr-status" role="status"></span>
     <label><input id="day-separators" type="checkbox" checked> UTC days</label>
   </div>
   <div id="reviewbar">
@@ -254,6 +260,7 @@ button:disabled{opacity:.45;cursor:default}
     <div id="drawing-hint" role="status" hidden></div>
     <div id="chart"></div>
     <div id="day-layer"></div>
+    <div id="sr-layer"></div>
     <div id="fib-layer"></div>
     <div id="fvg-layer"></div>
     <div id="trade-box-layer"></div>
@@ -934,11 +941,36 @@ button:disabled{opacity:.45;cursor:default}
 
   function redrawOverlays() {
     drawDaySeparators();
+    drawPreviousDayZones();
     drawFibOverlay();
     drawFvgOverlay();
     drawTradeBox();
     layoutOverlayLabels();
     drawUserDrawings();
+  }
+
+  let srCache=null;
+  function drawPreviousDayZones() {
+    const layer=$('sr-layer');layer.replaceChildren();$('sr-status').textContent='';
+    if(!chart || !candles || !$('sr-zones').checked)return;
+    const interval=Number(String(currentTimeframe).match(/^([0-9]+)/)?.[1])*({m:60,h:3600,d:86400,w:604800}[String(currentTimeframe).slice(-1)] || 0);
+    const anchor=replayActive?replayEntryTime:Date.parse(sourcePayload?.selectedTrade?.['Entry Time'] || '')/1000;
+    const day=dayMode?sourcePayload?.dayContext?.day:Math.floor(anchor/86400)*86400;
+    const bars=(marketPayload || sourcePayload)?.candles || [],width=Number($('sr-width').value);
+    if(!srCache || srCache.bars!==bars || srCache.day!==day || srCache.width!==width || srCache.interval!==interval)srCache={bars,day,width,interval,result:cslPreviousDayZones(bars,day,interval,width)};
+    const result=srCache.result;
+    if(result.reason){$('sr-status').textContent=result.reason;return;}
+    $('sr-status').textContent=result.zones.length+' zones · '+new Date((day-86400)*1000).toISOString().slice(0,10)+' UTC';
+    const right=chartWrap.clientWidth-76,height=chart.panes()[0].getHeight();
+    const start=chart.timeScale().timeToCoordinate(day),left=Math.max(0,Number(start ?? 0));
+    for(const zone of result.zones){
+      const a=candles.priceToCoordinate(zone.top),b=candles.priceToCoordinate(zone.bottom);
+      if(a==null || b==null || Math.max(a,b)<0 || Math.min(a,b)>height)continue;
+      const el=document.createElement('div');el.className='sr-zone';
+      const support=zone.kind==='support',resistance=zone.kind==='resistance';
+      Object.assign(el.style,{left:left+'px',width:Math.max(0,right-left)+'px',top:Math.max(0,Math.min(a,b))+'px',height:Math.max(2,Math.min(height,Math.max(a,b))-Math.max(0,Math.min(a,b)))+'px',borderColor:support?'#38bda0':resistance?'#e89861':'#a5a1e8',background:support?'rgba(56,189,160,.12)':resistance?'rgba(232,152,97,.12)':'rgba(165,161,232,.12)'});
+      const label=document.createElement('span');label.textContent='PD '+zone.kind+' '+formatPrice(zone.bottom)+'–'+formatPrice(zone.top)+' · '+zone.touches+' swing levels';el.appendChild(label);layer.appendChild(el);
+    }
   }
 
   function drawDaySeparators() {
@@ -1863,6 +1895,8 @@ button:disabled{opacity:.45;cursor:default}
     candles?.applyOptions({});
   });
   $('reset-price').addEventListener('click',resetPriceScale);
+  $('sr-zones').addEventListener('change',drawPreviousDayZones);
+  $('sr-width').addEventListener('change',drawPreviousDayZones);
   $('day-separators').addEventListener('change',drawDaySeparators);
   if (!window.LightweightCharts) {
     diag.textContent = 'ERROR: Lightweight Charts failed to load.';

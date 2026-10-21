@@ -306,3 +306,28 @@ console.log(JSON.stringify({{original,amended,before:cslAdvanceManualPosition(am
     assert 'positionHistory' not in result['original']
     assert 'error' in result['rewind']
     assert 'error' in result['invalid']
+
+def test_previous_day_zones_ignore_current_day_and_future_candles():
+    result=evaluate_manual('''
+const day=86400,interval=900;
+const bars=Array.from({length:96},(_,i)=>({time:i*interval,open:100,close:100,high:110+Math.sin(i)*4,low:90+Math.sin(i)*4}));
+const base=cslPreviousDayZones(bars,day,interval,2);
+const future=[...bars,{time:day,open:999,high:99999,low:1,close:999}];
+console.log(JSON.stringify({base,future:cslPreviousDayZones(future,day,interval,2),wide:cslPreviousDayZones(bars,day,interval,4),missing:cslPreviousDayZones(bars.slice(1),day,interval,2)}));
+''')
+    assert result['base']==result['future']
+    assert 2<=len(result['base']['zones'])<=8
+    assert sum(zone['extreme'] for zone in result['base']['zones'])==2
+    assert all(zone['bottom']<zone['top'] for zone in result['base']['zones'])
+    assert any(zone['touches']>1 for zone in result['base']['zones'])
+    assert result['wide']['zones']!=result['base']['zones']
+    assert result['missing']['zones']==[]
+    assert 'complete previous' in result['missing']['reason']
+
+
+def test_previous_day_zones_reject_gaps_duplicates_and_coarse_timeframes():
+    result=evaluate_manual('''
+const bars=Array.from({length:96},(_,i)=>({time:i*900,high:110,low:90}));bars[4].time=bars[3].time;
+console.log(JSON.stringify([cslPreviousDayZones(bars,86400,900),cslPreviousDayZones([],86400,14400)]));
+''')
+    assert all(item['zones']==[] and item['reason'] for item in result)
