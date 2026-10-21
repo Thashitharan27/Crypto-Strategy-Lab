@@ -15,6 +15,47 @@ def evaluate_manual(expression):
     return json.loads(result.stdout)
 
 
+def test_manual_day_is_independent_of_automatic_trades_and_future_prices():
+    result=evaluate_manual('''
+const candles=Array.from({length:288},(_,i)=>({time:i*900,open:15,high:16,low:14,close:15}));
+candles[10].high=25;candles[20].low=5;candles[106].high=20;candles[116].low=10;
+const source={candles,markers:[{kind:'exit',time:200*900}],selectedTrade:{'Net R':999,Side:'SHORT'},supplyDemandDerivation:{status:'AVAILABLE',future:'secret'},fibDerivation:{status:'AVAILABLE'}};
+const first=cslDaySource(source,172800,900,'LONG');
+const changed={...source,candles:candles.map(bar=>bar.time>=172800?{...bar,open:999,high:9999,low:0,close:999}:bar)};
+const second=cslDaySource(changed,172800,900,'LONG');
+const projected=cslReplayView(first,173700,900,172800,false,true);
+console.log(JSON.stringify({first,second,projected,source}));
+''')
+    first=result['first']
+    assert first['selectedTrade']==result['second']['selectedTrade']
+    assert first['dayContext']==result['second']['dayContext']
+    assert {x['role']:x['price'] for x in first['dayContext']['levels']}=={
+        'rangeHigh':20,'rangeLow':10,'swingHigh':25,'swingLow':5}
+    assert 'Net R' not in first['selectedTrade']
+    assert first['supplyDemandDerivation']=={'status':'NOT_AVAILABLE'}
+    assert result['source']['selectedTrade']['Net R']==999
+    view=result['projected']['view']
+    assert all(bar['time']+900<=173700 for bar in view['candles'])
+    assert len(view['markers'])==1 and view['markers'][0]['text']=='Manual day plan'
+    assert not result['projected']['outcomeVisible']
+
+
+def test_day_replay_handles_missing_context_and_both_directions():
+    result=evaluate_manual('''
+const source={candles:[{time:86400,open:100,high:110,low:90,close:105}]};
+const long=cslDaySource(source,86400,900,'LONG');
+const short=cslDaySource(source,86400,900,'SHORT');
+let missing=false;try{cslDaySource(source,172800,900);}catch{missing=true;}
+console.log(JSON.stringify({long,short,missing}));
+''')
+    assert result['missing']
+    assert result['long']['dayContext']['levels']==[]
+    assert result['long']['selectedTrade']['Stop']==99
+    assert result['short']['selectedTrade']['Stop']==101
+    assert result['long']['selectedTrade']['Target']==102
+    assert result['short']['selectedTrade']['Target']==98
+
+
 @pytest.mark.parametrize('side,entry,stop,target,valid',[
     ('LONG',100,90,120,True),('SHORT',100,110,80,True),
     ('LONG',100,110,120,False),('SHORT',100,90,80,False),

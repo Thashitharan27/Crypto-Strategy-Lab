@@ -1,6 +1,34 @@
 """Browser-only replay projection; completed-run evidence remains unchanged."""
 
 REPLAY_HELPERS = r"""
+function cslDaySource(source, day, interval, side='LONG', strength=2) {
+  const all=source.candles || [];
+  let history=all.filter(bar=>bar.time+interval<=day);
+  for(let i=history.length-1;i>0;i--) if(history[i].time-history[i-1].time!==interval) {history=history.slice(i);break;}
+  const previous=day-86400, prior=history.filter(bar=>bar.time>=previous);
+  const levels=[];
+  if(prior.length===86400/interval && prior[0]?.time===previous) {
+    const high=Math.max(...prior.map(bar=>bar.high)), low=Math.min(...prior.map(bar=>bar.low));
+    levels.push({role:'rangeHigh',label:'Previous day high',price:high},{role:'rangeLow',label:'Previous day low',price:low});
+    for(const [role,key,bound,greater] of [['swingHigh','high',high,true],['swingLow','low',low,false]]) {
+      let price=null;
+      for(let i=strength;i<history.length-strength;i++) {
+        const bar=history[i];if(bar.time>=previous)break;
+        const value=bar[key];if(!(greater?value>bound:value<bound))continue;
+        if(history.slice(i-strength,i+strength+1).every((other,j)=>j===strength || (greater?value>other[key]:value<other[key])))price=value;
+      }
+      levels.push({role,label:greater?'Older swing high':'Older swing low',price});
+    }
+  }
+  const first=all.find(bar=>bar.time>=day && bar.time<day+86400);
+  if(!first)throw Error('No candles available for this UTC day.');
+  const entry=history.at(-1)?.close ?? first.open, long=side==='LONG';
+  return {...source,selectedTradeIndex:null,selectedTrade:{Side:side,'Entry Time':new Date(first.time*1000).toISOString(),Entry:entry,Stop:entry*(long?.99:1.01),Target:entry*(long?1.02:.98)},
+    markers:[{kind:'selected-open',time:first.time,position:'belowBar',shape:'circle',text:'Manual day plan'}],
+    selectedTradeCandleTime:first.time,selectedTradeChartCandleTime:first.time,
+    fibDerivation:{status:'NOT_AVAILABLE'},fvgDerivation:{status:'NOT_AVAILABLE'},supplyDemandDerivation:{status:'NOT_AVAILABLE'},
+    dayContext:{day,levels},selectedTradeViewStart:day-86400,selectedTradeViewEnd:day+86400};
+}
 function cslManualPlan(entry, stop, target, side) {
   const values=[entry,stop,target];
   if(values.some(value=>value==null || String(value).trim()==='' || !Number.isFinite(Number(value)) || Number(value)<=0))
