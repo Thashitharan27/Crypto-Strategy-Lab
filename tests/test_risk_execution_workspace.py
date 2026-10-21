@@ -34,6 +34,31 @@ def _window():
     return app, window
 
 
+def test_sneaky_pivot_selection_and_settings_round_trip():
+    app, window = _window()
+    try:
+        selector=window.rule_builder.direction_mode
+        window.strategy_tf.setCurrentText('1h')
+        window.intrabar_tf.setCurrentIndex(window.intrabar_tf.findData(None))
+        index=selector.findData('SNEAKY_PIVOT')
+        assert index>=0
+        selector.setCurrentIndex(index);selector.activated.emit(index)
+        app.processEvents()
+        workspace=window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert window.strategy_tf.currentData()=='15m'
+        assert window.intrabar_tf.currentData()=='1m'
+        for name in ('sp_level_tolerance_atr','sp_body_atr','sp_confirmation_bars','sp_hold_minutes'):
+            assert not window.execution_form.widgets[name].isHidden()
+        window.execution_form.widgets['sp_level_tolerance_atr'].setValue(.2)
+        config=window.build_config()
+        assert config.execution.sp_level_tolerance_atr==.2
+        assert 'All-day 15m Sneaky Pivot' in workspace.summary_label.text()
+        assert window.execution_form.widgets['sd_minimum_r'].isHidden()
+    finally:
+        window.close()
+
+
 def test_six_factor_separation_controls_show_only_for_that_preset():
     app, window = _window()
     try:

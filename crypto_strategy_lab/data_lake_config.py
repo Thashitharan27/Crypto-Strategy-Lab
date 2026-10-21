@@ -404,6 +404,10 @@ class ExecutionConfig:
     ls_equal_tolerance_atr: float = 0.15
     ls_displacement_atr: float = 1.0
     ls_base_bars: int = 3
+    sp_level_tolerance_atr: float = 0.3
+    sp_body_atr: float = 0.5
+    sp_confirmation_bars: int = 3
+    sp_hold_minutes: int = 1440
     ls_max_wait_bars: int = 20
     sd_swing_strength: int = 2
     sd_stop_buffer_atr: float = 0.05
@@ -494,6 +498,8 @@ class ResearchRunConfig:
     def validate(self, request=None) -> None:
         from crypto_strategy_lab.supply_demand_retest import validate_settings
         validate_settings(self.execution.sd_swing_strength,self.execution.sd_stop_buffer_atr,self.execution.sd_minimum_r)
+        from crypto_strategy_lab.sneaky_pivot import validate_settings as validate_sneaky
+        validate_sneaky(self.execution.sp_level_tolerance_atr,self.execution.sp_body_atr,self.execution.sp_confirmation_bars,self.execution.sp_hold_minutes)
         from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
         validate_liquidity(self.execution.ls_equal_tolerance_atr,self.execution.ls_displacement_atr,self.execution.ls_base_bars,self.execution.ls_max_wait_bars)
         if any(r.get("_strategy_direction_mode")=="SUPPLY_DEMAND_RETEST" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())) and self.data.strategy_timeframe_minutes!=60:
@@ -504,6 +510,9 @@ class ResearchRunConfig:
             raise ValueError("EMA reward/risk must be finite and positive")
         if not math.isfinite(self.execution.ema_reversal_min_entry_ema300_atr) or self.execution.ema_reversal_min_entry_ema300_atr < 0:
             raise ValueError("EMA 300 entry distance must be finite and non-negative")
+        if any(r.get("_strategy_direction_mode")=="SNEAKY_PIVOT" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())):
+            if self.data.strategy_timeframe_minutes!=15 or not self.data.use_intrabar_data or self.data.intrabar_timeframe_minutes!=1:
+                raise ValueError("Sneaky Pivot requires 15m strategy candles and 1m execution data")
         data, features, strategy, execution, reporting = (
             self.data, self.features, self.strategy, self.execution, self.reporting
         )

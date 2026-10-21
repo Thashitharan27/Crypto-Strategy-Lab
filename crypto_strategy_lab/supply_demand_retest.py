@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 MODE = "SUPPLY_DEMAND_RETEST"
-MODES = {MODE, "LIQUIDITY_SWEEP_RETEST"}
+MODES = {MODE, "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT"}
 
 
 def validate_settings(strength, buffer, minimum_r):
@@ -87,6 +87,8 @@ class SupplyDemandRetestMixin:
         if not any(r.get("_strategy_direction_mode") in MODES for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())):
             return
         modes={r.get("_strategy_direction_mode") for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())}
+        if "SNEAKY_PIVOT" in modes:
+            return  # Configured by SneakyPivotMixin.
         if "LIQUIDITY_SWEEP_RETEST" in modes:
             from crypto_strategy_lab.liquidity_sweep_retest import liquidity_sweep_setups
             self.sd_setups=liquidity_sweep_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
