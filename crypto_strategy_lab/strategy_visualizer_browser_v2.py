@@ -149,6 +149,9 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 #replay-controls[hidden]{display:none}
 #replay-notes{width:260px;max-width:100%;background:#0c1420;color:#e6edf3;border:1px solid #475569;border-radius:5px;padding:8px;font:inherit}
 #replay-status{flex-basis:100%;font-size:13px;line-height:1.5;color:#c8e3f9}
+.manual-plan{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-basis:100%;padding-top:8px;border-top:1px solid #42607f}
+.manual-plan input{width:125px;background:#0c1420;color:#e6edf3;border:1px solid #475569;border-radius:4px;padding:6px}
+#manual-plan-status{flex-basis:100%;color:#b9d7f5;font-size:12px}
 #replay-toggle[aria-pressed=true]{background:#255b91;border-color:#60a5fa}
 button:disabled{opacity:.45;cursor:default}
 </style>
@@ -182,6 +185,15 @@ button:disabled{opacity:.45;cursor:default}
       <select id="replay-speed" aria-label="Replay speed"><option value="1500">Slow</option><option value="750" selected>Normal</option><option value="300">Fast</option></select>
       <button id="replay-reveal">Reveal result</button><button id="replay-restart">Restart at entry</button>
       <button id="replay-export">Export reviews</button>
+      <div class="manual-plan" role="group" aria-label="Manual trade plan">
+        <strong>My plan</strong>
+        <label>Entry <input id="manual-entry" type="number" step="any" min="0" aria-label="Manual entry price"></label><button data-pick-level="entry">Pick entry</button>
+        <label>SL <input id="manual-stop" type="number" step="any" min="0" aria-label="Manual stop-loss price"></label><button data-pick-level="stop">Pick SL</button>
+        <label>TP <input id="manual-target" type="number" step="any" min="0" aria-label="Manual take-profit price"></label><button data-pick-level="target">Pick TP</button>
+        <button id="manual-save">Save plan</button><button id="manual-reset">Use auto levels</button>
+        <span id="manual-plan-status" role="status"></span>
+        <details id="manual-history" hidden><summary>Saved plan changes</summary><div id="manual-history-content"></div></details>
+      </div>
       <span id="replay-status" role="status"></span>
     </div>
   </div>
@@ -319,6 +331,8 @@ button:disabled{opacity:.45;cursor:default}
   let replayOutcomeVisible = false;
   let replayTimer = null;
   let replayBusy = false;
+  let manualPlanDraft = null;
+  let manualPick = null;
   let reviewRecords = [];
   let reviewStorageAvailable = true;
   const normalViewsSeen = new Set();
@@ -355,6 +369,51 @@ button:disabled{opacity:.45;cursor:default}
     try { localStorage.setItem(reviewStorageKey,JSON.stringify(reviewRecords)); }
     catch { reviewStorageAvailable=false; }
   }
+  function automaticPlan() {
+    const trade=sourcePayload?.selectedTrade || {};
+    return {entry:Number(trade.Entry),stop:Number(trade.Stop),target:Number(trade.Target)};
+  }
+  function manualPlanLocked() {
+    return replayBusy || replayRevealed || replayOutcomeVisible || currentReview()?.netR!=null;
+  }
+  function loadManualPlan(plan) {
+    for(const key of ['entry','stop','target']) $('manual-'+key).value=plan[key] ?? '';
+    manualPick=null; chartWrap.style.cursor=''; refreshManualPlan();
+  }
+  function refreshManualPlan() {
+    if(manualPlanLocked()) {manualPick=null;chartWrap.style.cursor='';}
+    manualPlanDraft=cslManualPlan($('manual-entry').value,$('manual-stop').value,$('manual-target').value,sourcePayload?.selectedTrade?.Side);
+    const saved=currentReview()?.manualPlan;
+    const dirty=!saved || ['entry','stop','target'].some(key=>saved[key]!==manualPlanDraft[key]);
+    const status=manualPlanDraft.error || ('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Unsaved preview — choose Take/Skip/Unsure or Save plan.':'Saved manual plan.')+' Prices only; entry time stays at the automated entry. No manual fills or results are simulated.');
+    $('manual-plan-status').textContent=manualPick?'Click the chart to place '+manualPick+'.':status;
+    $('manual-plan-status').style.color=manualPlanDraft.error?'#fda4af':'#b9d7f5';
+    const locked=manualPlanLocked();
+    for(const key of ['entry','stop','target']) $('manual-'+key).disabled=locked;
+    for(const button of document.querySelectorAll('[data-pick-level]')) button.disabled=locked;
+    $('manual-save').disabled=locked || Boolean(manualPlanDraft.error) || !currentReview()?.decision;
+    $('manual-reset').disabled=locked;
+    const record=currentReview();
+    $('manual-history').hidden=!record?.planHistory?.length;
+    const history=$('manual-history-content');history.replaceChildren();
+    if(record?.originalPlan) {
+      const original=document.createElement('p');
+      original.textContent='Automatic plan · Entry '+formatPrice(record.originalPlan.entry)+' · SL '+formatPrice(record.originalPlan.stop)+' · TP '+formatPrice(record.originalPlan.target);history.appendChild(original);
+    }
+    for(const revision of (record?.planHistory || []).slice(-20)) {
+      const line=document.createElement('p');
+      line.textContent=String(revision.replayTime)+' · '+(revision.futureSeen?'After advancing / previously viewed':'Pre-entry plan')+(revision.outcomePreviouslyShown?' (outcome previously shown)':'')+' · Entry '+formatPrice(revision.entry)+' · SL '+formatPrice(revision.stop)+' · TP '+formatPrice(revision.target);history.appendChild(line);
+    }
+  }
+  function storeManualPlan() {
+    const record=currentReview();
+    if(!record || manualPlanDraft?.error) return;
+    const updated=cslRecordManualPlan(record,manualPlanDraft,automaticPlan(),{
+      recordedAt:new Date().toISOString(),replayTime:fmtTime(replayCutoff),
+      futureSeen:replayAdvanced || Boolean(record.revealedAt)});
+    reviewRecords=reviewRecords.map(item=>item===record?updated:item);
+    saveReviews(); refreshManualPlan();
+  }
   function initializeReplay() {
     stopReplay(); replayAdvanced=false; replayRevealed=false; replayOutcomeVisible=false;
     const match=String(boot.run.timeframe).match(/^([0-9]+)([mhdw])$/);
@@ -363,6 +422,7 @@ button:disabled{opacity:.45;cursor:default}
     replayCutoff=replayEntryTime;
     if(!replayInterval || !Number.isFinite(replayEntryTime)) throw Error('This trade has no usable entry time or strategy interval for replay.');
     $('replay-notes').value=currentReview()?.notes || '';
+    loadManualPlan(currentReview()?.manualPlan || automaticPlan());
   }
   function updateReplayControls() {
     const record=currentReview();
@@ -387,6 +447,7 @@ button:disabled{opacity:.45;cursor:default}
     message+=' · Saved in this browser; export to keep reviews across visualizer sessions.';
     if(!reviewStorageAvailable) message+=' Browser storage unavailable: export before closing.';
     $('replay-status').textContent=message;
+    refreshManualPlan();
   }
   function refreshReplay() {
     if(!sourcePayload) return;
@@ -423,6 +484,9 @@ button:disabled{opacity:.45;cursor:default}
     return true;
   }
   function stepReplay() {
+    if(replayActive && !manualPlanLocked()) {
+      refreshManualPlan(); if(manualPlanDraft.error) return; storeManualPlan();
+    }
     if(replayBusy || !replayActive || replayRevealed || replayOutcomeVisible || !markFutureSeen()) return;
     const next=(sourcePayload.candles || []).find(bar=>bar.time+replayInterval>replayCutoff);
     if(!next) { stopReplay(); $('replay-status').textContent='End of available candles. Export your review to retain it.'; return; }
@@ -434,6 +498,7 @@ button:disabled{opacity:.45;cursor:default}
     [...tradeSelect.options].forEach((option,index)=>option.textContent=replayActive ? 'Trade '+(index+1)+' · outcome hidden' : boot.trades[index].label);
   }
   $('replay-toggle').addEventListener('click',()=>{
+    if(replayActive && !manualPlanLocked()) {refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
     stopReplay(); replayActive=!replayActive;
     $('replay-toggle').setAttribute('aria-pressed',String(replayActive));
     $('replay-controls').hidden=!replayActive;
@@ -447,11 +512,24 @@ button:disabled{opacity:.45;cursor:default}
   });
   document.querySelectorAll('[data-replay-decision]').forEach(button=>button.addEventListener('click',()=>{
     if(replayBusy || replayAdvanced || replayRevealed || currentReview()?.revealedAt) return;
+    refreshManualPlan();
+    if(manualPlanDraft.error) return;
     const trade=sourcePayload.selectedTrade;
     let record=currentReview();
     if(!record) { record={key:replayKey(),runId:boot.run.runId,symbol:boot.run.symbol,tradeIndex:currentTrade,pair:trade.Pair,entryTime:trade['Entry Time'],side:trade.Side,recordedAt:new Date().toISOString(),outcomePreviouslyShown:normalViewsSeen.has(replayKey()),notes:'',decision:''}; reviewRecords.push(record); }
     record.decision=button.dataset.replayDecision; record.notes=$('replay-notes').value;
-    saveReviews(); updateReplayControls();
+    storeManualPlan(); updateReplayControls(); redrawOverlays();
+  }));
+  for(const key of ['entry','stop','target']) $('manual-'+key).addEventListener('input',()=>{
+    if(manualPlanLocked()) return;
+    stopReplay();
+    refreshManualPlan(); resetPriceScale();
+  });
+  $('manual-save').addEventListener('click',()=>{if(!manualPlanLocked()){storeManualPlan();updateReplayControls();redrawOverlays();}});
+  $('manual-reset').addEventListener('click',()=>{if(!manualPlanLocked()){loadManualPlan(automaticPlan());resetPriceScale();}});
+  document.querySelectorAll('[data-pick-level]').forEach(button=>button.addEventListener('click',()=>{
+    if(manualPlanLocked()) return;
+    stopReplay();manualPick=button.dataset.pickLevel;chartWrap.style.cursor='crosshair';refreshManualPlan();
   }));
   $('replay-notes').addEventListener('input',()=>{
     const record=currentReview();
@@ -465,17 +543,23 @@ button:disabled{opacity:.45;cursor:default}
   });
   $('replay-speed').addEventListener('change',()=>{if(replayTimer){stopReplay();$('replay-play').click();}});
   $('replay-reveal').addEventListener('click',()=>{
+    if(!manualPlanLocked()) {refreshManualPlan();if(manualPlanDraft.error)return;storeManualPlan();}
     if(replayBusy || !markFutureSeen()) return;
     stopReplay(); replayRevealed=true; refreshReplay();
   });
-  $('replay-restart').addEventListener('click',()=>{if(!replayBusy){initializeReplay();refreshReplay();}});
+  $('replay-restart').addEventListener('click',()=>{if(!replayBusy){
+    if(!manualPlanLocked()) {refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
+    initializeReplay();refreshReplay();
+  }});
   $('replay-export').addEventListener('click',()=>{
+    if(replayActive && !manualPlanLocked()) {refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
     const records=reviewRecords.filter(record=>record?.runId===boot.run.runId && record?.symbol===boot.run.symbol);
     const scored=records.filter(record=>record.netR!=null && Number.isFinite(Number(record.netR)));
     const sum=list=>list.reduce((total,record)=>total+Number(record.netR),0);
-    const report={version:1,runId:boot.run.runId,symbol:boot.run.symbol,exportedAt:new Date().toISOString(),
+    const report={version:2,runId:boot.run.runId,symbol:boot.run.symbol,exportedAt:new Date().toISOString(),
       summary:{reviewed:records.length,revealed:scored.length,automaticNetR:sum(scored),manualTakeNetR:sum(scored.filter(r=>r.decision==='Take')),skippedNetR:sum(scored.filter(r=>r.decision==='Skip')),unsureNetR:sum(scored.filter(r=>r.decision==='Unsure'))},
-      interpretation:'Sums of saved trade R for reviewed trades only; not a resimulation of portfolio sizing or overlapping positions.',reviews:records};
+      manualPlans:records.filter(record=>record.manualPlan).length,
+      interpretation:'R totals use original automated trade outcomes. Manual entry/SL/TP plans and timestamped revisions are recorded only; no manual fills, P&L, fees, portfolio sizing or overlapping positions are resimulated.',reviews:records};
     const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
     const link=document.createElement('a'); link.href=url; link.download='csl-manual-replay-reviews.json'; document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
@@ -538,6 +622,11 @@ button:disabled{opacity:.45;cursor:default}
       if (Number.isFinite(hi)) high=Math.max(high,hi);
     }
     const trade=payload?.selectedTrade || {};
+    if(replayActive && manualPlanDraft && !manualPlanDraft.error) {
+      for(const price of [manualPlanDraft.entry,manualPlanDraft.stop,manualPlanDraft.target]) {
+        low=Math.min(low,price);high=Math.max(high,price);
+      }
+    }
     for (const value of [
       trade.Entry ?? trade.entry, trade.Stop ?? trade.stop,
       trade.Target ?? trade.target, trade.Exit ?? trade.exit,
@@ -654,7 +743,7 @@ button:disabled{opacity:.45;cursor:default}
     const boxes=[];
     const height=chart?.panes()[0]?.getHeight() || chartWrap.clientHeight;
     const width=Math.max(1,chartWrap.clientWidth-80);
-    for (const label of chartWrap.querySelectorAll('.fvg-note:not(.sneaky-level-label),.trade-label')) {
+    for (const label of chartWrap.querySelectorAll('.fvg-note:not(.sneaky-level-label),.trade-label:not(.manual-price-label)')) {
       const w=label.offsetWidth, h=label.offsetHeight;
       const x=Math.max(2,Math.min(width-w,parseFloat(label.style.left)||0));
       const preferred=Math.max(2,Math.min(height-h-2,parseFloat(label.style.top)||0));
@@ -885,6 +974,7 @@ button:disabled{opacity:.45;cursor:default}
     label.style.top=Math.max(2,Number(y)-10)+'px';
     label.textContent=text;
     tradeBoxLayer.appendChild(label);
+    return label;
   }
 
   function resolveFibAnchorTimes(fib, items, entryTime) {
@@ -1025,7 +1115,8 @@ button:disabled{opacity:.45;cursor:default}
   function drawTradeBox() {
     tradeBoxLayer.replaceChildren();
     if (!payload || !chart || !candles) return;
-    const trade=payload.selectedTrade || {};
+    const manual=replayActive && manualPlanDraft && !manualPlanDraft.error;
+    const trade=manual ? {...payload.selectedTrade,Entry:manualPlanDraft.entry,Stop:manualPlanDraft.stop,Target:manualPlanDraft.target} : (payload.selectedTrade || {});
     const markers=payload.markers || [];
     const open=markers.find(m => String(m.kind)==='selected-open');
     const exit=markers.find(m => String(m.kind)==='exit');
@@ -1060,15 +1151,38 @@ button:disabled{opacity:.45;cursor:default}
     }
     rect(entryY,stopY,'risk');
     rect(entryY,targetY,'reward');
-    addTradeLabel(left+4,entryY,'entry','Entry '+formatPrice(trade.Entry ?? trade.entry));
+    const manualLabels=[];
+    manualLabels.push([addTradeLabel(left+4,entryY,'entry',(manual?'Planned entry ':'Entry ')+formatPrice(trade.Entry ?? trade.entry)),entryY,'#60a5fa']);
     if (exit && Number.isFinite(exitPrice))
-      addTradeLabel(Math.max(left+4,right-90),exitY,'exit','Exit ('+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
+      addTradeLabel(Math.max(left+4,right-90),exitY,'exit',(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
 
     const boundaryX=right+6;
     if (Number.isFinite(target))
-      addTradeLabel(boundaryX,targetY,'tp','Target '+formatPrice(trade.Target ?? trade.target));
+      manualLabels.push([addTradeLabel(boundaryX,targetY,'tp',(manual?'Planned TP ':'Target ')+formatPrice(trade.Target ?? trade.target)),targetY,'#34d399']);
     if (Number.isFinite(stop))
-      addTradeLabel(boundaryX,stopY,'sl','Stop '+formatPrice(trade.Stop ?? trade.stop));
+      manualLabels.push([addTradeLabel(boundaryX,stopY,'sl',(manual?'Planned SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)),stopY,'#fb7185']);
+    if(manual) {
+      // Preserve price ordering, with leaders to the exact price when labels
+      // need more room than the entry/stop separation provides.
+      const labels=manualLabels.filter(([label])=>label).sort((a,b)=>a[1]-b[1]);
+      const height=chart.panes()[0].getHeight(),plotRight=chartWrap.clientWidth-76;
+      let nextY=2;
+      for(const [label,y] of labels) {
+        label.classList.add('manual-price-label');
+        const top=Math.max(nextY,y-10);label.style.top=top+'px';
+        label.style.left=Math.max(2,plotRight-label.offsetWidth-4)+'px';
+        nextY=top+label.offsetHeight+4;
+      }
+      const shift=Math.max(0,nextY-height);
+      for(const [label,y,color] of labels) {
+        const top=Math.max(2,parseFloat(label.style.top)-shift);label.style.top=top+'px';
+        const x=parseFloat(label.style.left),center=top+label.offsetHeight/2;
+        const line=document.createElement('div');line.className='fvg-level';
+        Object.assign(line.style,{left:Math.min(left,x)+'px',top:y+'px',width:Math.max(3,Math.abs(x-left))+'px',borderColor:color});tradeBoxLayer.appendChild(line);
+        const leader=document.createElement('div');
+        Object.assign(leader.style,{position:'absolute',left:x+'px',top:Math.min(y,center)+'px',height:Math.abs(y-center)+'px',borderLeft:'1px solid '+color});tradeBoxLayer.appendChild(leader);
+      }
+    }
 
   }
 
@@ -1106,6 +1220,13 @@ button:disabled{opacity:.45;cursor:default}
       },
     });
     candles.setData(payload.candles || []);
+    chart.subscribeClick(event=>{
+      if(!replayActive || !manualPick || manualPlanLocked() || !event.point || event.point.y<0 || event.point.y>chart.panes()[0].getHeight()) return;
+      const price=candles.coordinateToPrice(event.point.y);
+      if(price==null || !Number.isFinite(price) || price<=0) return;
+      $('manual-'+manualPick).value=Number(price.toPrecision(12));
+      manualPick=null;chartWrap.style.cursor='';refreshManualPlan();resetPriceScale();
+    });
     const selectedEmas = new Set([...document.querySelectorAll('.ema-period:checked')].map(input => Number(input.value)));
     if (selectedEmas.size && !reviewMode) {
       for (const overlay of (payload.overlays || [])) {
@@ -1363,6 +1484,7 @@ button:disabled{opacity:.45;cursor:default}
   });
 
   tradeSelect.addEventListener('change',() => {
+    if(replayActive && !manualPlanLocked()) {refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
     currentTrade = Number(tradeSelect.value);
     load();
   });

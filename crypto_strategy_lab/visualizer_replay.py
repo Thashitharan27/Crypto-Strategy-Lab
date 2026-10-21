@@ -1,6 +1,26 @@
 """Browser-only replay projection; completed-run evidence remains unchanged."""
 
 REPLAY_HELPERS = r"""
+function cslManualPlan(entry, stop, target, side) {
+  const values=[entry,stop,target];
+  if(values.some(value=>value==null || String(value).trim()==='' || !Number.isFinite(Number(value)) || Number(value)<=0))
+    return {error:'Enter a positive price for entry, SL and TP.'};
+  [entry,stop,target]=values.map(Number);
+  const long=String(side).toUpperCase()==='LONG';
+  if(!['LONG','SHORT'].includes(String(side).toUpperCase())) return {error:'Trade direction is unavailable.'};
+  if(!(long ? stop<entry && entry<target : target<entry && entry<stop))
+    return {error:long?'Long plan needs SL < entry < TP.':'Short plan needs TP < entry < SL.'};
+  return {entry,stop,target,rewardRisk:Math.abs(target-entry)/Math.abs(entry-stop)};
+}
+function cslRecordManualPlan(record, plan, original, context) {
+  if(plan.error) throw Error(plan.error);
+  const previous=record.manualPlan;
+  if(previous && ['entry','stop','target'].every(key=>previous[key]===plan[key])) return record;
+  const revision={...plan,recordedAt:context.recordedAt,replayTime:context.replayTime,
+    futureSeen:Boolean(context.futureSeen),outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)};
+  return {...record,originalPlan:record.originalPlan || {...original},manualPlan:{...plan},
+    planHistory:[...(record.planHistory || []),revision]};
+}
 function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanced=false) {
   if (reveal) return {view:source,outcomeVisible:true};
   const original=source.selectedTrade || {};

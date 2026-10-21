@@ -41,3 +41,30 @@ This is a visual review aid. Completed-run data is loaded locally; it is not a
 secure examination mode. Outcomes already seen before entering replay cannot
 be made unseen. Keep replay active when selecting subsequent trades for a
 cleaner comparison.
+
+## Manual entry, SL and TP plans
+
+Replay includes **My plan** with editable Entry, SL and TP prices. Type prices
+or press **Pick entry**, **Pick SL** or **Pick TP**, then click the chart at the
+desired price. The risk/reward box previews the proposed levels and shows their
+reward/risk ratio. **Use auto levels** restores the automated prices as a draft.
+Long plans require SL < entry < TP; shorts require TP < entry < SL. All prices
+must be positive and finite. Editing prices pauses playback.
+
+Select Take, Skip or Unsure to save the initial plan with your judgement, or
+press **Save plan** for later adjustments. Advancing, revealing, exporting,
+switching trades or leaving replay also saves a valid draft for an existing
+judgement. Unsaved edits are identified in the plan status. Each changed plan
+adds a timestamped revision with the replay candle/time and a flag indicating
+whether future candles had already been viewed. The original automated plan,
+first manual plan and judgement remain available in the export. Repeated saves
+of identical prices do not duplicate history. Plans lock once the automated
+outcome has been revealed; restarting retains the saved history.
+
+This records proposed **prices**, not a relocated entry time or an executed
+manual order. The automated entry time remains the replay anchor. Manual fills,
+SL/TP outcomes, fees and P&L are not simulated. At reveal the exit label says
+**Auto exit**, and all reported R totals still use original automated results.
+Export format version 2 adds `originalPlan`, `manualPlan` and `planHistory`
+without removing earlier choice/note/outcome fields. Older browser reviews
+remain readable and acquire a plan when next saved before their outcome locks.

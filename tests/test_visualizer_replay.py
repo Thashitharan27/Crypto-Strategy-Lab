@@ -7,6 +7,51 @@ import pytest
 from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
 
 
+def evaluate_manual(expression):
+    node=shutil.which('node')
+    if not node:pytest.skip('Node is required to verify manual replay plans')
+    result=subprocess.run([node,'--input-type=commonjs'],input=REPLAY_HELPERS+'\n'+expression,
+        text=True,encoding='utf-8',capture_output=True,check=True)
+    return json.loads(result.stdout)
+
+
+@pytest.mark.parametrize('side,entry,stop,target,valid',[
+    ('LONG',100,90,120,True),('SHORT',100,110,80,True),
+    ('LONG',100,110,120,False),('SHORT',100,90,80,False),
+    ('LONG','',90,120,False),('LONG',100,100,120,False),
+    ('LONG',100,90,100,False),('LONG',100,-1,120,False),
+    ('UNKNOWN',100,90,120,False),('LONG','Infinity',90,120,False)])
+def test_manual_price_plan_validation(side,entry,stop,target,valid):
+    data=json.dumps([entry,stop,target,side])
+    result=evaluate_manual('console.log(JSON.stringify(cslManualPlan(...'+data+')));')
+    assert ('error' not in result)==valid
+    if valid:assert result['rewardRisk']==2
+
+
+def test_manual_revisions_preserve_original_plan_and_decision():
+    result=evaluate_manual('''
+const record={decision:'Take',notes:'original judgement',netR:null};
+const auto={entry:100,stop:90,target:120};
+const first=cslRecordManualPlan(record,cslManualPlan(101,91,131,'LONG'),auto,
+  {recordedAt:'first',replayTime:'entry',futureSeen:false});
+const second=cslRecordManualPlan(first,cslManualPlan(105,95,125,'LONG'),auto,
+  {recordedAt:'second',replayTime:'next candle',futureSeen:true});
+const same=cslRecordManualPlan(second,second.manualPlan,auto,{recordedAt:'third'});
+console.log(JSON.stringify({record,auto,first,second,same}));
+''')
+    assert 'manualPlan' not in result['record']
+    assert result['auto']=={'entry':100,'stop':90,'target':120}
+    assert result['second']['originalPlan']==result['auto']
+    assert result['second']['decision']=='Take'
+    assert result['second']['notes']=='original judgement'
+    assert result['first']['planHistory'][0]['entry']==101
+    assert not result['second']['planHistory'][0]['futureSeen']
+    assert result['second']['planHistory'][1]['futureSeen']
+    assert result['second']['planHistory'][1]['replayTime']=='next candle'
+    assert len(result['second']['planHistory'])==2
+    assert result['same']==result['second']
+
+
 def source():
     return {
         "candles": [dict(time=t, open=10, high=999, low=1, close=900) for t in (0, 60, 120, 180)],
