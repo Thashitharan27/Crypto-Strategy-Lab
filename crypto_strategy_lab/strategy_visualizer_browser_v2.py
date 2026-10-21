@@ -600,9 +600,38 @@ button:disabled{opacity:.45;cursor:default}
     }
   }
 
+  function drawSupplyDemandOverlay(sd) {
+    if (!chart || !candles) return;
+    const height=chart.panes()[0].getHeight();
+    fvgLayer.style.height=height+'px';
+    const bars=payload.candles || [];
+    function xAt(time,fallback) {
+      let found=null; for(const bar of bars) {if(bar.time>time) break; found=bar.time;}
+      return found==null ? fallback : (chart.timeScale().timeToCoordinate(found) ?? fallback);
+    }
+    const end=xAt(sd.signalTime,chartWrap.clientWidth-76);
+    for(const [zone,name,color] of [[sd.zone,sd.side==='LONG'?'Demand entry zone':'Supply entry zone','#22c55e30'],[sd.opposingZone,'Opposing swing / target','#ef444430']]) {
+      const a=candles.priceToCoordinate(zone.top), b=candles.priceToCoordinate(zone.bottom);
+      if(a==null || b==null) continue;
+      const start=Math.max(0,xAt(zone.pivotTime,0));
+      const band=document.createElement('div'); band.className='fvg-zone';
+      Object.assign(band.style,{left:start+'px',top:Math.max(0,a)+'px',width:Math.max(3,end-start)+'px',height:Math.max(2,Math.min(height,b)-Math.max(0,a))+'px',background:color});
+      fvgLayer.appendChild(band);
+      const label=document.createElement('span'); label.className='fvg-note'; label.textContent=name+' '+formatPrice(zone.bottom)+' – '+formatPrice(zone.top);
+      Object.assign(label.style,{left:(start+5)+'px',top:Math.max(2,a-22)+'px'}); fvgLayer.appendChild(label);
+    }
+    for(const [time,text] of [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']]) {
+      if(time==null) continue;
+      const label=document.createElement('span'); label.className='fvg-note'; label.textContent=text;
+      Object.assign(label.style,{left:Math.max(2,xAt(time,0))+'px',top:Math.max(4,(candles.priceToCoordinate(sd.zone.top) ?? 30)+8)+'px'}); fvgLayer.appendChild(label);
+    }
+  }
+
   function drawFvgOverlay() {
     fvgLayer.replaceChildren();
     const fvg=payload?.fvgDerivation;
+    const sd=payload?.supplyDemandDerivation;
+    if (sd?.status==='AVAILABLE') { drawSupplyDemandOverlay(sd); return; }
     if (!chart || !candles || fvg?.status !== 'AVAILABLE') return;
     const paneHeight=chart.panes()[0].getHeight();
     fvgLayer.style.height=paneHeight+'px';
@@ -711,6 +740,18 @@ button:disabled{opacity:.45;cursor:default}
       'Fib: ' + String(payload.fibDerivation?.status || 'NOT_AVAILABLE'),
     ];
     diag.textContent = lines.join('\\n');
+    const sd=payload.supplyDemandDerivation;
+    if(sd?.status==='AVAILABLE') {
+      fvgReview.hidden=false; $('setup-panel').hidden=false; $('review-setup').hidden=false;
+      $('review-setup').setAttribute('aria-pressed',String(reviewMode));
+      $('setup-panel').setAttribute('aria-label','Supply and demand setup explanation');
+      fvgReview.textContent='Supply & demand · '+sd.side+' · Setup details →';
+      const panel=$('setup-panel'); panel.replaceChildren();
+      const title=document.createElement('h3'); title.textContent='1h confirmed swing retest'; panel.appendChild(title);
+      const facts=document.createElement('p'); facts.style.whiteSpace='pre-line';
+      facts.textContent='Zone confirmed: '+fmtTime(sd.zone.confirmedTime)+'\\nFirst touch: '+fmtTime(sd.zone.touchTime)+'\\nBounce: '+fmtTime(sd.zone.bounceTime)+'\\nRetest: '+fmtTime(sd.signalTime)+'\\nTarget swing: '+formatPrice(sd.target)+'\\nEntry is the next candle open. Zones are saved decision-time evidence.';
+      panel.appendChild(facts); return;
+    }
     const fvg = payload.fvgDerivation;
     fvgReview.hidden = fvg?.status !== 'AVAILABLE';
     $('setup-panel').hidden = fvgReview.hidden;
@@ -1061,6 +1102,8 @@ button:disabled{opacity:.45;cursor:default}
   }));
 
   function replayBounds() {
+    const sd=payload?.supplyDemandDerivation;
+    if(sd?.status==='AVAILABLE') return {from:Math.min(sd.zone.pivotTime,sd.opposingZone.pivotTime)-8*replayInterval,to:replayCutoff+12*replayInterval};
     const known=payload?.fvgDerivation;
     const from=known?.status==='AVAILABLE' ? known.impulseStartTime-8*replayInterval : replayCutoff-80*replayInterval;
     return {from,to:replayCutoff+12*replayInterval};
@@ -1068,6 +1111,11 @@ button:disabled{opacity:.45;cursor:default}
 
   function setupBounds() {
     if(replayActive && !replayRevealed) return null;
+    const sd=payload?.supplyDemandDerivation;
+    if(sd?.status==='AVAILABLE') {
+      const entry=Number(payload.selectedTradeChartCandleTime || sd.signalTime);
+      return {from:Math.min(sd.zone.pivotTime,sd.opposingZone.pivotTime)-6*3600,to:entry+12*3600};
+    }
     const fvg=payload?.fvgDerivation;
     if (fvg?.status!=='AVAILABLE') return null;
     const bars=payload.candles || [];
@@ -1230,7 +1278,7 @@ button:disabled{opacity:.45;cursor:default}
   });
   $('center').addEventListener('click',centerSelected);
   $('review-setup').addEventListener('click',() => {
-    if(payload?.fvgDerivation?.status!=='AVAILABLE') return;
+    if(payload?.fvgDerivation?.status!=='AVAILABLE' && payload?.supplyDemandDerivation?.status!=='AVAILABLE') return;
     reviewMode=!reviewMode;
     renderDiagnostics(); buildChart();
     requestAnimationFrame(centerSelected);

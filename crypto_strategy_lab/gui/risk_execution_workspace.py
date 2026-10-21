@@ -149,6 +149,14 @@ class RiskExecutionWorkspace(QWidget):
         self.ema_gap_card.add_field("ema_reversal_target_r", "Reward / risk (TP stays at EMA 100)", self.account["ema_reversal_target_r"])
         layout.addWidget(self.ema_gap_card)
 
+        self.sd_card = FormCard("Supply & demand retest", note="One-hour confirmed swing zones. Touch → bounce away → later directional retest; entry at the next open. 0 stop buffer means the exact zone edge.")
+        for name,label in (("sd_swing_strength","Swing candles on each side"),("sd_stop_buffer_atr","Stop buffer beyond zone (ATR)"),("sd_minimum_r","Minimum reward / risk")):
+            self.sd_card.add_field(name,label,self.account[name])
+        self.account["sd_swing_strength"].setRange(1,20)
+        self.account["sd_stop_buffer_atr"].setRange(0.,100.)
+        self.account["sd_minimum_r"].setRange(.01,100.)
+        layout.addWidget(self.sd_card)
+
         self.entry_card = FormCard(
             "1. Entry Execution",
             note=(
@@ -840,10 +848,12 @@ class RiskExecutionWorkspace(QWidget):
             for name in fields:
                 self.advanced_card.set_row_visible(name, enabled)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
+        supply_demand = self._signal_strategy_mode() == "SUPPLY_DEMAND_RETEST"
+        self.sd_card.setVisible(supply_demand)
         self.ema_gap_card.setVisible(automatic_reversal)
         for card in (self.entry_card, self.stop_card, self.target_card, self.ladder_card,
                      self.management_card, self.advanced_card):
-            card.setVisible(not automatic_reversal)
+            card.setVisible(not automatic_reversal and not supply_demand)
         self.refresh_summary_from_widgets()
 
     @staticmethod
@@ -894,6 +904,16 @@ class RiskExecutionWorkspace(QWidget):
         return ", ".join(enabled) if enabled else "no optional trade management"
 
     def update_summary(self, execution, base) -> None:
+        if self._signal_strategy_mode() == "SUPPLY_DEMAND_RETEST":
+            self.summary_label.setText(
+                f"Supply & demand — 1h swing retest. Confirm swings with {execution.sd_swing_strength} completed candles on each side. "
+                "Use each swing candle's full high/low range as its zone. Wait for a subsequent touch, close away, then a later retest with a directional candle. "
+                "Entry: next open. SL: beyond the entry zone. TP: opposing confirmed swing extreme, fixed at entry. "
+                f"Stop buffer: {execution.sd_stop_buffer_atr:g} × ATR; minimum reward/risk: {execution.sd_minimum_r:g}R. "
+                "Only the latest zone per side is considered. Broken zones and missing hours reset setups. "
+                "Each zone has one qualifying retest attempt; skipped attempts are not retried. Optional trade management does not apply."
+            )
+            return
         if self._signal_strategy_mode() == "EMA_100_300_REVERSAL":
             self.summary_label.setText(
                 f"EMA 100 (low) / EMA 300 (high) — automatic {execution.ema_reversal_target_r:g}R plan. "

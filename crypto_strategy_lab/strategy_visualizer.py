@@ -965,6 +965,26 @@ class CompletedRunVisualizer:
         }
         return {key: value for key, value in summary.items() if value is not None}
 
+    def supply_demand_derivation(self, index):
+        if index is None or not self.trade_count:
+            return {"status":"NOT_AVAILABLE"}
+        raw=self._trade_row(index).get("supply_demand_setup")
+        try:
+            value=json.loads(raw) if isinstance(raw,str) else dict(raw)
+            if value.get("version")!=1 or value.get("side") not in {"LONG","SHORT"} or _finite(value.get("target")) is None:
+                return {"status":"NOT_AVAILABLE"}
+            value["signalTime"]=_unix_seconds(_utc(value["signalTime"]))
+            for key in ("zone","opposingZone"):
+                zone=value[key]
+                if not all(_finite(zone.get(k)) is not None for k in ("bottom","top")) or zone["top"]<=zone["bottom"]:
+                    return {"status":"NOT_AVAILABLE"}
+                for time in ("pivotTime","confirmedTime","touchTime","bounceTime"):
+                    if zone.get(time) is not None:
+                        zone[time]=_unix_seconds(_utc(zone[time]))
+            return {**value,"status":"AVAILABLE"}
+        except (ValueError,TypeError,KeyError):
+            return {"status":"NOT_AVAILABLE"}
+
     def fvg_six_factor_derivation(self, index: int | None) -> dict[str, Any]:
         """Read the decision saved with the trade, never reconstruct it."""
         if index is None or not self.trade_count:
@@ -2316,6 +2336,7 @@ class CompletedRunVisualizer:
             "selectedTradeIndex": trade_index,
             "selectedTrade": selected_trade,
             "fibDerivation": self.fib_derivation(trade_index),
+            "supplyDemandDerivation": self.supply_demand_derivation(trade_index),
             "fvgDerivation": self.fvg_six_factor_derivation(trade_index),
             "selectedTradeCandleTime": selected_trade_candle_time,
             "selectedTradeChartCandleTime": selected_trade_chart_candle_time,

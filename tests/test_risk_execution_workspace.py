@@ -666,3 +666,31 @@ def test_ema_reversal_gap_control_visibility_and_config_round_trip():
         assert workspace.ema_gap_card.isHidden()
     finally:
         window.close()
+
+
+def test_supply_demand_preset_sets_one_hour_and_round_trips_controls():
+    app,window=_window()
+    try:
+        selector=window.rule_builder.direction_mode
+        index=selector.findData("SUPPLY_DEMAND_RETEST")
+        assert index>=0
+        selector.setCurrentIndex(index)
+        selector.activated.emit(index)
+        app.processEvents()
+        workspace=window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert not workspace.sd_card.isHidden()
+        assert workspace.entry_card.isHidden()
+        assert workspace.ema_gap_card.isHidden()
+        assert window.strategy_tf.currentData()=="1h"
+        window.execution_form.widgets["sd_swing_strength"].setValue(3)
+        window.execution_form.widgets["sd_minimum_r"].setValue(1.5)
+        config=window.build_config()
+        assert config.execution.sd_swing_strength==3
+        assert config.execution.sd_minimum_r==1.5
+        assert config.data.strategy_timeframe_minutes==60
+        assert "next open" in workspace.summary_label.text()
+        window.apply_config(config)
+        assert window.execution_form.widgets["sd_swing_strength"].value()==3
+    finally:
+        window.close()

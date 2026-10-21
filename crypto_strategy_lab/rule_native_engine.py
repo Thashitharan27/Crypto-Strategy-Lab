@@ -16,6 +16,7 @@ from crypto_strategy_lab.data_lake_production_engine import (
 )
 from crypto_strategy_lab.ema_pullback import Ema920PullbackMixin
 from crypto_strategy_lab.ema100_300_reversal import Ema100300ReversalMixin
+from crypto_strategy_lab.supply_demand_retest import SupplyDemandRetestMixin
 from crypto_strategy_lab.fair_value_gap import FairValueGapMixin
 from crypto_strategy_lab.fib_retracement import (
     FIB_RULE_INDICATORS,
@@ -233,7 +234,7 @@ _MR_RULE_INDICATORS = frozenset(
 )
 
 
-class RuleAwareDataLakeProductionBacktestEngine(Ema100300ReversalMixin, VolumeProfileMixin, FairValueGapMixin, FibonacciRetracementMixin, MtfSrReactionMixin, Ema920PullbackMixin, DataLakeProductionBacktestEngine):
+class RuleAwareDataLakeProductionBacktestEngine(SupplyDemandRetestMixin, Ema100300ReversalMixin, VolumeProfileMixin, FairValueGapMixin, FibonacciRetracementMixin, MtfSrReactionMixin, Ema920PullbackMixin, DataLakeProductionBacktestEngine):
     """Current native runtime with prepared research evidence available to rules."""
 
     @classmethod
