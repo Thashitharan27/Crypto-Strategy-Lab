@@ -85,7 +85,7 @@ function cslCloseManualPosition(record, bars, cutoff, interval, recordedAt, requ
     method:requested?'USER_PICKED_PRICE':'LATEST_CLOSED_CANDLE_CLOSE',grossR:change/risk,returnPercent:100*change/entry.entry,
     sameCandle:bar.time===entry.candleTime,futureSeen:cutoff>entry.replayTime || Boolean(record.revealedAt) || Boolean(entry.futureSeen),
     automaticOutcomeShown:record.netR!=null,
-    interpretation:'Manual review result before fees/slippage. Intrabar fill sequence and automatic SL/TP execution are not simulated.'}};
+    interpretation:'Manual review gross result before fees/slippage. Exact intrabar fill sequence is unknown.'}};
 }
 function cslAdvanceManualPosition(record, bars, cutoff, interval, recordedAt) {
   const entry=record?.manualEntry;if(!entry || record.manualExit)return record;
