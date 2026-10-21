@@ -401,6 +401,9 @@ class ExecutionConfig:
     fvg_confirmation_minutes: int = 1
     fvg_target_mode: str = "FIXED_R"
     ema_reversal_min_entry_ema300_atr: float = 0.5
+    sd_swing_strength: int = 2
+    sd_stop_buffer_atr: float = 0.05
+    sd_minimum_r: float = 1.0
     ema_reversal_target_r: float = 1.0
     ema_reversal_min_gap_atr: float = 0.5
     fvg_reject_ema100_in_tp: bool = False
@@ -484,6 +487,10 @@ class ResearchRunConfig:
     config_version: int = CONFIG_VERSION
 
     def validate(self, request=None) -> None:
+        from crypto_strategy_lab.supply_demand_retest import validate_settings
+        validate_settings(self.execution.sd_swing_strength,self.execution.sd_stop_buffer_atr,self.execution.sd_minimum_r)
+        if any(r.get("_strategy_direction_mode")=="SUPPLY_DEMAND_RETEST" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())) and self.data.strategy_timeframe_minutes!=60:
+            raise ValueError("Supply/demand retest uses the 1h strategy timeframe")
         if not math.isfinite(self.execution.ema_reversal_min_gap_atr) or self.execution.ema_reversal_min_gap_atr < 0:
             raise ValueError("EMA minimum gap must be finite and non-negative")
         if not math.isfinite(self.execution.ema_reversal_target_r) or self.execution.ema_reversal_target_r <= 0:

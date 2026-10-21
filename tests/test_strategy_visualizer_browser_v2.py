@@ -22,6 +22,16 @@ class _Model:
         return f"{index + 1}/2 · trade"
 
 
+def test_supply_demand_overlay_and_details_use_saved_evidence():
+    html = build_browser_visualizer_v2_html(_Model(), "sd")
+    assert "function drawSupplyDemandOverlay(sd)" in html
+    assert "supplyDemandDerivation" in html
+    assert "Bounce confirmed" in html
+    assert "1h confirmed swing retest" in html
+    assert "\\nFirst touch:" in html
+    assert "\nFirst touch:" not in html
+
+
 def test_v2_html_is_minimal_and_diagnostic():
     html = build_browser_visualizer_v2_html(_Model(), "abc")
 

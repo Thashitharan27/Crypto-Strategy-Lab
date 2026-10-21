@@ -102,14 +102,16 @@ class MainWindow(LegacyMainWindow):
         if timing is None or not hasattr(timing, "findData"):
             return
         strategy = self.rule_builder.direction_mode.currentData()
-        if strategy == "EMA_100_300_REVERSAL":
+        if strategy == "SUPPLY_DEMAND_RETEST":
+            self.strategy_tf.setCurrentIndex(self.strategy_tf.findData("1h"))
+        if strategy in {"EMA_100_300_REVERSAL", "SUPPLY_DEMAND_RETEST"}:
             for name in ("di_ladder_enabled", "fvg_confirmation_enabled", "ema_cross_entry_confirmation_enabled"):
                 self.execution_form.widgets[name].setChecked(False)
             for name, value in (("sr_take_profit_mode", "FIXED_R"), ("risk_mode", "ATR")):
                 widget = self.execution_form.widgets[name]
                 widget.setCurrentIndex(widget.findData(value))
             self.strategy_form.widgets["enable_daily_entry_schedule"].setChecked(False)
-        target = "NEXT_CANDLE_OPEN" if strategy in {"EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "EMA_100_300_REVERSAL", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", "FIB_RETRACEMENT"} else "SIGNAL_CLOSE"
+        target = "NEXT_CANDLE_OPEN" if strategy in {"EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "EMA_100_300_REVERSAL", "SUPPLY_DEMAND_RETEST", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", "FIB_RETRACEMENT"} else "SIGNAL_CLOSE"
         index = timing.findData(target)
         if index >= 0:
             timing.setCurrentIndex(index)

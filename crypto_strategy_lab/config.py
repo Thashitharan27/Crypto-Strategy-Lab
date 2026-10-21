@@ -79,6 +79,9 @@ class BacktestConfig:
     fvg_confirmation_minutes: int = 1
     fvg_target_mode: str = "FIXED_R"
     ema_reversal_min_entry_ema300_atr: float = 0.5
+    sd_swing_strength: int = 2
+    sd_stop_buffer_atr: float = 0.05
+    sd_minimum_r: float = 1.0
     ema_reversal_target_r: float = 1.0
     ema_reversal_min_gap_atr: float = 0.5
     fvg_reject_ema100_in_tp: bool = False
@@ -175,6 +178,8 @@ class BacktestConfig:
     create_standard_charts: bool = True
 
     def __post_init__(self) -> None:
+        from crypto_strategy_lab.supply_demand_retest import validate_settings
+        validate_settings(self.sd_swing_strength,self.sd_stop_buffer_atr,self.sd_minimum_r)
         if not math.isfinite(self.ema_reversal_min_gap_atr) or self.ema_reversal_min_gap_atr < 0:
             raise ValueError("EMA minimum gap must be finite and non-negative")
         if not math.isfinite(self.ema_reversal_target_r) or self.ema_reversal_target_r <= 0:
