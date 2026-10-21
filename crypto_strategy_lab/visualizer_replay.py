@@ -69,6 +69,45 @@ function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
     futureSeen:Boolean(record.revealedAt) || Boolean(record.planHistory?.some(revision=>revision.futureSeen)),automaticOutcomeShown:record.netR!=null,
     outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)}};
 }
+function cslCloseManualPosition(record, bars, cutoff, interval, recordedAt, requested=null) {
+  const entry=record?.manualEntry;
+  if(!entry)return {error:'Confirm your manual entry before closing the position.'};
+  if(record.manualExit)return {error:'This manual position is already closed.'};
+  const available=bars.filter(bar=>bar.time>=entry.candleTime && bar.time+interval<=cutoff);
+  const bar=requested?available.find(item=>item.time===requested.time):available.at(-1);
+  if(!bar)return {error:'Choose a closed candle at or after your manual entry.'};
+  const price=requested?Number(requested.price):Number(bar.close);
+  if(!Number.isFinite(price) || price<=0 || price<bar.low || price>bar.high)return {error:'The exit price must be within the selected closed candle’s range.'};
+  const risk=Math.abs(entry.entry-entry.stop),side=String(record.side).toUpperCase();
+  if(!risk || !['LONG','SHORT'].includes(side))return {error:'The saved entry has no valid direction or stop distance.'};
+  const change=(side==='LONG'?1:-1)*(price-entry.entry);
+  return {...record,manualExit:{price,candleTime:bar.time,exitTime:requested?null:bar.time+interval,availableAt:bar.time+interval,recordedAt,replayTime:cutoff,candle:{...bar},
+    method:requested?'USER_PICKED_PRICE':'LATEST_CLOSED_CANDLE_CLOSE',grossR:change/risk,returnPercent:100*change/entry.entry,
+    sameCandle:bar.time===entry.candleTime,futureSeen:cutoff>entry.replayTime || Boolean(record.revealedAt) || Boolean(entry.futureSeen),
+    automaticOutcomeShown:record.netR!=null,
+    interpretation:'Manual review result before fees/slippage. Intrabar fill sequence and automatic SL/TP execution are not simulated.'}};
+}
+function cslAdvanceManualPosition(record, bars, cutoff, interval, recordedAt) {
+  const entry=record?.manualEntry;if(!entry || record.manualExit)return record;
+  const long=record.side==='LONG';if(!['LONG','SHORT'].includes(record.side))return record;
+  // The entry candle's pre-/post-entry extremes cannot be ordered from OHLC.
+  for(const bar of bars){
+    if(bar.time<=entry.candleTime || bar.time+interval>cutoff)continue;
+    const stopOpen=long?bar.open<=entry.stop:bar.open>=entry.stop;
+    const targetOpen=long?bar.open>=entry.target:bar.open<=entry.target;
+    const stop=long?bar.low<=entry.stop:bar.high>=entry.stop;
+    const target=long?bar.high>=entry.target:bar.low<=entry.target;
+    if(!stopOpen && !targetOpen && !stop && !target)continue;
+    const reason=stopOpen?'SL':targetOpen?'TP':stop?'SL':'TP';
+    const price=stopOpen || targetOpen?bar.open:reason==='SL'?entry.stop:entry.target;
+    const result=cslCloseManualPosition(record,bars,cutoff,interval,recordedAt,{time:bar.time,price});
+    if(result.error)return record;
+    result.manualExit={...result.manualExit,reason,method:'REPLAY_LEVEL_HIT',exitTime:stopOpen || targetOpen?bar.time:null,ambiguous:!stopOpen && !targetOpen && stop && target,
+      entryCandlePolicy:'Automatic level checks start after the entry candle; its intrabar ordering is unknown.'};
+    return result;
+  }
+  return record;
+}
 function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanced=false) {
   if (reveal) return {view:source,outcomeVisible:true};
   const original=source.selectedTrade || {};

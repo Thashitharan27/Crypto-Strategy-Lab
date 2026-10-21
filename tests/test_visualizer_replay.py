@@ -15,6 +15,62 @@ def evaluate_manual(expression):
     return json.loads(result.stdout)
 
 
+@pytest.mark.parametrize('side,price,r',[('LONG',110,1),('LONG',95,-.5),('SHORT',90,1),('SHORT',105,-.5)])
+def test_manual_close_records_separate_result_without_changing_automatic_trade(side,price,r):
+    stop=90 if side=='LONG' else 110
+    result=evaluate_manual(f'''
+const record={{side:'{side}',netR:42,manualEntry:{{entry:100,stop:{stop},target:120,candleTime:60,replayTime:120}}}};
+const bars=[{{time:60,open:100,high:110,low:90,close:105}},{{time:120,open:105,high:115,low:85,close:{price}}},{{time:180,open:1,high:999,low:1,close:999}}];
+const result=cslCloseManualPosition(record,bars,180,60,'now');
+console.log(JSON.stringify({{record,result,duplicate:cslCloseManualPosition(result,bars,180,60,'later')}}));
+''')
+    assert result['result']['manualExit']['price']==price
+    assert result['result']['manualExit']['grossR']==r
+    assert result['result']['manualExit']['candleTime']==120
+    assert result['result']['manualExit']['exitTime']==180
+    assert result['result']['netR']==42
+    assert 'manualExit' not in result['record']
+    assert 'error' in result['duplicate']
+
+
+@pytest.mark.parametrize('exit_request',[{'time':0,'price':100},{'time':180,'price':100},{'time':120,'price':999}])
+def test_manual_exit_rejects_pre_entry_future_or_unreachable_price(exit_request):
+    result=evaluate_manual('''
+const record={side:'LONG',manualEntry:{entry:100,stop:90,candleTime:60}};
+const bars=[0,60,120,180].map(time=>({time,open:100,high:110,low:90,close:100}));
+console.log(JSON.stringify(cslCloseManualPosition(record,bars,180,60,'now',REQUEST)));
+'''.replace('REQUEST',json.dumps(exit_request)))
+    assert 'error' in result
+
+
+@pytest.mark.parametrize('side,scenario,reason,price',[
+    ('LONG','tp','TP',120),('LONG','sl','SL',90),('LONG','both','SL',90),
+    ('LONG','gap_sl','SL',85),('LONG','gap_tp','TP',125),
+    ('SHORT','tp','TP',80),('SHORT','sl','SL',110),('SHORT','both','SL',110),
+    ('SHORT','gap_sl','SL',115),('SHORT','gap_tp','TP',75)])
+def test_manual_levels_close_on_first_known_hit_with_conservative_ties(side,scenario,reason,price):
+    long=side=='LONG'
+    stop,target=(90,120) if long else (110,80)
+    bar={'time':120,'open':100,'high':105,'low':95,'close':100}
+    if scenario in ('tp','both'):bar['high' if long else 'low']=target
+    if scenario in ('sl','both'):bar['low' if long else 'high']=stop
+    if scenario.startswith('gap'):
+        bar.update(open=price,high=max(price,100),low=min(price,100),close=100)
+    result=evaluate_manual('''
+const record={side:SIDE,manualEntry:{entry:100,stop:STOP,target:TARGET,candleTime:60,replayTime:120}};
+const bars=[{time:60,open:100,high:999,low:1,close:100},BAR,{time:180,open:1,high:999,low:1,close:1}];
+const before=cslAdvanceManualPosition(record,bars,179,60,'before');
+const after=cslAdvanceManualPosition(record,bars,180,60,'after');
+console.log(JSON.stringify({record,before,after}));
+'''.replace('SIDE',json.dumps(side)).replace('STOP',str(stop)).replace('TARGET',str(target)).replace('BAR',json.dumps(bar)))
+    assert 'manualExit' not in result['before']
+    exit=result['after']['manualExit']
+    assert exit['reason']==reason and exit['price']==price
+    assert exit['ambiguous']==(scenario=='both')
+    assert exit['candleTime']==120
+    assert 'manualExit' not in result['record']
+
+
 def test_replay_series_updates_replace_entry_stub_and_append_only_new_points():
     result=evaluate_manual('''
 const old=[{time:0,open:100,high:100,low:100,close:100}];

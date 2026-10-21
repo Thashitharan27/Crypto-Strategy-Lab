@@ -49,7 +49,7 @@ def test_replay_manual_plan_controls_history_and_chart_preview():
     assert 'Move box' in html and 'Confirm manual entry' in html
     assert 'manual ? manualPlanDraft.entryTime : Number(open.time)' in html
     assert "payload.candles || []).some(bar=>bar.time===time)" in html
-    assert 'not a simulated fill or manual P&L' in html
+    assert 'Manual results are gross R before fees/slippage.' in html
     assert 'version:3' in html
     assert 'Saved plan changes' in html
     assert "(record?.planHistory || []).slice(-20)" in html
@@ -74,6 +74,14 @@ def test_drawing_controls_and_incremental_replay_are_available():
     assert 'refreshReplay(true)' in html
     assert 'item.series.update(point)' in html
     assert "node.textContent=shape.text" in html
+
+
+def test_manual_position_closing_and_sidebar_controls():
+    html=build_browser_visualizer_v2_html(_Model(),'close')
+    for text in ('Close manual position','Pick exit','Drawing toolbar','Drawing settings','manualResults','current-profit','current-loss'):
+        assert text in html
+    assert 'cslAdvanceManualPosition' in html
+    assert "$('drawing-settings').appendChild($('drawing-tools'))" in html
 
 
 def test_supply_demand_overlay_and_details_use_saved_evidence():
@@ -136,7 +144,7 @@ def test_v2_trade_box_layer_stays_above_chart_canvas():
 
     assert "#chart{position:absolute;inset:0;z-index:1}" in html
     assert "#trade-box-layer{position:absolute;inset:0;z-index:5" in html
-    assert "const width=Math.max(48,right-left)" in html
+    assert "const width=Math.max(manual?8:48,right-left)" in html
 
 
 def test_v2_trade_box_shows_opposite_boundary_without_floating_markers():
