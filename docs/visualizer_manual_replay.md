@@ -189,8 +189,7 @@ A complete previous UTC day on a 1h-or-lower chart is required. Strict swing
 pivots use two candles on each side, all from that previous day; daily high/low
 are included. Bands use 1%, 2%, or 4% of that day's range as their base width.
 Nearby pivots merge with bounded clustering; up to eight bands prioritize daily
-extremes then number of pivot levels. Labels show price bounds and pivot count
-(not a count of independent retests). Bands start on the selected UTC day and
+extremes then number of pivot levels. Bands have no visible labels; hover over a band for its price range. Bands start on the selected UTC day and
 remain fixed throughout its replay. Colors describe their previous-day origin,
 not a prediction of future reactions. This display does not change automatic
 entries or exits; use manual TP resizing or closing to record your decision.
