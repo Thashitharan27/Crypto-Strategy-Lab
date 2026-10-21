@@ -78,7 +78,7 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
         surviving=[]; candidates=[]
         for p in pending:
             side=p["side"];long=side=="LONG"
-            if (l[i]<=p["stop"] if long else h[i]>=p["stop"]):
+            if (l[i]<=p["stopSwingPrice"] if long else h[i]>=p["stopSwingPrice"]):
                 continue
             if (c[i]>o[i] if long else c[i]<o[i]):
                 zone={"bottom":min(p["low"],l[i],p["level"]),"top":max(p["high"],h[i],p["level"]),
@@ -89,7 +89,8 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
                     "signalTime":t.isoformat(),"target":p["rangeHigh"] if long else p["rangeLow"],
                     "trigger":float(h[i] if long else l[i]),"stop":p["stop"],
                     "stopSource":"Older swing low" if long else "Older swing high",
-                    "stopSwingTime":p["stopSwingTime"],
+                    "stopSwingTime":p["stopSwingTime"],"stopSwingPrice":p["stopSwingPrice"],
+                    "stopBufferAtr":float(buffer),"stopBufferPrice":p["stopBufferPrice"],
                     "setupStart":p["start"],"level":p["level"],"levelName":p["levelName"],"setupAtr":p["atr"],
                     "levels":p["levels"],"levelsSource":"Saved at setup"})
             elif i-p["index"] < wait:
@@ -115,7 +116,8 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
                     name="Previous range low" if long else "Previous range high"
                     pending.append({"levels":snapshot_levels(prior,pivots,previous),"rangeStart":previous.isoformat(),"rangeEnd":day.isoformat(),"index":i,"side":side,"start":t.isoformat(),"level":float(level),"levelName":name,"atr":av,
                         "low":float(l[i]),"high":float(h[i]),"rangeLow":prior["low"],"rangeHigh":prior["high"],
-                        "stop":float(swing["price"]),"stopSwingTime":swing["time"].isoformat()})
+                        "stop":float(swing["price"])+(-1 if long else 1)*float(buffer)*av,
+                        "stopSwingPrice":float(swing["price"]),"stopBufferPrice":float(buffer)*av,"stopSwingTime":swing["time"].isoformat()})
         # Confirmed pivots can only affect future candles/days.
         j=i-strength
         if j-strength>=segment:

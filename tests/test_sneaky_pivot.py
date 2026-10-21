@@ -29,7 +29,7 @@ def test_all_day_signal_frozen_geometry_and_causality(short):
     setup=s[193];assert setup is not None
     assert setup['side']==('SHORT' if short else 'LONG')
     assert setup['target']==(10 if short else 20)
-    assert setup['stop']==pytest.approx(25 if short else 5)
+    assert setup['stop']==pytest.approx(25.05 if short else 4.95)
     assert setup['trigger']==pytest.approx(18.8 if short else 11.2)
     # Prefixes include day boundary, initial test, confirmation and breakout.
     for end in [95,96,97,192,193,194,195,len(args[0])]:
@@ -75,7 +75,7 @@ def test_entry_tests_day_boundary_but_stop_uses_frozen_older_swing(short,test):
         assert setup is None
         return
     assert setup['level']==(20 if short else 10)
-    assert setup['stop']==(25 if short else 5)
+    assert setup['stop']==pytest.approx(25.05 if short else 4.95)
     assert setup['stopSource']==('Older swing high' if short else 'Older swing low')
     assert pd.Timestamp(setup['stopSwingTime'])==ts[20]
     assert setup['trigger']==pytest.approx(18.8 if short else 11.2)
@@ -145,11 +145,11 @@ def test_native_breakout_fill_saved_evidence_and_timeout(short,event):
         for j in range(194,len(ts),96):
             idx=j*15
             if short:
-                minute.loc[idx,'high']=25
+                minute.loc[idx,'high']=26
                 if event=='stop_first':minute.loc[idx,['low','close']]=19
                 if event=='gap_stop':minute.loc[idx,['open','close']]=18.5
             else:
-                minute.loc[idx,'low']=5
+                minute.loc[idx,'low']=4
                 if event=='stop_first':minute.loc[idx,['high','close']]=11
                 if event=='gap_stop':minute.loc[idx,['open','close']]=11.5
     profiles,_=compile_profiles(direction_mode=MODE,market_permissions=MARKET_PERMISSIONS)
@@ -183,3 +183,17 @@ def test_visualizer_names_breakout_instead_of_next_open():
     source=Path('crypto_strategy_lab/strategy_visualizer_browser_v2.py').read_text(encoding='utf-8')
     assert 'All-day level test → reversal → breakout' in source
     assert 'Enter only on a breakout during the next 15m candle' in source
+
+
+@pytest.mark.parametrize('short',[False,True])
+@pytest.mark.parametrize('buffer',[0,.05,.25])
+def test_stop_buffer_uses_frozen_setup_atr_and_preserves_swing_anchor(short,buffer):
+    ts,o,h,l,c,atr=candles(short)
+    atr[191]=2;atr[193]=20
+    setup=sneaky_setups(ts,o,h,l,c,atr,buffer=buffer)[193]
+    assert setup is not None
+    anchor=25 if short else 5
+    assert setup['stopSwingPrice']==anchor
+    assert setup['stop']==pytest.approx(anchor+(1 if short else -1)*buffer*2)
+    assert setup['stopBufferAtr']==buffer
+    assert setup['stopBufferPrice']==pytest.approx(buffer*2)
