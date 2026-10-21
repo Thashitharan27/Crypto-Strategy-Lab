@@ -9,7 +9,8 @@ to closed candles, and the trade selector hides result-bearing labels.
 Review the entry plan, known indicators and saved setup. Write an optional note
 and select **Take**, **Skip** or **Unsure** before revealing future candles.
 Then use **Next candle**, **Play/Pause** with the speed selector, or **Reveal
-result**. Play pauses when the recorded exit has been reached. Judgements and
+result**. Replay can continue past the automatic exit to review a later manual
+entry. Judgements and
 pre-entry notes lock as soon as any future candles are revealed. **Restart at
 entry** hides the result again but retains the original judgement and marks it
 as previously reviewed. Selecting another trade keeps replay active and starts
@@ -58,13 +59,29 @@ judgement. Unsaved edits are identified in the plan status. Each changed plan
 adds a timestamped revision with the replay candle/time and a flag indicating
 whether future candles had already been viewed. The original automated plan,
 first manual plan and judgement remain available in the export. Repeated saves
-of identical prices do not duplicate history. Plans lock once the automated
-outcome has been revealed; restarting retains the saved history.
+of identical prices and entry candles do not duplicate history. Plans lock after
+explicitly revealing the full result or confirming a manual entry; restarting
+retains the saved history and confirmation.
 
-This records proposed **prices**, not a relocated entry time or an executed
-manual order. The automated entry time remains the replay anchor. Manual fills,
-SL/TP outcomes, fees and P&L are not simulated. At reveal the exit label says
-**Auto exit**, and all reported R totals still use original automated results.
-Export format version 2 adds `originalPlan`, `manualPlan` and `planHistory`
-without removing earlier choice/note/outcome fields. Older browser reviews
-remain readable and acquire a plan when next saved before their outcome locks.
+Use **Move box**, then click a visible candle at or after the automatic entry.
+The whole risk/reward box moves horizontally to that candle while preserving
+your Entry, SL and TP prices. The selected candle time appears beside the button
+and is included in each saved revision. Advance replay to select later candles.
+Older reviews without an entry candle default to the original entry candle.
+
+After choosing **Take**, use **Confirm manual entry** to record that you would
+have entered on the selected candle. It must be fully closed in replay, and its
+low/high range must include your entry price. Otherwise the tool explains why it
+cannot confirm; advance, move the box or adjust the price and try again.
+Confirmation saves and locks the plan. It records the candle OHLC, selected
+prices, confirmation time, replay time and whether results had already been
+seen. A candle range validates price reachability, not an exact intrabar fill
+sequence or order execution. Later plans remain visibly tagged as made after
+advancing; this is not a blind prospective execution backtest.
+
+The automated entry remains the initial replay anchor. Manual SL/TP outcomes,
+fees and P&L are not simulated. At reveal the exit label says **Auto exit**, and
+all reported R totals still use original automated results. Export format
+version 3 adds the manual plan's `entryTime`, optional `manualEntry` confirmation
+and `confirmedManualEntries` count, preserving earlier choice/note/outcome
+fields. Unconfirmed plans remain plans, not entered trades.

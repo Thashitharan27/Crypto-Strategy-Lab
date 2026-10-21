@@ -15,11 +15,25 @@ function cslManualPlan(entry, stop, target, side) {
 function cslRecordManualPlan(record, plan, original, context) {
   if(plan.error) throw Error(plan.error);
   const previous=record.manualPlan;
-  if(previous && ['entry','stop','target'].every(key=>previous[key]===plan[key])) return record;
+  if(previous && ['entry','stop','target','entryTime'].every(key=>previous[key]===plan[key])) return record;
   const revision={...plan,recordedAt:context.recordedAt,replayTime:context.replayTime,
-    futureSeen:Boolean(context.futureSeen),outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)};
+    futureSeen:Boolean(context.futureSeen),automaticOutcomeShown:record.netR!=null,
+    outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)};
   return {...record,originalPlan:record.originalPlan || {...original},manualPlan:{...plan},
     planHistory:[...(record.planHistory || []),revision]};
+}
+function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
+  if(record.manualEntry) return {error:'Manual entry is already confirmed.'};
+  const plan=record.manualPlan;
+  if(!plan || !Number.isFinite(plan.entryTime)) return {error:'Choose an entry candle first.'};
+  const bar=bars.find(item=>item.time===plan.entryTime && item.time+interval<=cutoff);
+  if(!bar) return {error:'Advance until the selected entry candle has closed.'};
+  if(!(bar.low<=plan.entry && plan.entry<=bar.high)) return {error:'The selected candle did not trade through your entry price. Move the box to another candle or adjust the price.'};
+  return {...record,manualEntry:{...plan,candleTime:bar.time,confirmedAt:recordedAt,
+    replayTime:cutoff,candle:{...bar},confirmation:'User confirmed; candle range includes price. Intrabar fill time is unknown.',
+    planSavedAt:record.planHistory?.at(-1)?.recordedAt,
+    futureSeen:Boolean(record.revealedAt),automaticOutcomeShown:record.netR!=null,
+    outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)}};
 }
 function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanced=false) {
   if (reveal) return {view:source,outcomeVisible:true};
