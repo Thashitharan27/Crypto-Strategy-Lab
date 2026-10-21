@@ -149,12 +149,18 @@ class RiskExecutionWorkspace(QWidget):
         self.ema_gap_card.add_field("ema_reversal_target_r", "Reward / risk (TP stays at EMA 100)", self.account["ema_reversal_target_r"])
         layout.addWidget(self.ema_gap_card)
 
-        self.sd_card = FormCard("Supply & demand retest", note="One-hour confirmed swing zones. Touch → bounce away → later directional retest; entry at the next open. 0 stop buffer means the exact zone edge.")
+        self.sd_card = FormCard("Supply & demand retest", note="Confirmed swing zones. Touch → bounce away → later directional retest; entry at the next open. 0 stop buffer means the exact zone edge.")
         for name,label in (("sd_swing_strength","Swing candles on each side"),("sd_stop_buffer_atr","Stop buffer beyond zone (ATR)"),("sd_minimum_r","Minimum reward / risk")):
             self.sd_card.add_field(name,label,self.account[name])
         self.account["sd_swing_strength"].setRange(1,20)
         self.account["sd_stop_buffer_atr"].setRange(0.,100.)
         self.account["sd_minimum_r"].setRange(.01,100.)
+        for name,label in (("ls_equal_tolerance_atr","Equal-high/low tolerance (ATR)"),("ls_displacement_atr","Minimum displacement body (ATR)"),("ls_base_bars","Maximum zone base candles"),("ls_max_wait_bars","Maximum wait per stage (candles)")):
+            self.sd_card.add_field(name,label,self.account[name])
+        self.account["ls_equal_tolerance_atr"].setRange(0.,10.)
+        self.account["ls_displacement_atr"].setRange(.01,100.)
+        self.account["ls_base_bars"].setRange(1,20)
+        self.account["ls_max_wait_bars"].setRange(1,500)
         layout.addWidget(self.sd_card)
 
         self.entry_card = FormCard(
@@ -852,7 +858,11 @@ class RiskExecutionWorkspace(QWidget):
             for name in fields:
                 self.advanced_card.set_row_visible(name, enabled)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
-        supply_demand = self._signal_strategy_mode() == "SUPPLY_DEMAND_RETEST"
+        liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
+        supply_demand = self._signal_strategy_mode() in {"SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST"}
+        self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
+        for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
+            self.sd_card.set_row_visible(name,liquidity)
         self.sd_card.setVisible(supply_demand)
         self.ema_gap_card.setVisible(automatic_reversal)
         for card in (self.entry_card, self.stop_card, self.target_card, self.ladder_card,
@@ -908,6 +918,16 @@ class RiskExecutionWorkspace(QWidget):
         return ", ".join(enabled) if enabled else "no optional trade management"
 
     def update_summary(self, execution, base) -> None:
+        if self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST":
+            self.summary_label.setText(
+                f"Liquidity sweep: confirmed HH/HL trend for longs, LH/LL for shorts; {execution.sd_swing_strength} swing candles each side. "
+                f"Two equal lows/highs within {execution.ls_equal_tolerance_atr:g} × ATR; sweep and reclaim against the trend. "
+                f"Then a directional body ≥ {execution.ls_displacement_atr:g} × ATR closing beyond up to {execution.ls_base_bars} preceding base candles. "
+                f"Retest that zone with a directional candle, then enter at next open. Wait at most {execution.ls_max_wait_bars} candles per stage. "
+                f"SL beyond zone + {execution.sd_stop_buffer_atr:g} × ATR; fixed TP at the pre-sweep trend extreme; minimum {execution.sd_minimum_r:g}R. "
+                "One attempt per swept pool/zone; consolidation alone cannot enter."
+            )
+            return
         if self._signal_strategy_mode() == "SUPPLY_DEMAND_RETEST":
             self.summary_label.setText(
                 f"Supply & demand — 1h swing retest. Confirm swings with {execution.sd_swing_strength} completed candles on each side. "

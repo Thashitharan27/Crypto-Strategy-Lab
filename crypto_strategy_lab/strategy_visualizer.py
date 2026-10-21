@@ -974,6 +974,10 @@ class CompletedRunVisualizer:
             if not isinstance(value,dict) or value.get("version")!=1 or value.get("side") not in {"LONG","SHORT"} or _finite(value.get("target")) is None:
                 return {"status":"NOT_AVAILABLE"}
             value["signalTime"]=_unix_seconds(_utc(value["signalTime"]))
+            if value.get("sweepTime") is not None:
+                value["sweepTime"]=_unix_seconds(_utc(value["sweepTime"]))
+                for key in ("firstTime","secondTime"):
+                    value["liquidity"][key]=_unix_seconds(_utc(value["liquidity"][key]))
             for key in ("zone","opposingZone"):
                 zone=value[key]
                 if not isinstance(zone,dict) or not all(_finite(zone.get(k)) is not None for k in ("bottom","top")) or zone["top"]<=zone["bottom"]:

@@ -27,6 +27,9 @@ def test_supply_demand_overlay_and_details_use_saved_evidence():
     assert "function drawSupplyDemandOverlay(sd)" in html
     assert "supplyDemandDerivation" in html
     assert "Bounce confirmed" in html
+    assert "Liquidity sweep" in html
+    assert "Equal lows" in html
+    assert "Displacement" in html
     assert "1h confirmed swing retest" in html
     assert "\\nFirst touch:" in html
     assert "\nFirst touch:" not in html
