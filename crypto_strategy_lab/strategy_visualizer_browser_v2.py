@@ -30,6 +30,9 @@ def build_browser_visualizer_v2_html(
     session_token: str,
 ) -> str:
     request = model.seed.request
+    swing_strength = getattr(getattr(getattr(model.seed,"config",None),"execution",None),"sd_swing_strength",2)
+    if not isinstance(swing_strength,int) or isinstance(swing_strength,bool) or swing_strength<1:
+        swing_strength=2
     bootstrap = {
         "sessionBase": f"/session/{session_token}",
         "trades": [
@@ -41,7 +44,7 @@ def build_browser_visualizer_v2_html(
             "symbol": request.symbol,
             "timeframe": request.strategy_timeframe,
             "tradeCount": model.trade_count,
-            "swingStrength": getattr(getattr(getattr(model.seed,"config",None),"execution",None),"sd_swing_strength",2),
+            "swingStrength": swing_strength,
             "emaReversal": getattr(model, "_ema_source", lambda period: "close")(300) == "high",
         },
     }
