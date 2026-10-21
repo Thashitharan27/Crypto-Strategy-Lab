@@ -898,6 +898,7 @@ button:disabled{opacity:.45;cursor:default}
     fvgLayer.replaceChildren();
     if(dayMode && payload?.dayContext && chart && candles) {
       const height=chart.panes()[0].getHeight(),right=chartWrap.clientWidth-76;
+      fvgLayer.style.height=height+'px';
       for(const level of payload.dayContext.levels || []) {
         const y=candles.priceToCoordinate(level.price);if(level.price==null || y==null || y<0 || y>height)continue;
         const line=document.createElement('div');line.className='fvg-level';
