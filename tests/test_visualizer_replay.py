@@ -123,7 +123,7 @@ console.log(JSON.stringify({first,moved}));
 @pytest.mark.parametrize('cutoff,price,valid',[(179,100,False),(180,100,True),(180,80,False),(180,95,True),(180,105,True)])
 def test_manual_confirmation_requires_closed_selected_candle_and_reachable_price(cutoff,price,valid):
     result=evaluate_manual(f'''
-const record={{decision:'Take',manualPlan:{{entry:{price},stop:90,target:120,entryTime:120}},planHistory:[{{recordedAt:'saved'}}]}};
+const record={{decision:'Take',manualPlan:{{entry:{price},stop:90,target:120,entryTime:120}},planHistory:[{{recordedAt:'saved',futureSeen:true}}]}};
 const bars=[{{time:120,open:99,high:105,low:95,close:103}},{{time:180,open:100,high:200,low:1,close:100}}];
 const result=cslConfirmManualEntry(record,bars,{cutoff},60,'confirmed');
 console.log(JSON.stringify({{record,result}}));
@@ -135,6 +135,7 @@ console.log(JSON.stringify({{record,result}}));
         assert entry['candleTime']==120
         assert entry['entry']==price
         assert entry['planSavedAt']=='saved'
+        assert entry['futureSeen']
         assert entry['candle']['high']==105
         assert 'unknown' in entry['confirmation']
 

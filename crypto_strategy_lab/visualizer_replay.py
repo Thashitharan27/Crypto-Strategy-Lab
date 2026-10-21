@@ -60,7 +60,7 @@ function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
   return {...record,manualEntry:{...plan,candleTime:bar.time,confirmedAt:recordedAt,
     replayTime:cutoff,candle:{...bar},confirmation:'User confirmed; candle range includes price. Intrabar fill time is unknown.',
     planSavedAt:record.planHistory?.at(-1)?.recordedAt,
-    futureSeen:Boolean(record.revealedAt),automaticOutcomeShown:record.netR!=null,
+    futureSeen:Boolean(record.revealedAt) || Boolean(record.planHistory?.some(revision=>revision.futureSeen)),automaticOutcomeShown:record.netR!=null,
     outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)}};
 }
 function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanced=false) {
