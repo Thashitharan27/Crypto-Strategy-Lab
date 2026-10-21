@@ -1800,12 +1800,34 @@ class FibonacciRetracementMixin:
         from .candle_confirmation import candle_confirmation_check
         return candle_confirmation_check(self, i, self._effective_trade_direction(i), "fib")
 
+    def _fib_entry_zone_check(self, i, execution_i=None):
+        """Execution veto using frozen signal anchors and the actual fill price."""
+        if not bool(getattr(self.config, "fib_entry_50_618_only", False)):
+            return True, "FIB_ENTRY_ZONE_DISABLED"
+        try:
+            values=self.fib_retracement
+            start=float(values["_FIB_IMPULSE_START_PRICE"][i])
+            end=float(values["_FIB_IMPULSE_END_PRICE"][i])
+            entry=float(self._expected_entry_price(i,execution_i,self._effective_trade_direction(i)))
+        except (KeyError,IndexError,TypeError,ValueError,AttributeError):
+            return False, "FIB_ENTRY_ZONE_UNAVAILABLE"
+        if not np.isfinite([start,end,entry]).all() or start==end:
+            return False, "FIB_ENTRY_ZONE_UNAVAILABLE"
+        level50=end-.5*(end-start)
+        level618=end-.618*(end-start)
+        if not min(level50,level618)<entry<max(level50,level618):
+            return False, "FIB_ENTRY_OUTSIDE_50_618_ZONE"
+        return True, "FIB_ENTRY_INSIDE_50_618_ZONE"
+
     def _entry_filter_result(self, i, execution_i=None):
         passed, reason = super()._entry_filter_result(i, execution_i)
         if not passed or getattr(self, "signal_strategy_mode", "DI") != FIB_RETRACEMENT_MODE:
             return passed, reason
         if self._fib_deeper_entry_enabled() and self._effective_trade_direction(i) != self._selected_direction(i):
             return False, "FIB_DEEPER_LIMIT_DIRECTION_FLIP_UNSUPPORTED"
+        zone_passed, zone_reason = self._fib_entry_zone_check(i,execution_i)
+        if not zone_passed:
+            return False, zone_reason
         candle_passed, candle_reason = self._fib_candle_confirmation_check(i)
         if not candle_passed:
             return False, candle_reason

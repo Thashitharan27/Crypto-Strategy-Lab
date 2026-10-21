@@ -694,3 +694,26 @@ def test_supply_demand_preset_sets_one_hour_and_round_trips_controls():
         assert window.execution_form.widgets["sd_swing_strength"].value()==3
     finally:
         window.close()
+
+
+def test_fib_entry_zone_filter_visibility_and_saved_config():
+    app,window=_window()
+    try:
+        selector=window.rule_builder.direction_mode
+        selector.setCurrentIndex(selector.findData("FIB_RETRACEMENT"))
+        workspace=window.risk_execution_workspace
+        workspace.refresh_visibility()
+        checkbox=window.execution_form.widgets["fib_entry_50_618_only"]
+        assert not checkbox.isHidden()
+        assert not checkbox.isChecked()
+        checkbox.setChecked(True)
+        config=window.build_config()
+        assert config.execution.fib_entry_50_618_only
+        assert "strictly inside the 50%" in workspace.summary_label.text()
+        window.apply_config(config)
+        assert checkbox.isChecked()
+        selector.setCurrentIndex(selector.findData("FVG_SIX_FACTOR"))
+        workspace.refresh_visibility()
+        assert checkbox.isHidden()
+    finally:
+        window.close()

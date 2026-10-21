@@ -130,7 +130,7 @@ EXECUTION_GROUPS = (
         "sr_take_profit_mode", "sr_take_profit_timeframe_minutes",
         "sr_take_profit_maximum_r", "sr_take_profit_minimum_r",
         "sr_take_profit_buffer_r", "fvg_target_buffer_atr", "fib_target_mode",
-        "fib_fixed_target_r", "fib_target_buffer_atr", "fib_minimum_target_r",
+        "fib_entry_50_618_only", "fib_fixed_target_r", "fib_target_buffer_atr", "fib_minimum_target_r",
         "sr_take_profit_no_level_policy",
     ), None),
     ("Fees", (
