@@ -65,6 +65,17 @@ def test_calendar_replay_controls_and_manual_only_context():
     assert 'End of this UTC day.' in html
 
 
+def test_drawing_controls_and_incremental_replay_are_available():
+    html=build_browser_visualizer_v2_html(_Model(),'drawing')
+    for text in ('Trend line','Horizontal line','Rectangle','Fib retracement','Text note','Undo drawing','Export drawings','Follow replay'):
+        assert text in html
+    assert 'function cslDrawingShapes' in html
+    assert 'function updateReplayChart()' in html
+    assert 'refreshReplay(true)' in html
+    assert 'item.series.update(point)' in html
+    assert "node.textContent=shape.text" in html
+
+
 def test_supply_demand_overlay_and_details_use_saved_evidence():
     html = build_browser_visualizer_v2_html(_Model(), "sd")
     assert "function drawSupplyDemandOverlay(sd)" in html

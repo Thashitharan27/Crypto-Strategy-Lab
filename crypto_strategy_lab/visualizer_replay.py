@@ -1,6 +1,12 @@
 """Browser-only replay projection; completed-run evidence remains unchanged."""
 
 REPLAY_HELPERS = r"""
+function cslSeriesTail(previous, next) {
+  if(!previous.length)return {reset:false,points:next};
+  if(next.length<previous.length || next[0]?.time!==previous[0]?.time || next[previous.length-1]?.time!==previous.at(-1)?.time)
+    return {reset:true,points:next};
+  return {reset:false,points:next.slice(previous.length-1)};
+}
 function cslDaySource(source, day, interval, side='LONG', strength=2) {
   const all=source.candles || [];
   let history=all.filter(bar=>bar.time+interval<=day);

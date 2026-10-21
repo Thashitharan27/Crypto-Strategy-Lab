@@ -19,6 +19,7 @@ from crypto_strategy_lab.strategy_visualizer import (
     LIGHTWEIGHT_CHARTS_URL,
 )
 from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
+from crypto_strategy_lab.visualizer_drawings import DRAWING_HELPERS
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -92,6 +93,11 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #review-setup[aria-pressed=true]{background:#195d76;border-color:#22d3ee}
 @media(max-width:900px){#setup-panel{width:215px;padding:10px}}
 #trade-box-layer{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}
+#drawing-layer{position:absolute;inset:0;z-index:6;pointer-events:none;overflow:hidden}
+#drawing-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 10px;background:#121e2b;border-bottom:1px solid #334155}
+#drawing-tools{flex-basis:100%}
+#drawing-tools input{background:#0c1420;color:#e6edf3;border:1px solid #475569;border-radius:4px;padding:4px}
+#drawing-status{font-size:12px;color:#b9d7f5}
 .fib-band{position:absolute;box-sizing:border-box;border-top:1px solid rgba(255,255,255,.18)}
 .fib-level-label{position:absolute;transform:translateY(-50%);padding:2px 5px;border-radius:3px;font:10px/1.2 Segoe UI,Arial,sans-serif;font-weight:700;white-space:nowrap;color:#f8fafc;background:rgba(15,23,32,.90);border:1px solid rgba(148,163,184,.44);box-shadow:0 1px 3px rgba(0,0,0,.32)}
 .fib-anchor{position:absolute;height:1px;transform-origin:0 50%;background:rgba(148,163,184,.65)}
@@ -194,6 +200,7 @@ button:disabled{opacity:.45;cursor:default}
       <button data-replay-decision="Take">Take</button><button data-replay-decision="Skip">Skip</button><button data-replay-decision="Unsure">Unsure</button>
       <input id="replay-notes" aria-label="Pre-entry judgement note" placeholder="Why would you take or skip it?">
       <button id="replay-step">Next candle</button><button id="replay-play">Play</button>
+      <label><input id="replay-follow" type="checkbox" checked> Follow replay</label>
       <select id="replay-speed" aria-label="Replay speed"><option value="1500">Slow</option><option value="750" selected>Normal</option><option value="300">Fast</option></select>
       <button id="replay-reveal">Reveal result</button><button id="replay-restart">Restart at entry</button>
       <button id="replay-export">Export reviews</button>
@@ -210,6 +217,19 @@ button:disabled{opacity:.45;cursor:default}
       </div>
       <span id="replay-status" role="status"></span>
     </div>
+    <div id="drawing-tools" role="group" aria-label="Chart drawing tools">
+      <strong>Draw</strong><select id="drawing-tool" aria-label="Drawing tool">
+        <option value="cursor">Cursor</option><option value="trend">Trend line</option><option value="ray">Ray</option>
+        <option value="hline">Horizontal line</option><option value="vline">Vertical line</option><option value="rect">Rectangle</option>
+        <option value="fib">Fib retracement</option><option value="measure">Measure</option><option value="text">Text note</option>
+      </select>
+      <input id="drawing-color" type="color" value="#60a5fa" aria-label="Drawing color">
+      <input id="drawing-text" aria-label="Drawing note" placeholder="Text note" size="12" maxlength="200">
+      <select id="drawing-selected" aria-label="Saved drawing"><option value="">Saved drawings</option></select>
+      <button id="drawing-edit">Redraw selected</button><button id="drawing-delete">Delete selected</button>
+      <button id="drawing-undo">Undo drawing</button><button id="drawing-clear">Clear drawings</button><button id="drawing-export">Export drawings</button>
+      <span id="drawing-status" role="status"></span>
+    </div>
   </div>
   <details id="diagnostics"><summary>Trade diagnostics (expand)</summary><div id="diag">Loading…</div></details>
   <div id="workspace"><div id="chart-wrap">
@@ -218,6 +238,7 @@ button:disabled{opacity:.45;cursor:default}
     <div id="fib-layer"></div>
     <div id="fvg-layer"></div>
     <div id="trade-box-layer"></div>
+    <svg id="drawing-layer" width="100%" height="100%" aria-label="Chart drawings"></svg>
   </div><aside id="setup-panel" aria-label="FVG setup explanation" hidden></aside></div>
 </div>
 <dialog id="indicator-dialog" aria-labelledby="indicator-title">
@@ -263,6 +284,7 @@ button:disabled{opacity:.45;cursor:default}
 <script>
 (() => {
   __REPLAY_HELPERS__
+  __DRAWING_HELPERS__
   const boot = __BOOTSTRAP__;
   const $ = id => document.getElementById(id);
   $('chart-symbol').textContent = boot.run.symbol;
@@ -366,6 +388,7 @@ button:disabled{opacity:.45;cursor:default}
   let chart = null;
   let chartResizeObserver = null;
   let candles = null;
+  let replaySeries = [];
   let trendEmaLines = [];
   let rsiSeries = null;
   let rsiZoomFactor = 1.0;
@@ -374,6 +397,72 @@ button:disabled{opacity:.45;cursor:default}
   let pricePanOffset = 0.0;
   let verticalPan = null;
   let defaultPriceRange = null;
+  const drawingKey='csl-drawings-v1:'+boot.run.runId+':'+boot.run.symbol;
+  let drawings=[],drawingUndo=[],drawingPoints=[],drawingHover=null,drawingEditId=null;
+  let drawingStorageOk=true;
+  try {const saved=JSON.parse(localStorage.getItem(drawingKey)||'[]');if(Array.isArray(saved))drawings=saved.filter(item=>item && Array.isArray(item.points) && item.points.length && item.points.every(p=>Number.isFinite(p.time) && Number.isFinite(p.price) && p.price>0));}catch{drawingStorageOk=false;}
+  function drawingControls() {
+    const selected=$('drawing-selected').value;
+    $('drawing-selected').replaceChildren(new Option('Saved drawings ('+drawings.length+')',''));
+    drawings.forEach((item,index)=>$('drawing-selected').add(new Option((index+1)+'. '+item.tool+(item.text?' · '+item.text:''),item.id)));
+    $('drawing-selected').value=selected;
+    $('drawing-delete').disabled=!$('drawing-selected').value;$('drawing-edit').disabled=!$('drawing-selected').value;
+    $('drawing-undo').disabled=!drawingUndo.length;
+    $('drawing-status').textContent=($('drawing-tool').value==='cursor'?'Drawings saved in this browser.':drawingPoints.length?'Click the second anchor.':'Click a price-chart anchor.')+(drawingStorageOk?'':' Storage unavailable; export to keep drawings.');
+  }
+  function saveDrawings(next) {
+    drawingUndo.push(drawings);if(drawingUndo.length>30)drawingUndo.shift();drawings=next;
+    try{localStorage.setItem(drawingKey,JSON.stringify(drawings));}catch{drawingStorageOk=false;}
+    drawingControls();drawUserDrawings();
+  }
+  function drawingPoint(event) {
+    if(!event.point || event.point.y<0 || event.point.y>chart.panes()[0].getHeight())return null;
+    const price=candles.coordinateToPrice(event.point.y),bars=payload?.candles || [];
+    const logical=chart.timeScale().coordinateToLogical(event.point.x);
+    const stepMatch=String(currentTimeframe).match(/^([0-9]+)([mhdw])$/);
+    const step=stepMatch?Number(stepMatch[1])*({m:60,h:3600,d:86400,w:604800}[stepMatch[2]]):900;
+    const index=Math.round(logical ?? 0);
+    const time=event.time!=null?Number(event.time):bars[index]?.time ?? (bars.length?bars.at(-1).time+(index-bars.length+1)*step:NaN);
+    return Number.isFinite(price) && price>0 && Number.isFinite(time)?{time,price}:null;
+  }
+  function drawingClick(event) {
+    const tool=$('drawing-tool').value;if(tool==='cursor')return false;
+    const point=drawingPoint(event);if(!point)return true;
+    drawingPoints.push(point);
+    if(drawingPoints.length<(['hline','vline','text'].includes(tool)?1:2)){drawingControls();return true;}
+    const item={id:drawingEditId || String(Date.now())+'-'+Math.random().toString(36).slice(2),tool,points:drawingPoints,color:$('drawing-color').value,text:$('drawing-text').value.slice(0,200),recordedAt:new Date().toISOString(),replayTime:replayActive?replayCutoff:null};
+    saveDrawings(drawingEditId?drawings.map(old=>old.id===drawingEditId?item:old):[...drawings,item]);
+    drawingPoints=[];drawingHover=null;drawingEditId=null;$('drawing-tool').value='cursor';chartWrap.style.cursor='';drawingControls();drawUserDrawings();return true;
+  }
+  function drawUserDrawings() {
+    const layer=$('drawing-layer');layer.replaceChildren();if(!chart || !candles)return;
+    const bars=payload?.candles || [],width=chartWrap.clientWidth-76,height=chart.panes()[0].getHeight();layer.style.height=height+'px';
+    const project=point=>{
+      let x=chart.timeScale().timeToCoordinate(point.time);
+      if(x==null && bars.length){
+        let lo=0,hi=bars.length;while(lo<hi){const mid=(lo+hi)>>1;if(bars[mid].time<point.time)lo=mid+1;else hi=mid;}
+        const a=Math.max(0,Math.min(bars.length-2,lo-1)),step=bars[a+1]?.time-bars[a]?.time || replayInterval;
+        x=chart.timeScale().logicalToCoordinate(a+(point.time-bars[a].time)/step);
+      }
+      const y=candles.priceToCoordinate(point.price);return x==null || y==null?null:{x,y};
+    };
+    const visible=drawings.filter(item=>!replayActive || item.replayTime==null || item.replayTime<=replayCutoff);
+    if(drawingPoints.length && drawingHover)visible.push({tool:$('drawing-tool').value,points:[drawingPoints[0],drawingHover],color:$('drawing-color').value});
+    for(const item of visible)for(const shape of cslDrawingShapes(item,project,width,height)){
+      const node=document.createElementNS('http://www.w3.org/2000/svg',shape.tag);
+      for(const [key,value]of Object.entries(shape.attrs))node.setAttribute(key,String(value));
+      if(shape.text!=null)node.textContent=shape.text;layer.appendChild(node);
+    }
+  }
+  $('drawing-tool').addEventListener('change',()=>{stopReplay();manualPick=null;drawingPoints=[];drawingHover=null;drawingEditId=null;chartWrap.style.cursor=$('drawing-tool').value==='cursor'?'':'crosshair';drawingControls();drawUserDrawings();});
+  $('drawing-selected').addEventListener('change',drawingControls);
+  $('drawing-delete').addEventListener('click',()=>saveDrawings(drawings.filter(item=>item.id!==$('drawing-selected').value)));
+  $('drawing-clear').addEventListener('click',()=>saveDrawings([]));
+  $('drawing-undo').addEventListener('click',()=>{if(!drawingUndo.length)return;drawings=drawingUndo.pop();try{localStorage.setItem(drawingKey,JSON.stringify(drawings));}catch{drawingStorageOk=false;}drawingControls();drawUserDrawings();});
+  $('drawing-edit').addEventListener('click',()=>{const item=drawings.find(item=>item.id===$('drawing-selected').value);if(!item)return;stopReplay();drawingEditId=item.id;$('drawing-tool').value=item.tool;$('drawing-color').value=item.color;$('drawing-text').value=item.text || '';manualPick=null;drawingPoints=[];drawingHover=null;chartWrap.style.cursor='crosshair';drawingControls();});
+  $('drawing-export').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify({version:1,runId:boot.run.runId,symbol:boot.run.symbol,drawings},null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='csl-chart-drawings.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'){drawingPoints=[];drawingHover=null;drawingEditId=null;$('drawing-tool').value='cursor';chartWrap.style.cursor='';drawingControls();drawUserDrawings();}});
+  drawingControls();
 
   function stopReplay() {
     if(replayTimer) clearInterval(replayTimer);
@@ -488,7 +577,7 @@ button:disabled{opacity:.45;cursor:default}
     $('replay-status').textContent=message;
     refreshManualPlan();
   }
-  function refreshReplay() {
+  function refreshReplay(incremental=false) {
     if(!sourcePayload) return;
     if(replayActive) {
       const projected=cslReplayView(sourcePayload,replayCutoff,replayInterval,replayEntryTime,dayMode?false:replayRevealed,replayAdvanced);
@@ -510,11 +599,11 @@ button:disabled{opacity:.45;cursor:default}
         saveReviews();
       }
     }
-    defaultPriceRange=null; priceZoomFactor=1; pricePanOffset=0;
-    renderDiagnostics(); buildChart();
+    renderDiagnostics();
+    if(incremental && chart && replaySeries.length) updateReplayChart();
+    else {defaultPriceRange=null;priceZoomFactor=1;pricePanOffset=0;buildChart();requestAnimationFrame(centerSelected);}
     chartWrap.style.visibility='visible';
     if(replayActive) updateReplayControls();
-    requestAnimationFrame(centerSelected);
   }
   function markFutureSeen() {
     const record=currentReview();
@@ -533,7 +622,7 @@ button:disabled{opacity:.45;cursor:default}
     replayCutoff=next.time+replayInterval; replayAdvanced=true;
     if(dayMode)replayCutoff=Math.min(replayCutoff,replayDay+86400);
     if(dayMode && currentReview())markFutureSeen();
-    refreshReplay();
+    refreshReplay(true);
   }
   function updateTradeLabels() {
     [...tradeSelect.options].forEach((option,index)=>option.textContent=replayActive ? 'Trade '+(index+1)+' · outcome hidden' : boot.trades[index].label);
@@ -611,7 +700,7 @@ button:disabled{opacity:.45;cursor:default}
   $('manual-reset').addEventListener('click',()=>{if(!manualPlanLocked()){loadManualPlan(automaticPlan());resetPriceScale();}});
   $('manual-move').addEventListener('click',()=>{
     if(manualPlanLocked()) return;
-    stopReplay();manualPick='candle';chartWrap.style.cursor='crosshair';refreshManualPlan();
+    stopReplay();$('drawing-tool').value='cursor';drawingPoints=[];drawingHover=null;drawingControls();manualPick='candle';chartWrap.style.cursor='crosshair';refreshManualPlan();
   });
   $('manual-confirm').addEventListener('click',()=>{
     if(manualPlanLocked() || currentReview()?.decision!=='Take') return;
@@ -624,7 +713,7 @@ button:disabled{opacity:.45;cursor:default}
   });
   document.querySelectorAll('[data-pick-level]').forEach(button=>button.addEventListener('click',()=>{
     if(manualPlanLocked()) return;
-    stopReplay();manualPick=button.dataset.pickLevel;chartWrap.style.cursor='crosshair';refreshManualPlan();
+    stopReplay();$('drawing-tool').value='cursor';drawingPoints=[];drawingHover=null;drawingControls();manualPick=button.dataset.pickLevel;chartWrap.style.cursor='crosshair';refreshManualPlan();
   }));
   $('replay-notes').addEventListener('input',()=>{
     const record=currentReview();
@@ -637,6 +726,12 @@ button:disabled{opacity:.45;cursor:default}
     replayTimer=setInterval(stepReplay,Number($('replay-speed').value)); $('replay-play').textContent='Pause';
   });
   $('replay-speed').addEventListener('change',()=>{if(replayTimer){stopReplay();$('replay-play').click();}});
+  $('replay-follow').addEventListener('change',()=>{
+    if(!$('replay-follow').checked || !chart || !replayActive)return;
+    const range=chart.timeScale().getVisibleLogicalRange();if(!range)return;
+    const to=(payload.candles || []).length+8;
+    chart.timeScale().setVisibleLogicalRange({from:to-(range.to-range.from),to});
+  });
   $('replay-reveal').addEventListener('click',()=>{
     if(!manualPlanLocked()) {refreshManualPlan();if(manualPlanDraft.error)return;storeManualPlan();}
     if(replayBusy || (!dayMode && !markFutureSeen())) return;
@@ -773,6 +868,7 @@ button:disabled{opacity:.45;cursor:default}
     drawFvgOverlay();
     drawTradeBox();
     layoutOverlayLabels();
+    drawUserDrawings();
   }
 
   function drawDaySeparators() {
@@ -1303,6 +1399,7 @@ button:disabled{opacity:.45;cursor:default}
     if (chart) chart.remove();
     trendEmaLines = [];
     rsiSeries = null;
+    replaySeries=[];
     chart = window.LightweightCharts.createChart($('chart'),{
       autoSize:true,
       layout:{background:{type:'solid',color:'#0f1720'},textColor:'#b8c2cc'},
@@ -1332,7 +1429,9 @@ button:disabled{opacity:.45;cursor:default}
       },
     });
     candles.setData(payload.candles || []);
+    replaySeries.push({series:candles,kind:'candles',data:payload.candles || []});
     chart.subscribeClick(event=>{
+      if(drawingClick(event))return;
       if(!replayActive || !manualPick || manualPlanLocked() || !event.point || event.point.y<0 || event.point.y>chart.panes()[0].getHeight()) return;
       if(manualPick==='candle') {
         const time=Number(event.time);
@@ -1362,12 +1461,13 @@ button:disabled{opacity:.45;cursor:default}
           title:overlay.name,
         });
         series.setData(overlay.data || []);
+        replaySeries.push({series,kind:overlay.kind,period:overlay.period,data:overlay.data || []});
         trendEmaLines.push(series);
       }
     }
     const selectedRsi = new Set([...document.querySelectorAll('.rsi-line:checked')].map(input => input.value));
     const rsiOverlays = (payload.overlays || []).filter(o => ((o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period))) || (o.kind === 'rsi' && Number(o.period) === 14)) && selectedRsi.has(o.kind + ':' + o.period));
-    if (rsiOverlays.length && $('show-rsi').checked && rsiOverlays.some(o => (o.data || []).length)) {
+    if (rsiOverlays.length && $('show-rsi').checked) {
       // The built-in second pane shares the price chart's time scale:
       // horizontal panning, zooming, and crosshair remain aligned.
       for (const overlay of rsiOverlays) {
@@ -1383,6 +1483,7 @@ button:disabled{opacity:.45;cursor:default}
         },
       },1);
       line.setData(overlay.data || []);
+      replaySeries.push({series:line,kind:overlay.kind,period:overlay.period,data:overlay.data || []});
       if (!rsiSeries) rsiSeries=line;
       }
       for (const level of [30,70]) {
@@ -1396,6 +1497,7 @@ button:disabled{opacity:.45;cursor:default}
     }
     const redraw=redrawOverlays;
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
+    chart.subscribeCrosshairMove(event=>{if(!drawingPoints.length)return;drawingHover=drawingPoint(event);drawUserDrawings();});
     if (window.ResizeObserver) {
       chartResizeObserver=new ResizeObserver(redraw);
       chartResizeObserver.observe($('chart-wrap'));
@@ -1404,6 +1506,18 @@ button:disabled{opacity:.45;cursor:default}
       redraw();
       setTimeout(redraw, 40);
     });
+  }
+
+  function updateReplayChart() {
+    const range=chart.timeScale().getVisibleLogicalRange(),previousCount=replaySeries[0]?.data.length || 0;
+    for(const item of replaySeries){
+      const next=item.kind==='candles'?(payload.candles || []):((payload.overlays || []).find(o=>o.kind===item.kind && o.period===item.period)?.data || []);
+      const delta=cslSeriesTail(item.data,next);
+      if(delta.reset)item.series.setData(next);else for(const point of delta.points)item.series.update(point);
+      item.data=next;
+    }
+    if(range){const shift=$('replay-follow').checked?(payload.candles.length-previousCount):0;chart.timeScale().setVisibleLogicalRange({from:range.from+shift,to:range.to+shift});}
+    requestAnimationFrame(redrawOverlays);
   }
 
   $('rsi-height').addEventListener('input', () => {
@@ -1643,7 +1757,7 @@ button:disabled{opacity:.45;cursor:default}
 </script>
 </body>
 </html>"""
-    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS)
+    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS)
 
 
 class _LoopbackHTTPServer(ThreadingHTTPServer):
