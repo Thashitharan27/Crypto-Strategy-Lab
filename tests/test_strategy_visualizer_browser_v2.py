@@ -36,6 +36,23 @@ def test_sneaky_four_levels_and_utc_day_separators():
     assert "payload.supplyDemandDerivation.levels || []" in html
 
 
+def test_replay_manual_plan_controls_history_and_chart_preview():
+    html=build_browser_visualizer_v2_html(_Model(),'manual')
+    for name in ('Manual entry price','Manual stop-loss price','Manual take-profit price'):
+        assert f'aria-label="{name}"' in html
+    assert 'Save plan' in html and 'Use auto levels' in html
+    assert 'function cslRecordManualPlan' in html
+    assert 'planHistory' in html and 'originalPlan' in html
+    assert 'chart.subscribeClick(event=>' in html
+    assert 'candles.coordinateToPrice(event.point.y)' in html
+    assert 'Planned entry ' in html and 'Planned SL ' in html and 'Planned TP ' in html
+    assert 'entry time stays at the automated entry' in html
+    assert 'No manual fills or results are simulated.' in html
+    assert 'version:2' in html
+    assert 'Saved plan changes' in html
+    assert "(record?.planHistory || []).slice(-20)" in html
+
+
 def test_supply_demand_overlay_and_details_use_saved_evidence():
     html = build_browser_visualizer_v2_html(_Model(), "sd")
     assert "function drawSupplyDemandOverlay(sd)" in html
@@ -105,10 +122,10 @@ def test_v2_trade_box_shows_opposite_boundary_without_floating_markers():
     assert "OPEN/EXIT markers" not in html
     assert "createSeriesMarkers" not in html
     assert "trade['Exit Reason']" in html
-    assert "'Exit ('+String(trade['Exit Reason']" in html
+    assert "(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason']" in html
     assert "layoutOverlayLabels" in html
-    assert "'Target '+formatPrice(trade.Target ?? trade.target)" in html
-    assert "'Stop '+formatPrice(trade.Stop ?? trade.stop)" in html
+    assert "(manual?'Planned TP ':'Target ')+formatPrice(trade.Target ?? trade.target)" in html
+    assert "(manual?'Planned SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)" in html
 
 
 def test_v2_fib_overlay_has_structure_only_no_trade_specific_fib_labels():
