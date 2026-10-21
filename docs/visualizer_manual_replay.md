@@ -174,3 +174,12 @@ and position overlap are excluded. Reviews export `manualExit` evidence,
 exit reason/method and gross R, plus a separate `manualResults` total. Existing
 automatic `netR` and Take-only comparison totals are unchanged. Browser storage
 and export preserve both user closes and TP/SL exits across review sessions.
+
+Manual position resizing: drag the dashed entry, SL or TP edge before confirming
+entry. After confirmation, entry stays fixed; SL and TP remain draggable while
+open. The SL to break-even button uses the original entry price. Changes are
+saved in positionHistory with old/new levels and replay time, apply only to
+subsequent candles, and are included in exported reviews. Stops may lock in profit,
+but SL and TP must bracket the current closed price. R always uses initial risk.
+Rewinding shows the levels known then; advance to the latest saved change before
+editing again. Closed positions cannot be resized.
