@@ -71,6 +71,7 @@ SIGNAL_STRATEGIES = {
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
     "EMA_320_CLOSE_CROSS": "EMA 320 Price Close Cross — ATR SL/TP",
+    "LIQUIDITY_SWEEP_RETEST": "Liquidity Sweep — Trend + Zone Retest",
     "SUPPLY_DEMAND_RETEST": "Supply & Demand — 1h Swing Retest",
     "EMA_100_300_REVERSAL": "EMA 100/300 — Three-Candle Reversal (Custom R)",
     "FAIR_VALUE_GAP": "Fair Value Gap — First Revisit",

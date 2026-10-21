@@ -610,6 +610,18 @@ button:disabled{opacity:.45;cursor:default}
       return found==null ? fallback : (chart.timeScale().timeToCoordinate(found) ?? fallback);
     }
     const end=xAt(sd.signalTime,chartWrap.clientWidth-76);
+    if(sd.liquidity) {
+      const price=(Number(sd.liquidity.bottom)+Number(sd.liquidity.top))/2;
+      const y=candles.priceToCoordinate(price);
+      if(y!=null && y>=0 && y<height) {
+        const start=Math.max(0,xAt(sd.liquidity.firstTime,0));
+        const stop=Math.max(start,xAt(sd.sweepTime,end));
+        const line=document.createElement('div'); line.className='fvg-level';
+        Object.assign(line.style,{left:start+'px',top:y+'px',width:Math.max(3,stop-start)+'px',borderColor:'#fbbf24'}); fvgLayer.appendChild(line);
+        const label=document.createElement('span'); label.className='fvg-note'; label.textContent=(sd.side==='LONG'?'Equal lows':'Equal highs')+' · liquidity pool';
+        Object.assign(label.style,{left:(start+3)+'px',top:Math.max(2,y-22)+'px'}); fvgLayer.appendChild(label);
+      }
+    }
     for(const [zone,name,color] of [[sd.zone,sd.side==='LONG'?'Demand entry zone':'Supply entry zone','#22c55e30'],[sd.opposingZone,'Opposing swing / target','#ef444430']]) {
       const a=candles.priceToCoordinate(zone.top), b=candles.priceToCoordinate(zone.bottom);
       if(a==null || b==null) continue;
@@ -620,7 +632,7 @@ button:disabled{opacity:.45;cursor:default}
       const label=document.createElement('span'); label.className='fvg-note'; label.textContent=name+' '+formatPrice(zone.bottom)+' – '+formatPrice(zone.top);
       Object.assign(label.style,{left:(start+5)+'px',top:Math.max(2,a-22)+'px'}); fvgLayer.appendChild(label);
     }
-    for(const [time,text] of [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']]) {
+    for(const [time,text] of (sd.strategy==='LIQUIDITY_SWEEP_RETEST' ? [[sd.sweepTime,'Liquidity sweep'],[sd.zone.bounceTime,'Displacement'],[sd.signalTime,'Zone retest']] : [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']])) {
       if(time==null) continue;
       const label=document.createElement('span'); label.className='fvg-note'; label.textContent=text;
       Object.assign(label.style,{left:Math.max(2,xAt(time,0))+'px',top:Math.max(4,(candles.priceToCoordinate(sd.zone.top) ?? 30)+8)+'px'}); fvgLayer.appendChild(label);
@@ -745,11 +757,14 @@ button:disabled{opacity:.45;cursor:default}
       fvgReview.hidden=false; $('setup-panel').hidden=false; $('review-setup').hidden=false;
       $('review-setup').setAttribute('aria-pressed',String(reviewMode));
       $('setup-panel').setAttribute('aria-label','Supply and demand setup explanation');
-      fvgReview.textContent='Supply & demand · '+sd.side+' · Setup details →';
+      fvgReview.textContent=(sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
       const panel=$('setup-panel'); panel.replaceChildren();
-      const title=document.createElement('h3'); title.textContent='1h confirmed swing retest'; panel.appendChild(title);
+      const title=document.createElement('h3'); title.textContent=sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
       const facts=document.createElement('p'); facts.style.whiteSpace='pre-line';
       facts.textContent='Zone confirmed: '+fmtTime(sd.zone.confirmedTime)+'\\nFirst touch: '+fmtTime(sd.zone.touchTime)+'\\nBounce: '+fmtTime(sd.zone.bounceTime)+'\\nRetest: '+fmtTime(sd.signalTime)+'\\nTarget swing: '+formatPrice(sd.target)+'\\nEntry is the next candle open. Zones are saved decision-time evidence.';
+      if(sd.sweepTime!=null) {
+        const sweep=document.createElement('p'); sweep.textContent='Equal-level pool: '+formatPrice(sd.liquidity.bottom)+' – '+formatPrice(sd.liquidity.top)+'; swept '+fmtTime(sd.sweepTime)+'. A later displacement confirms the entry zone.'; panel.appendChild(sweep);
+      }
       panel.appendChild(facts); return;
     }
     const fvg = payload.fvgDerivation;

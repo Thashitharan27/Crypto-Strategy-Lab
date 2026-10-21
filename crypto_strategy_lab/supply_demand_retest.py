@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 MODE = "SUPPLY_DEMAND_RETEST"
+MODES = {MODE, "LIQUIDITY_SWEEP_RETEST"}
 
 
 def validate_settings(strength, buffer, minimum_r):
@@ -83,38 +84,46 @@ def retest_setups(times, opens, highs, lows, closes, strength=2):
 class SupplyDemandRetestMixin:
     def _configure_signal_features(self):
         super()._configure_signal_features()
-        if not any(r.get("_strategy_direction_mode")==MODE for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())):
+        if not any(r.get("_strategy_direction_mode") in MODES for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())):
             return
-        if self.config.strategy_timeframe_minutes != 60:
-            raise ValueError("Supply/demand retest uses the 1h strategy timeframe")
-        self.sd_setups=retest_setups(self.times,self.open,self.high,self.low,self.close,self.config.sd_swing_strength)
+        modes={r.get("_strategy_direction_mode") for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())}
+        if "LIQUIDITY_SWEEP_RETEST" in modes:
+            from crypto_strategy_lab.liquidity_sweep_retest import liquidity_sweep_setups
+            self.sd_setups=liquidity_sweep_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
+                strength=self.config.sd_swing_strength,timeframe_minutes=self.config.strategy_timeframe_minutes,
+                tolerance_atr=self.config.ls_equal_tolerance_atr,displacement_atr=self.config.ls_displacement_atr,
+                base_bars=self.config.ls_base_bars,max_wait=self.config.ls_max_wait_bars)
+        else:
+            if self.config.strategy_timeframe_minutes != 60:
+                raise ValueError("Supply/demand retest uses the 1h strategy timeframe")
+            self.sd_setups=retest_setups(self.times,self.open,self.high,self.low,self.close,self.config.sd_swing_strength)
 
     def _infer_signal_strategy_mode(self):
-        if any(r.get("_strategy_direction_mode")==MODE for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())):
-            return MODE
+        if any(r.get("_strategy_direction_mode") in MODES for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())):
+            return next(r["_strategy_direction_mode"] for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",()) if r.get("_strategy_direction_mode") in MODES)
         return super()._infer_signal_strategy_mode()
 
     def _selected_direction(self,i):
-        if getattr(self,"signal_strategy_mode",None)==MODE:
+        if getattr(self,"signal_strategy_mode",None) in MODES:
             return self.sd_setups[i]["side"] if self.sd_setups[i] else None
         return super()._selected_direction(i)
 
     def _should_enter(self,i):
-        if getattr(self,"signal_strategy_mode",None)==MODE:
+        if getattr(self,"signal_strategy_mode",None) in MODES:
             return self._selected_direction(i) in {"LONG","SHORT"}
         return super()._should_enter(i)
 
     def _entry_decision(self,i,active_at_candle_start=False):
-        if getattr(self,"signal_strategy_mode",None)!=MODE:
+        if getattr(self,"signal_strategy_mode",None) not in MODES:
             return super()._entry_decision(i,active_at_candle_start)
-        if i+1>=len(self.times) or not self._should_enter(i) or pd.Timestamp(self.times[i+1])-pd.Timestamp(self.times[i])!=pd.Timedelta(hours=1):
+        if i+1>=len(self.times) or not self._should_enter(i) or pd.Timestamp(self.times[i+1])-pd.Timestamp(self.times[i])!=pd.Timedelta(minutes=getattr(self.config,"strategy_timeframe_minutes",60)):
             return None
         return {"execution_index":i+1,"indicator_index":i,"scheduled_timestamp":pd.Timestamp(self.times[i+1]),
                 "actual_entry_timestamp":None,"entry_schedule_status":"NEXT_CANDLE_OPEN", "fill_price_source":"NEXT_CANDLE_OPEN","defer_to_next_open":True}
 
     def _profile_context(self,i):
         context=super()._profile_context(i)
-        if getattr(self,"signal_strategy_mode",None)!=MODE or context is None:
+        if getattr(self,"signal_strategy_mode",None) not in MODES or context is None:
             return context
         profile=replace(context[3],reward_risk_ratio=1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
                         partial_profit_enabled=False,partial_stop_enabled=False,trailing_enabled=False,break_even_enabled=False,
@@ -122,7 +131,7 @@ class SupplyDemandRetestMixin:
         return (*context[:3],profile)
 
     def _sr_stop_plan(self,i,execution_i=None):
-        if getattr(self,"signal_strategy_mode",None)!=MODE:
+        if getattr(self,"signal_strategy_mode",None) not in MODES:
             return super()._sr_stop_plan(i,execution_i)
         setup=self.sd_setups[i]
         side=self._effective_trade_direction(i)
@@ -141,29 +150,29 @@ class SupplyDemandRetestMixin:
         if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk<self.config.sd_minimum_r:
             return reject
         return {"passed":True,"applied":True,"reason":"SD_ZONE_STOP","distance":risk,"stop_price":stop,
-                "boundary_price":stop,"level_price":setup["target"],"distance_atr":risk/atr,"timeframe_minutes":60}
+                "boundary_price":stop,"level_price":setup["target"],"distance_atr":risk/atr,"timeframe_minutes":getattr(self.config,"strategy_timeframe_minutes",60)}
 
     def _apply_sr_take_profit(self,i,pair):
-        if getattr(self,"signal_strategy_mode",None)!=MODE:
+        if getattr(self,"signal_strategy_mode",None) not in MODES:
             return super()._apply_sr_take_profit(i,pair)
         for pos in pair.positions():
             pos.tp=float(self.sd_setups[i]["target"])
 
     def _sr_tp_filter_result(self,i,execution_i=None):
-        if getattr(self,"signal_strategy_mode",None)==MODE:
+        if getattr(self,"signal_strategy_mode",None) in MODES:
             return True,None
         return super()._sr_tp_filter_result(i,execution_i)
 
     def _open_pair(self,i,entry_filter_passed=True,entry_filter_reason="Strategy profile passed",schedule=None):
         before=len(self.active_pairs)
         result=super()._open_pair(i,entry_filter_passed,entry_filter_reason,schedule)
-        if getattr(self,"signal_strategy_mode",None)==MODE and len(self.active_pairs)>before:
+        if getattr(self,"signal_strategy_mode",None) in MODES and len(self.active_pairs)>before:
             j=schedule["indicator_index"] if schedule else i
             self.active_pairs[-1].sd_setup=copy.deepcopy(self.sd_setups[j])
         return result
 
     def _build_result_row(self,pair,row_kind,positions):
         row=super()._build_result_row(pair,row_kind,positions)
-        if getattr(self,"signal_strategy_mode",None)==MODE:
+        if getattr(self,"signal_strategy_mode",None) in MODES:
             row["supply_demand_setup"]=json.dumps(getattr(pair,"sd_setup",None),allow_nan=False)
         return row

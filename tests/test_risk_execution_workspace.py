@@ -717,3 +717,25 @@ def test_fib_entry_zone_filter_visibility_and_saved_config():
         assert checkbox.isHidden()
     finally:
         window.close()
+
+
+def test_liquidity_preset_and_parameter_round_trip():
+    app,window=_window()
+    try:
+        selector=window.rule_builder.direction_mode
+        index=selector.findData("LIQUIDITY_SWEEP_RETEST")
+        assert index>=0
+        selector.setCurrentIndex(index);selector.activated.emit(index);app.processEvents()
+        workspace=window.risk_execution_workspace;workspace.refresh_visibility()
+        assert not workspace.sd_card.isHidden()
+        assert not window.execution_form.widgets["ls_equal_tolerance_atr"].isHidden()
+        assert workspace.entry_card.isHidden()
+        window.execution_form.widgets["ls_displacement_atr"].setValue(.8)
+        config=window.build_config()
+        assert config.execution.ls_displacement_atr==.8
+        assert "sweep and reclaim" in workspace.summary_label.text()
+        window.apply_config(config)
+        assert window.execution_form.widgets["ls_displacement_atr"].value()==.8
+        selector.setCurrentIndex(selector.findData("SUPPLY_DEMAND_RETEST"));workspace.refresh_visibility()
+        assert window.execution_form.widgets["ls_equal_tolerance_atr"].isHidden()
+    finally:window.close()
