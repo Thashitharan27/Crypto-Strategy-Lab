@@ -183,3 +183,14 @@ subsequent candles, and are included in exported reviews. Stops may lock in prof
 but SL and TP must bracket the current closed price. R always uses initial risk.
 Rewinding shows the levels known then; advance to the latest saved change before
 editing again. Closed positions cannot be resized.
+
+Previous-day support/resistance: enable Previous-day S/R in the chart toolbar.
+A complete previous UTC day on a 1h-or-lower chart is required. Strict swing
+pivots use two candles on each side, all from that previous day; daily high/low
+are included. Bands use 1%, 2%, or 4% of that day's range as their base width.
+Nearby pivots merge with bounded clustering; up to eight bands prioritize daily
+extremes then number of pivot levels. Labels show price bounds and pivot count
+(not a count of independent retests). Bands start on the selected UTC day and
+remain fixed throughout its replay. Colors describe their previous-day origin,
+not a prediction of future reactions. This display does not change automatic
+entries or exits; use manual TP resizing or closing to record your decision.
