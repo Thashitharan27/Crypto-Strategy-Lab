@@ -45,6 +45,35 @@ cleaner comparison.
 
 ## Manual entry, SL and TP plans
 
+## Review days without automatic trades
+
+Select **Day replay** to review any available UTC day independently of the
+automatic trade list, including days with no generated trades. Use **Previous
+day**, **Next day** or the date picker. Navigation moves to the start of the
+chosen day; missing-data days are skipped by the navigation buttons. Click
+**Day replay** again to return to the normal trade view.
+
+Use **Next candle** or **Play** freely while looking for a setup. Future candles
+remain hidden; playback stops at the day's end. **Reveal day** shows only that
+day through its end, not later days. **Restart day** restarts that date while
+retaining saved review history. The previous complete day's high/low and older
+confirmed outside swings are drawn when available from the loaded history.
+Automatic setup drawings and trade outcomes are excluded from this mode.
+
+Choose LONG or SHORT, edit the starting Entry/SL/TP placeholders, and use
+**Move box** to select an entry candle. Choose **Take** when you find a setup,
+then **Confirm manual entry** after the chosen candle closes and reaches your
+price. One review/confirmed setup is stored per day, separately from automatic
+trade reviews; return to that date to inspect its saved plan. History records
+whether candles had already been advanced before planning. This remains a
+manual review, with no simulated manual SL/TP outcomes or P&L.
+
+**Export reviews** includes these records with `reviewType: manual-day`, the UTC
+`day`, plan history and optional manual entry confirmation. `manualDayReviews`
+counts them; they do not contribute to automatic-trade R totals.
+
+## Edit a replay plan
+
 Replay includes **My plan** with editable Entry, SL and TP prices. Type prices
 or press **Pick entry**, **Pick SL** or **Pick TP**, then click the chart at the
 desired price. The risk/reward box previews the proposed levels and shows their

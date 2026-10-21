@@ -55,6 +55,16 @@ def test_replay_manual_plan_controls_history_and_chart_preview():
     assert "(record?.planHistory || []).slice(-20)" in html
 
 
+def test_calendar_replay_controls_and_manual_only_context():
+    html=build_browser_visualizer_v2_html(_Model(),'days')
+    for label in ('Day replay','Next day','Previous day','Replay UTC day','Manual day direction'):
+        assert label in html
+    assert 'function cslDaySource' in html
+    assert 'manualDayReviews' in html
+    assert 'No automatic trade is required.' in html
+    assert 'End of this UTC day.' in html
+
+
 def test_supply_demand_overlay_and_details_use_saved_evidence():
     html = build_browser_visualizer_v2_html(_Model(), "sd")
     assert "function drawSupplyDemandOverlay(sd)" in html
