@@ -971,12 +971,12 @@ class CompletedRunVisualizer:
         raw=self._trade_row(index).get("supply_demand_setup")
         try:
             value=json.loads(raw) if isinstance(raw,str) else dict(raw)
-            if value.get("version")!=1 or value.get("side") not in {"LONG","SHORT"} or _finite(value.get("target")) is None:
+            if not isinstance(value,dict) or value.get("version")!=1 or value.get("side") not in {"LONG","SHORT"} or _finite(value.get("target")) is None:
                 return {"status":"NOT_AVAILABLE"}
             value["signalTime"]=_unix_seconds(_utc(value["signalTime"]))
             for key in ("zone","opposingZone"):
                 zone=value[key]
-                if not all(_finite(zone.get(k)) is not None for k in ("bottom","top")) or zone["top"]<=zone["bottom"]:
+                if not isinstance(zone,dict) or not all(_finite(zone.get(k)) is not None for k in ("bottom","top")) or zone["top"]<=zone["bottom"]:
                     return {"status":"NOT_AVAILABLE"}
                 for time in ("pivotTime","confirmedTime","touchTime","bounceTime"):
                     if zone.get(time) is not None:

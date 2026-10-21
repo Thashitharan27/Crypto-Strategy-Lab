@@ -121,3 +121,5 @@ def test_visualizer_reads_saved_zones_without_recomputing():
     assert result["signalTime"]==int(ts[9].timestamp())
     fake._trade_row=lambda i:{"supply_demand_setup":"bad json"}
     assert CompletedRunVisualizer.supply_demand_derivation(fake,0)["status"]=="NOT_AVAILABLE"
+    fake._trade_row=lambda i:{"supply_demand_setup":"[]"}
+    assert CompletedRunVisualizer.supply_demand_derivation(fake,0)["status"]=="NOT_AVAILABLE"
