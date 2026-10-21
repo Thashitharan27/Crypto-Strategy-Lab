@@ -45,6 +45,33 @@ cleaner comparison.
 
 ## Manual entry, SL and TP plans
 
+## Drawing tools and smooth playback
+
+Use **Draw** in the chart toolbar for trend lines, rays, horizontal/vertical
+lines, rectangles, Fibonacci retracements, price/time measurements and text
+notes. Select a tool and click one anchor for a horizontal/vertical line or
+note, or two anchors for other tools. Enter note text before placing a note.
+The mouse previews the second anchor. Escape cancels the unfinished drawing.
+Choose a color before drawing. Drawings stay attached to time and price while
+panning, zooming or changing chart timeframe.
+
+Select an item under **Saved drawings** to delete it or use **Redraw selected**
+to replace its anchors, color and note. **Undo drawing** reverses the last
+creation, edit, deletion or clear in this session. Drawings are saved locally
+for this run/symbol; export them with **Export drawings** before closing if
+you want a portable JSON copy. Browser storage uses the local server address,
+so a newly launched visualizer on a different port may need a fresh drawing
+session. Export is archival; drawing import is not currently provided.
+Replay-created drawings are hidden when restarting before their creation time.
+Drawings are annotations; they do not change strategy decisions or order levels.
+
+**Next candle** and **Play** update existing chart series rather than rebuilding
+the chart. Price zoom/pan and RSI settings remain stable. **Follow replay**
+slides the time window by each newly added candle; turn it off to hold the time
+window fixed. Use **Reset price** or **Center selected** when you want to refit
+the chart. Switching days, trades, timeframes or indicators can still rebuild
+the chart as those change its context or series layout.
+
 ## Review days without automatic trades
 
 Select **Day replay** to review any available UTC day independently of the

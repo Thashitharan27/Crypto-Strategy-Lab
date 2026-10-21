@@ -15,6 +15,22 @@ def evaluate_manual(expression):
     return json.loads(result.stdout)
 
 
+def test_replay_series_updates_replace_entry_stub_and_append_only_new_points():
+    result=evaluate_manual('''
+const old=[{time:0,open:100,high:100,low:100,close:100}];
+const next=[{time:0,open:100,high:110,low:90,close:105},{time:60,open:105,high:107,low:104,close:106}];
+const appended=cslSeriesTail(old,next),steady=cslSeriesTail(next,[...next,{time:120,close:108}]);
+const restart=cslSeriesTail(next,old),empty=cslSeriesTail([],next);
+console.log(JSON.stringify({appended,steady,restart,empty,old}));
+''')
+    assert not result['appended']['reset']
+    assert result['appended']['points'][0]['high']==110
+    assert [p['time'] for p in result['steady']['points']]==[60,120]
+    assert result['restart']['reset']
+    assert len(result['empty']['points'])==2
+    assert result['old'][0]['high']==100
+
+
 def test_manual_day_is_independent_of_automatic_trades_and_future_prices():
     result=evaluate_manual('''
 const candles=Array.from({length:288},(_,i)=>({time:i*900,open:15,high:16,low:14,close:15}));
