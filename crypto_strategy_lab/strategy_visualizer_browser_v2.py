@@ -117,6 +117,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 .trade-rect.reward.current-profit{background:rgba(12,145,80,.48);border-color:#34d399}
 .trade-rect.risk.current-loss{background:rgba(180,36,52,.48);border-color:#fb7185}
 .trade-label{position:absolute;padding:2px 5px;border-radius:3px;font:11px/1.2 Segoe UI,Arial,sans-serif;white-space:nowrap}
+.position-handle{position:absolute;pointer-events:auto;cursor:ns-resize;height:12px;z-index:9;border-top:2px dashed #fff;touch-action:none;background:rgba(255,255,255,.08)}
 .trade-label.entry{background:rgba(43,108,176,.96);color:#fff}
 .trade-label.exit{background:rgba(184,132,50,.96);color:#fff}
 .trade-label.tp{background:rgba(32,139,85,.96);color:#fff}
@@ -223,6 +224,7 @@ button:disabled{opacity:.45;cursor:default}
         <label>TP <input id="manual-target" type="number" step="any" min="0" aria-label="Manual take-profit price"></label><button data-pick-level="target">Pick TP</button>
         <button id="manual-move">Move box</button><span id="manual-time"></span>
         <button id="manual-confirm">Confirm manual entry</button>
+        <button id="manual-be">SL to break-even</button>
         <button id="manual-close">Close manual position</button><button id="manual-pick-exit">Pick exit</button>
         <span id="manual-exit-status" role="status"></span>
         <button id="manual-save">Save plan</button><button id="manual-reset">Use auto levels</button>
@@ -520,6 +522,16 @@ button:disabled{opacity:.45;cursor:default}
     return replayBusy || replayRevealed || Boolean(currentReview()?.manualEntry);
   }
   function manualCloseLocked() {return replayBusy || !replayActive || replayRevealed || !currentReview()?.manualEntry || Boolean(currentReview()?.manualExit);}
+  function amendPosition(stop,target) {
+    if(manualCloseLocked())return;
+    stopReplay();advanceManualPosition();if(manualCloseLocked())return;
+    const record=currentReview(),bar=(sourcePayload.candles || []).filter(item=>item.time+replayInterval<=replayCutoff).at(-1);
+    const updated=cslAmendManualPosition(record,stop,target,replayCutoff,new Date().toISOString(),bar?.close);
+    if(updated.error)manualEntryMessage=updated.error;
+    else {reviewRecords=reviewRecords.map(item=>item===record?updated:item);saveReviews();manualEntryMessage='Position levels saved at '+fmtTime(replayCutoff)+' UTC.';}
+    refreshManualPlan();redrawOverlays();
+  }
+  $('manual-be').addEventListener('click',()=>amendPosition(currentReview()?.manualEntry?.entry,manualPlanDraft.target));
   function closeManualPosition(requested=null) {
     if(manualCloseLocked())return;
     stopReplay();const record=currentReview();
@@ -542,11 +554,12 @@ button:disabled{opacity:.45;cursor:default}
     if(manualPlanLocked() && manualPick!=='exit' || manualPick==='exit' && manualCloseLocked()) {manualPick=null;chartWrap.style.cursor='';}
     manualPlanDraft=cslManualPlan($('manual-entry').value,$('manual-stop').value,$('manual-target').value,sourcePayload?.selectedTrade?.Side);
     manualPlanDraft.entryTime=manualEntryTime;
+    if(currentReview()?.manualEntry){const levels=cslManualLevels(currentReview(),replayCutoff);manualPlanDraft={...levels,entry:currentReview().manualEntry.entry,entryTime:manualEntryTime};for(const key of ['entry','stop','target'])$('manual-'+key).value=manualPlanDraft[key];}
     const saved=currentReview()?.manualPlan;
     const dirty=!saved || ['entry','stop','target','entryTime'].some(key=>saved[key]!==manualPlanDraft[key]);
     const confirmed=currentReview()?.manualEntry;
     $('manual-time').textContent='Entry candle: '+fmtTime(manualEntryTime)+' UTC';
-    const status=manualPlanDraft.error || (confirmed?'Manual entry confirmed at '+fmtTime(confirmed.candleTime)+' UTC.':('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Unsaved preview — choose Take/Skip/Unsure or Save plan.':'Saved manual plan.')))+' '+manualEntryMessage+' Move box selects a visible candle; prices stay unchanged. Manual results are gross R before fees/slippage. TP/SL checks start after the entry candle; ties use SL.';
+    const status=manualPlanDraft.error || (confirmed?'Manual entry confirmed at '+fmtTime(confirmed.candleTime)+' UTC.':('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Unsaved preview — choose Take/Skip/Unsure or Save plan.':'Saved manual plan.')))+' '+manualEntryMessage+' Drag the box edges to resize SL/TP (and entry before confirmation). Move box selects a candle. Manual results are gross R before fees/slippage. TP/SL checks start after the entry candle; ties use SL.';
     $('manual-plan-status').textContent=manualPick?'Click the chart to place '+manualPick+'.':status;
     $('manual-plan-status').style.color=manualPlanDraft.error?'#fda4af':'#b9d7f5';
     const locked=manualPlanLocked();
@@ -556,6 +569,7 @@ button:disabled{opacity:.45;cursor:default}
     $('manual-reset').disabled=locked;
     $('manual-move').disabled=locked;
     $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error) || currentReview()?.decision!=='Take';
+    $('manual-be').disabled=manualCloseLocked();
     $('manual-close').disabled=manualCloseLocked();$('manual-pick-exit').disabled=manualCloseLocked();
     const closed=currentReview()?.manualExit;
     const closedKnown=closed && (closed.availableAt ?? closed.candleTime+replayInterval)<=replayCutoff;
@@ -567,6 +581,7 @@ button:disabled{opacity:.45;cursor:default}
       const original=document.createElement('p');
       original.textContent=(dayMode?'Starting manual levels':'Automatic plan')+' · Entry '+formatPrice(record.originalPlan.entry)+' · SL '+formatPrice(record.originalPlan.stop)+' · TP '+formatPrice(record.originalPlan.target);history.appendChild(original);
     }
+    for(const revision of (record?.positionHistory || []).filter(item=>item.effectiveAt<=replayCutoff)){const line=document.createElement('p');line.textContent=fmtTime(revision.effectiveAt)+' UTC · Position changed · SL '+formatPrice(revision.previousStop)+' → '+formatPrice(revision.stop)+' · TP '+formatPrice(revision.previousTarget)+' → '+formatPrice(revision.target);history.appendChild(line);}
     for(const revision of (record?.planHistory || []).slice(-20)) {
       const line=document.createElement('p');
       line.textContent=String(revision.replayTime)+' · '+(revision.futureSeen?'After advancing / previously viewed':'Pre-entry plan')+(revision.outcomePreviouslyShown?' (outcome previously shown)':'')+' · Entry '+formatPrice(revision.entry)+' · Candle '+(revision.entryTime!=null?fmtTime(revision.entryTime):'automatic')+' · SL '+formatPrice(revision.stop)+' · TP '+formatPrice(revision.target);history.appendChild(line);
@@ -1417,6 +1432,14 @@ button:disabled{opacity:.45;cursor:default}
       el.style.height=Math.max(2,Math.abs(Number(b)-Number(a)))+'px';
       tradeBoxLayer.appendChild(el);
     }
+    if(manual && (!manualPlanLocked() || !manualCloseLocked())) {
+      for(const [key,y] of [['stop',stopY],['target',targetY],...(!manualPlanLocked()?[['entry',entryY]]:[])]) {
+        if(y==null)continue;
+        const handle=document.createElement('div');handle.className='position-handle';handle.dataset.positionLevel=key;
+        handle.title='Drag '+(key==='stop'?'SL':key==='target'?'TP':'entry');handle.setAttribute('aria-label',handle.title);
+        Object.assign(handle.style,{left:left+'px',top:(y-6)+'px',width:width+'px'});tradeBoxLayer.appendChild(handle);
+      }
+    }
     const currentPrice=visibleManualExit?manualExit.price:lastVisible?.close;
     const signedMove=(String(trade.Side).toUpperCase()==='SHORT'?-1:1)*(Number(currentPrice)-entry);
     rect(entryY,stopY,'risk'+(manual && signedMove<0?' current-loss':''));
@@ -1669,6 +1692,31 @@ button:disabled{opacity:.45;cursor:default}
     return event.clientY - rect.top < paneHeight;
   }
 
+  let positionResize=null;
+  chartWrap.addEventListener('pointerdown',event=>{
+    const handle=event.target.closest?.('.position-handle');if(!handle || event.button!==0)return;
+    event.preventDefault();event.stopImmediatePropagation();stopReplay();
+    positionResize={key:handle.dataset.positionLevel,price:null,pointerId:event.pointerId};
+    chartWrap.setPointerCapture(event.pointerId);
+  },{capture:true});
+  chartWrap.addEventListener('pointermove',event=>{
+    if(!positionResize)return;event.preventDefault();event.stopImmediatePropagation();
+    const y=event.clientY-chartWrap.getBoundingClientRect().top;
+    const price=candles.coordinateToPrice(y);if(!Number.isFinite(price) || price<=0)return;
+    positionResize.price=price;
+    const handle=tradeBoxLayer.querySelector('[data-position-level="'+positionResize.key+'"]');
+    if(handle){handle.style.top=(y-6)+'px';handle.textContent=formatPrice(price);}
+  },{capture:true});
+  const finishPositionResize=event=>{
+    if(!positionResize)return;event.preventDefault();event.stopImmediatePropagation();
+    const change=positionResize;positionResize=null;chartWrap.releasePointerCapture?.(change.pointerId);
+    if(event.type==='pointercancel' || change.price==null){redrawOverlays();return;}
+    if(currentReview()?.manualEntry)amendPosition(change.key==='stop'?change.price:manualPlanDraft.stop,change.key==='target'?change.price:manualPlanDraft.target);
+    else if(!manualPlanLocked()){$('manual-'+change.key).value=change.price;refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();redrawOverlays();}
+  };
+  chartWrap.addEventListener('pointerup',finishPositionResize,{capture:true});
+  chartWrap.addEventListener('pointercancel',finishPositionResize,{capture:true});
+
   // Wheel over the right price scale changes vertical zoom only.
   chartWrap.addEventListener('wheel',event => {
     const rect=chartWrap.getBoundingClientRect();
@@ -1695,6 +1743,7 @@ button:disabled{opacity:.45;cursor:default}
   // Primarily vertical left-drag moves the chart price range up/down.
   // Horizontal drags remain normal time-axis panning.
   chartWrap.addEventListener('pointerdown',event => {
+    if(event.target.closest?.('.position-handle'))return;
     if (event.button !== 0 || !candles || !inCandlePane(event)) return;
     const rect=chartWrap.getBoundingClientRect();
     if (event.clientX-rect.left >= rect.width-86) return;

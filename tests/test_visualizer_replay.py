@@ -289,3 +289,20 @@ def test_only_known_fib_geometry_is_retained():
     assert "outcomeSensitiveValue" not in fib
     data["fibDerivation"]["impulseEndTime"] = 120
     assert project(data)["result"]["view"]["fibDerivation"]["status"] == "NOT_AVAILABLE"
+
+@pytest.mark.parametrize('side,stop,target,close', [('LONG',90,120,105),('SHORT',110,80,95)])
+def test_position_resize_applies_only_to_future_candles_and_preserves_initial_risk(side,stop,target,close):
+    result=evaluate_manual(f'''
+const original={{side:'{side}',manualEntry:{{entry:100,stop:{stop},target:{target},candleTime:0,replayTime:60}}}};
+const amended=cslAmendManualPosition(original,100,{target},120,'now',{close});
+const bars=[{{time:60,open:100,high:109,low:91,close:{close}}},{{time:120,open:{close},high:110,low:90,close:100}}];
+console.log(JSON.stringify({{original,amended,before:cslAdvanceManualPosition(amended,bars,120,60,'now'),after:cslAdvanceManualPosition(amended,bars,180,60,'now'),rewind:cslAmendManualPosition(amended,100,{target},60,'now',{close}),invalid:cslAmendManualPosition(amended,-1,{target},120,'now',{close})}}));
+''')
+    assert 'manualExit' not in result['before']
+    assert result['after']['manualExit']['grossR']==0
+    assert result['after']['manualExit']['price']==100
+    assert result['amended']['manualEntry']['stop']==stop
+    assert result['amended']['positionHistory'][0]['effectiveAt']==120
+    assert 'positionHistory' not in result['original']
+    assert 'error' in result['rewind']
+    assert 'error' in result['invalid']

@@ -87,19 +87,34 @@ function cslCloseManualPosition(record, bars, cutoff, interval, recordedAt, requ
     automaticOutcomeShown:record.netR!=null,
     interpretation:'Manual review gross result before fees/slippage. Exact intrabar fill sequence is unknown.'}};
 }
+function cslManualLevels(record, cutoff) {
+  let levels=record.manualEntry;
+  for(const revision of record.positionHistory || [])if(revision.effectiveAt<=cutoff)levels={...levels,...revision};
+  return levels;
+}
+function cslAmendManualPosition(record, stop, target, cutoff, recordedAt, currentPrice) {
+  if(!record?.manualEntry || record.manualExit)return {error:'An open confirmed position is required.'};
+  if(cutoff<Math.max(record.manualEntry.replayTime,...(record.positionHistory || []).map(item=>item.effectiveAt)))return {error:'Advance to the latest saved position change before editing.'};
+  const long=record.side==='LONG';stop=Number(stop);target=Number(target);
+  if(![stop,target,currentPrice].every(value=>Number.isFinite(value) && value>0) || !(long?stop<currentPrice && currentPrice<target:target<currentPrice && currentPrice<stop))return {error:'SL and TP must bracket the current price.'};
+  const previous=cslManualLevels(record,cutoff);
+  if(previous.stop===stop && previous.target===target)return record;
+  return {...record,positionHistory:[...(record.positionHistory || []),{stop,target,previousStop:previous.stop,previousTarget:previous.target,effectiveAt:cutoff,recordedAt,method:'USER_RESIZED_POSITION'}]};
+}
 function cslAdvanceManualPosition(record, bars, cutoff, interval, recordedAt) {
   const entry=record?.manualEntry;if(!entry || record.manualExit)return record;
   const long=record.side==='LONG';if(!['LONG','SHORT'].includes(record.side))return record;
   // The entry candle's pre-/post-entry extremes cannot be ordered from OHLC.
   for(const bar of bars){
     if(bar.time<=entry.candleTime || bar.time+interval>cutoff)continue;
-    const stopOpen=long?bar.open<=entry.stop:bar.open>=entry.stop;
-    const targetOpen=long?bar.open>=entry.target:bar.open<=entry.target;
-    const stop=long?bar.low<=entry.stop:bar.high>=entry.stop;
-    const target=long?bar.high>=entry.target:bar.low<=entry.target;
+    const levels=cslManualLevels(record,bar.time);
+    const stopOpen=long?bar.open<=levels.stop:bar.open>=levels.stop;
+    const targetOpen=long?bar.open>=levels.target:bar.open<=levels.target;
+    const stop=long?bar.low<=levels.stop:bar.high>=levels.stop;
+    const target=long?bar.high>=levels.target:bar.low<=levels.target;
     if(!stopOpen && !targetOpen && !stop && !target)continue;
     const reason=stopOpen?'SL':targetOpen?'TP':stop?'SL':'TP';
-    const price=stopOpen || targetOpen?bar.open:reason==='SL'?entry.stop:entry.target;
+    const price=stopOpen || targetOpen?bar.open:reason==='SL'?levels.stop:levels.target;
     const result=cslCloseManualPosition(record,bars,cutoff,interval,recordedAt,{time:bar.time,price});
     if(result.error)return record;
     result.manualExit={...result.manualExit,reason,method:'REPLAY_LEVEL_HIT',exitTime:stopOpen || targetOpen?bar.time:null,ambiguous:!stopOpen && !targetOpen && stop && target,
