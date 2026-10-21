@@ -5,6 +5,15 @@ candles and 1m execution data. Run a backtest and open the completed run in the
 visualizer; **Review setup** shows the initial level test, reversal, defended
 range, breakout trigger and fixed target. Trade replay uses the saved evidence.
 
+The chart shows four named horizontal levels: previous UTC-day high and low
+(solid), older swing high and low (dashed). They are saved at setup time on new
+runs. Older runs reconstruct missing display context from the same warmup,
+strictly before setup, and label that source in setup details; saved outcomes
+and entry decisions are unchanged. Missing outer swings are explicitly marked
+unavailable instead of duplicating a range boundary. Reset price fits all known
+levels; manual zoom can still move a level off screen. UTC midnight separators
+and date labels are enabled by default and can be toggled with **UTC days**.
+
 This is the all-day mechanical interpretation of
 [The Rumers' Sneaky Pivot video](https://www.youtube.com/watch?v=zspMXJVbfAY),
 not a reproduction of its discretionary stock-market results.

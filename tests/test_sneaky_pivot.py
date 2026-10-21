@@ -39,6 +39,47 @@ def test_all_day_signal_frozen_geometry_and_causality(short):
     assert sneaky_setups(ts,o,h,l,c,atr)[121] is not None
 
 
+def test_four_saved_levels_and_legacy_reconstruction_match_without_future_data():
+    from crypto_strategy_lab.sneaky_pivot import historical_levels
+    ts,o,h,l,c,atr=candles(days=3)
+    h[10]=25;l[20]=5
+    setup=sneaky_setups(ts,o,h,l,c,atr)[193]
+    assert setup is not None
+    assert {x['role']:x['price'] for x in setup['levels']}=={
+        'rangeHigh':20.,'rangeLow':10.,'swingHigh':25.,'swingLow':5.}
+    frame=pd.DataFrame(dict(period_start=ts,high=h,low=l))
+    assert historical_levels(frame,ts[192])==setup['levels']
+    frame['period_start']=frame.period_start.dt.as_unit('us')
+    assert historical_levels(frame,ts[192])==setup['levels']
+    frame.loc[frame.period_start>=ts[192],['high','low']]=[999,0]
+    assert historical_levels(frame,ts[192])==setup['levels']
+    assert setup['levelsSource']=='Saved at setup'
+
+
+def test_missing_outer_swings_are_explicit_not_substituted_with_range():
+    setup=sneaky_setups(*candles())[97]
+    assert [x['price'] for x in setup['levels'] if x['role'].startswith('swing')]==[None,None]
+
+
+def test_legacy_visualizer_recovers_four_roles_without_rewriting_trade():
+    from types import SimpleNamespace
+    from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    ts,o,h,l,c,atr=candles(days=3);h[10]=25;l[20]=5
+    setup=sneaky_setups(ts,o,h,l,c,atr)[193]
+    expected=setup.pop('levels');setup.pop('levelsSource')
+    raw=json.dumps(setup)
+    model=object.__new__(CompletedRunVisualizer)
+    model.trades=pd.DataFrame({'supply_demand_setup':[raw]})
+    model.seed=SimpleNamespace(request=SimpleNamespace(period_start=ts[96]),config=ResearchRunConfig())
+    model._market_frame=lambda *args,**kwargs:pd.DataFrame(dict(period_start=ts.as_unit('us'),high=h,low=l))
+    result=model.supply_demand_derivation(0)
+    assert result['status']=='AVAILABLE'
+    assert result['levels']==expected
+    assert result['levelsSource']=='Reconstructed historical context (legacy run)'
+    assert model.trades.iloc[0].supply_demand_setup==raw
+
+
 @pytest.mark.parametrize('change',['gap','weak','wrong_colour','break_level','no_prior_day'])
 def test_missing_stage(change):
     ts,o,h,l,c,atr=candles(days=2)
