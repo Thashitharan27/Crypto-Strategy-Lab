@@ -187,6 +187,9 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.add_field(
             "fvg_confirmation_minutes", "First Confirmation Candle", self.account["fvg_confirmation_minutes"]
         )
+        self.account["fib_entry_50_618_only"].setText("Only enter inside the 50%–61.8% Fib zone")
+        self.account["fib_entry_50_618_only"].setToolTip("Require the actual entry price after slippage to be strictly between the selected swing's 50% and 61.8% prices. Applies to both directions and deeper limit fills. Other entry rules still apply.")
+        self.entry_card.add_control("fib_entry_50_618_only", self.account["fib_entry_50_618_only"])
         self.first_minute_confirmation = QToolButton()
         self.first_minute_confirmation.setText("Use first 1m confirmation")
         self.first_minute_confirmation.clicked.connect(self._use_first_minute_confirmation)
@@ -770,6 +773,7 @@ class RiskExecutionWorkspace(QWidget):
             else "Configured R before FVG move high / low"
         )
         self.target_card.set_row_visible("fvg_target_buffer_atr", fvg)
+        self.entry_card.set_row_visible("fib_entry_50_618_only", fib)
         fib_target_mode = str(self.account["fib_target_mode"].currentData() or "IMPULSE_EXTREME")
         self.target_card.set_row_visible("fib_target_method", fib)
         self.target_card.set_row_visible("fib_fixed_target_r", fib and fib_target_mode == "FIXED_R")
@@ -1048,6 +1052,8 @@ class RiskExecutionWorkspace(QWidget):
                     "prior impulse extreme (0.0 Fib): previous swing high for long or previous swing low "
                     f"for short; {room_gate}"
                 )
+            if execution.fib_entry_50_618_only:
+                target += "; actual entries must be strictly inside the 50%–61.8% retracement zone"
         else:
             target_mode = str(execution.sr_take_profit_mode).upper()
             if target_mode == "SR_CAPPED_R":

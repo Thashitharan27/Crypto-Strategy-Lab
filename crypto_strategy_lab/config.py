@@ -105,6 +105,7 @@ class BacktestConfig:
     fib_candle_star: bool = True
     fib_first_zone_hold_entry: bool = False
     fib_stop_buffer_atr: float = 0.05
+    fib_entry_50_618_only: bool = False
     fib_target_mode: str = "IMPULSE_EXTREME"
     fib_fixed_target_r: float = 2.0
     fib_target_buffer_atr: float = 0.05

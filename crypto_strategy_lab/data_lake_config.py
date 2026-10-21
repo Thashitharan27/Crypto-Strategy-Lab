@@ -416,6 +416,7 @@ class ExecutionConfig:
     fvg_min_clear_bars: int = 3
     fvg_min_move_away_atr: float = 0.5
     fib_stop_buffer_atr: float = 0.05
+    fib_entry_50_618_only: bool = False
     fib_target_mode: str = "IMPULSE_EXTREME"
     fib_fixed_target_r: float = 2.0
     fib_target_buffer_atr: float = 0.05
