@@ -38,17 +38,18 @@ function cslPreviousDayZones(bars, day, interval, widthPercent=2) {
   const high=Math.max(...prior.map(bar=>bar.high)),low=Math.min(...prior.map(bar=>bar.low));
   if(high<=low)return {zones:[],reason:'Previous day has no price range.'};
   const half=(high-low)*Math.max(.5,Math.min(10,Number(widthPercent) || 2))/200;
-  const points=[{price:high,kind:'resistance',extreme:true},{price:low,kind:'support',extreme:true}];
+  const points=[{price:high,kind:'resistance',extreme:true,time:prior.find(bar=>bar.high===high).time},
+    {price:low,kind:'support',extreme:true,time:prior.find(bar=>bar.low===low).time}];
   for(let i=2;i<prior.length-2;i++)for(const [key,kind] of [['high','resistance'],['low','support']]) {
     const price=prior[i][key];
-    if(prior.slice(i-2,i+3).every((bar,j)=>j===2 || (key==='high'?price>bar[key]:price<bar[key])))points.push({price,kind,extreme:false});
+    if(prior.slice(i-2,i+3).every((bar,j)=>j===2 || (key==='high'?price>bar[key]:price<bar[key])))points.push({price,kind,extreme:false,time:prior[i].time});
   }
   const merged=[];
   for(const point of points.sort((a,b)=>a.price-b.price)) {
     const previous=merged.at(-1);
     // Bound total band width, so a chain of nearby pivots cannot swallow the day.
-    if(previous && point.price-previous.seed<=2*half){previous.top=point.price+half;previous.touches++;previous.extreme ||= point.extreme;if(previous.kind!==point.kind)previous.kind='support / resistance';}
-    else merged.push({bottom:point.price-half,top:point.price+half,seed:point.price,kind:point.kind,touches:1,extreme:point.extreme});
+    if(previous && point.price-previous.seed<=2*half){previous.top=point.price+half;previous.touches++;previous.time=Math.min(previous.time,point.time);previous.extreme ||= point.extreme;if(previous.kind!==point.kind)previous.kind='support / resistance';}
+    else merged.push({bottom:point.price-half,top:point.price+half,seed:point.price,kind:point.kind,touches:1,extreme:point.extreme,time:point.time});
   }
   return {day,previousDay:day-86400,high,low,widthPercent:Number(widthPercent),zones:merged.sort((a,b)=>Number(b.extreme)-Number(a.extreme) || b.touches-a.touches || a.bottom-b.bottom).slice(0,8).sort((a,b)=>a.bottom-b.bottom)};
 }

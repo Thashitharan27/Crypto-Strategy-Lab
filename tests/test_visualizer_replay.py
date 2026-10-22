@@ -471,3 +471,17 @@ console.log(JSON.stringify(cslComparisonReportHtml({rows:[row],before:-1,after:2
     assert 'data-state="wins"' in page
     assert "row.dataset.state!==this.value" in page
     assert '</script></body></html>' in page
+
+def test_previous_day_zone_origins_use_earliest_contributing_candle():
+    result=evaluate_manual('''
+const interval=900,day=86400;
+const bars=Array.from({length:96},(_,i)=>({time:i*interval,high:110,low:90}));
+bars[10].high=120;bars[20].high=119.9;bars[30].low=80;
+console.log(JSON.stringify(cslPreviousDayZones(bars,day,interval,1)));
+''')
+    assert len(result['zones'])==2
+    support,resistance=result['zones']
+    assert support['time']==30*900
+    assert resistance['time']==10*900
+    assert resistance['touches']>=2
+    assert all(zone['time']<86400 for zone in result['zones'])

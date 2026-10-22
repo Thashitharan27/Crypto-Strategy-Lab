@@ -476,3 +476,10 @@ console.log(JSON.stringify({before,after:drawn.filter(x=>x.className==='fvg-leve
     result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
     assert result['before']==['50px','100px']
     assert result['after']==['150px','50px','100px']
+
+def test_previous_day_zones_default_to_enabled_narrow_and_start_at_origin():
+    html=build_browser_visualizer_v2_html(_Model(),'sr-defaults')
+    assert 'id="sr-zones" type="checkbox" checked' in html
+    assert '<option value="1" selected>Narrow zones</option>' in html
+    assert 'timeToCoordinate(zone.time)' in html
+    assert 'timeToCoordinate(item.time)' in html

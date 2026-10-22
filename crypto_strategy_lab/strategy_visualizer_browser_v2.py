@@ -196,8 +196,8 @@ button:disabled{opacity:.45;cursor:default}
     <span class="toolbar-spacer"></span>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
-    <label title="Previous UTC day confirmed swing zones; visual reference only"><input id="sr-zones" type="checkbox"> Previous-day S/R</label>
-    <select id="sr-width" aria-label="S/R zone width"><option value="1">Narrow zones</option><option value="2" selected>Normal zones</option><option value="4">Wide zones</option></select>
+    <label title="Previous UTC day confirmed swing zones; visual reference only"><input id="sr-zones" type="checkbox" checked> Previous-day S/R</label>
+    <select id="sr-width" aria-label="S/R zone width"><option value="1" selected>Narrow zones</option><option value="2">Normal zones</option><option value="4">Wide zones</option></select>
     <span id="sr-status" role="status" hidden></span>
     <label><input id="day-separators" type="checkbox" checked> UTC days</label>
   </div>
@@ -1025,9 +1025,8 @@ button:disabled{opacity:.45;cursor:default}
     chartWrap.removeAttribute('title');
     if(!$('sr-zones').checked || !srCache?.result?.zones || !candles)return;
     const rect=chartWrap.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;
-    const start=chart.timeScale().timeToCoordinate(srCache.day);
-    if(x<Math.max(0,Number(start ?? 0)) || x>rect.width-76 || y>chart.panes()[0].getHeight())return;
-    const price=candles.coordinateToPrice(y),zone=srCache.result.zones.find(item=>item.bottom<=price && price<=item.top);
+    if(x<0 || x>rect.width-76 || y>chart.panes()[0].getHeight())return;
+    const price=candles.coordinateToPrice(y),zone=srCache.result.zones.find(item=>item.bottom<=price && price<=item.top && x>=Math.max(0,Number(chart.timeScale().timeToCoordinate(item.time) ?? 0)));
     if(zone)chartWrap.title='Previous-day '+zone.kind+' · '+formatPrice(zone.bottom)+'–'+formatPrice(zone.top);
   });
   chartWrap.addEventListener('mouseleave',()=>chartWrap.removeAttribute('title'));
@@ -1043,8 +1042,8 @@ button:disabled{opacity:.45;cursor:default}
     if(result.reason){$('sr-status').textContent=result.reason;return;}
     $('sr-status').textContent=result.zones.length+' zones · '+new Date((day-86400)*1000).toISOString().slice(0,10)+' UTC';
     const right=chartWrap.clientWidth-76,height=chart.panes()[0].getHeight();
-    const start=chart.timeScale().timeToCoordinate(day),left=Math.max(0,Number(start ?? 0));
     for(const zone of result.zones){
+      const start=chart.timeScale().timeToCoordinate(zone.time),left=Math.max(0,Number(start ?? 0));
       const a=candles.priceToCoordinate(zone.top),b=candles.priceToCoordinate(zone.bottom);
       if(a==null || b==null || Math.max(a,b)<0 || Math.min(a,b)>height)continue;
       const el=document.createElement('div');el.className='sr-zone';
