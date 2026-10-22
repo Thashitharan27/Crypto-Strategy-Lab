@@ -144,6 +144,11 @@ function cslAdvanceManualPosition(record, bars, cutoff, interval, recordedAt) {
   }
   return record;
 }
+function cslNextReplayCutoff(bars, cutoff, interval, dayEnd=null) {
+  const next=bars.find(bar=>bar.time+interval>cutoff && (dayEnd==null || bar.time<dayEnd));
+  if(!next || dayEnd!=null && cutoff>=dayEnd)return null;
+  return dayEnd==null?next.time+interval:Math.min(dayEnd,next.time+interval);
+}
 function cslReplayChart(view, chartSource, cutoff, interval, entryTime, revealed=false) {
   const projected=cslReplayView({...chartSource,selectedTrade:view.selectedTrade,markers:view.markers},cutoff,interval,entryTime,revealed,true).view;
   return {...view,candles:projected.candles,overlays:projected.overlays,markers:projected.markers,chartTimeframe:chartSource.chartTimeframe};

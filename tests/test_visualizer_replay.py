@@ -347,3 +347,17 @@ console.log(JSON.stringify({view,result}));
     assert projected['supplyDemandDerivation']==result['view']['supplyDemandDerivation']
     assert all(bar['time']+interval<=4500 or bar['open']==bar['high']==bar['low']==bar['close']==100 for bar in projected['candles'])
     assert all(point['time']+interval<=4500 for point in projected['overlays'][0]['data'])
+
+@pytest.mark.parametrize('interval',[60,300,900,3600])
+def test_next_replay_advances_one_selected_chart_candle(interval):
+    result=evaluate_manual('''
+const interval=INTERVAL,bars=Array.from({length:8},(_,i)=>({time:i*interval}));
+const first=cslNextReplayCutoff(bars,interval,interval);
+const second=cslNextReplayCutoff(bars,first,interval);
+console.log(JSON.stringify({first,second,exhausted:cslNextReplayCutoff(bars,8*interval,interval),boundary:cslNextReplayCutoff(bars,interval,interval,interval),mid:cslNextReplayCutoff(bars,interval+30,interval)}));
+'''.replace('INTERVAL',str(interval)))
+    assert result['first']==2*interval
+    assert result['second']==3*interval
+    assert result['mid']==2*interval
+    assert result['exhausted'] is None
+    assert result['boundary'] is None

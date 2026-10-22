@@ -625,7 +625,7 @@ button:disabled{opacity:.45;cursor:default}
       button.disabled=replayBusy || locked;
       button.setAttribute('aria-pressed',String(record?.decision===button.dataset.replayDecision));
     }
-    $('replay-step').title='Advance one '+boot.run.timeframe+' strategy candle; chart timeframe changes the view only.';
+    $('replay-step').title='Advance one '+currentTimeframe+' chart candle.';
     $('replay-notes').disabled=replayBusy || locked;
     for(const id of ['replay-step','replay-play','replay-reveal']) $(id).disabled=replayBusy || (!dayMode && !record) || replayRevealed;
     if(dayMode) {
@@ -692,11 +692,9 @@ button:disabled{opacity:.45;cursor:default}
       refreshManualPlan(); if(manualPlanDraft.error && !dayMode) return; if(!manualPlanDraft.error)storeManualPlan();
     }
     if(replayBusy || !replayActive || replayRevealed || (!dayMode && !markFutureSeen())) return;
-    const next=(sourcePayload.candles || []).find(bar=>bar.time+replayInterval>replayCutoff);
-    if(dayMode && (replayCutoff>=replayDay+86400 || !next || next.time>=replayDay+86400)) {stopReplay();$('replay-status').textContent='End of this UTC day. Use Next day to continue.';return;}
-    if(!next) { stopReplay(); $('replay-status').textContent='End of available candles. Export your review to retain it.'; return; }
-    replayCutoff=next.time+replayInterval; replayAdvanced=true;
-    if(dayMode)replayCutoff=Math.min(replayCutoff,replayDay+86400);
+    const nextCutoff=cslNextReplayCutoff((replayChartSource || sourcePayload).candles || [],replayCutoff,chartInterval(),dayMode?replayDay+86400:null);
+    if(nextCutoff==null) {stopReplay();$('replay-status').textContent=dayMode?'End of this UTC day. Use Next day to continue.':'End of available candles. Export your review to retain it.';return;}
+    replayCutoff=nextCutoff; replayAdvanced=true;
     if(dayMode && currentReview())markFutureSeen();
     refreshReplay(true);
   }
