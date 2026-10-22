@@ -70,7 +70,7 @@ function cslManualPlan(entry, stop, target, side) {
 function cslRecordManualPlan(record, plan, original, context) {
   if(plan.error) throw Error(plan.error);
   const previous=record.manualPlan;
-  if(previous && ['entry','stop','target','entryTime'].every(key=>previous[key]===plan[key])) return record;
+  if(previous && ['entry','stop','target','entryTime','interval','timeframe'].every(key=>previous[key]===plan[key])) return record;
   const revision={...plan,recordedAt:context.recordedAt,replayTime:context.replayTime,
     futureSeen:Boolean(context.futureSeen),automaticOutcomeShown:record.netR!=null,
     outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)};
@@ -83,8 +83,8 @@ function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
   if(!plan || !Number.isFinite(plan.entryTime)) return {error:'Choose an entry candle first.'};
   const bar=bars.find(item=>item.time===plan.entryTime && item.time+interval<=cutoff);
   if(!bar) return {error:'Advance until the selected entry candle has closed.'};
-  if(!(bar.low<=plan.entry && plan.entry<=bar.high)) return {error:'The selected candle did not trade through your entry price. Move the box to another candle or adjust the price.'};
-  return {...record,manualEntry:{...plan,candleTime:bar.time,confirmedAt:recordedAt,
+  if(!(bar.low<=plan.entry && plan.entry<=bar.high)) return {error:'Entry not confirmed: '+plan.entry+' is outside the selected candle range '+bar.low+'–'+bar.high+'. Use Move box or Enter at current candle.'};
+  return {...record,manualEntry:{...plan,interval,candleTime:bar.time,confirmedAt:recordedAt,
     replayTime:cutoff,candle:{...bar},confirmation:'User confirmed; candle range includes price. Intrabar fill time is unknown.',
     planSavedAt:record.planHistory?.at(-1)?.recordedAt,
     futureSeen:Boolean(record.revealedAt) || Boolean(record.planHistory?.some(revision=>revision.futureSeen)),automaticOutcomeShown:record.netR!=null,
