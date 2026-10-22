@@ -184,7 +184,7 @@ but SL and TP must bracket the current closed price. R always uses initial risk.
 Rewinding shows the levels known then; advance to the latest saved change before
 editing again. Closed positions cannot be resized.
 
-Previous-day support/resistance: enable Previous-day S/R in the chart toolbar.
+Previous-day support/resistance: Previous-day S/R is enabled by default in the chart toolbar; uncheck it to hide the bands. Bright boundaries remain visible over position boxes. An information icon explains when previous-day data is unavailable.
 A complete previous UTC day on a 1h-or-lower chart is required. Strict swing
 pivots use two candles on each side, all from that previous day; daily high/low
 are included. Bands use 1%, 2%, or 4% of that day's range as their base width.

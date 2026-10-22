@@ -71,8 +71,8 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #chart{position:absolute;inset:0;z-index:1}
 #fib-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
 #fvg-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
-#sr-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
-.sr-zone{position:absolute;border-top:1px solid;border-bottom:1px solid;box-sizing:border-box}
+#sr-layer{position:absolute;inset:0;z-index:6;pointer-events:none;overflow:hidden}
+.sr-zone{position:absolute;border-top:2px solid;border-bottom:2px solid;box-sizing:border-box}
 #day-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
 .utc-day-line{position:absolute;top:0;border-left:1px dashed #8295ab88}
 .utc-day-label{position:absolute;top:4px;font-size:11px;color:#b5c6d8;background:#101923dd;padding:3px 6px;border-radius:3px;white-space:nowrap}
@@ -194,7 +194,7 @@ button:disabled{opacity:.45;cursor:default}
     <span class="toolbar-spacer"></span>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
-    <label title="Previous UTC day confirmed swing zones; visual reference only"><input id="sr-zones" type="checkbox"> Previous-day S/R</label>
+    <label title="Previous UTC day confirmed swing zones; visual reference only"><input id="sr-zones" type="checkbox" checked> Previous-day S/R</label>
     <select id="sr-width" aria-label="S/R zone width"><option value="1">Narrow zones</option><option value="2" selected>Normal zones</option><option value="4">Wide zones</option></select>
     <span id="sr-status" role="status" hidden></span>
     <label><input id="day-separators" type="checkbox" checked> UTC days</label>
@@ -960,7 +960,7 @@ button:disabled{opacity:.45;cursor:default}
   });
   chartWrap.addEventListener('mouseleave',()=>chartWrap.removeAttribute('title'));
   function drawPreviousDayZones() {
-    const layer=$('sr-layer');layer.replaceChildren();$('sr-status').textContent='';chartWrap.removeAttribute('title');
+    const layer=$('sr-layer');layer.replaceChildren();$('sr-status').textContent='';$('sr-status').hidden=true;chartWrap.removeAttribute('title');
     if(!chart || !candles || !$('sr-zones').checked)return;
     const interval=Number(String(currentTimeframe).match(/^([0-9]+)/)?.[1])*({m:60,h:3600,d:86400,w:604800}[String(currentTimeframe).slice(-1)] || 0);
     const anchor=replayActive?replayEntryTime:Date.parse(sourcePayload?.selectedTrade?.['Entry Time'] || '')/1000;
@@ -968,7 +968,7 @@ button:disabled{opacity:.45;cursor:default}
     const bars=(marketPayload || sourcePayload)?.candles || [],width=Number($('sr-width').value);
     if(!srCache || srCache.bars!==bars || srCache.day!==day || srCache.width!==width || srCache.interval!==interval)srCache={bars,day,width,interval,result:cslPreviousDayZones(bars,day,interval,width)};
     const result=srCache.result;
-    if(result.reason){$('sr-status').textContent=result.reason;return;}
+    if(result.reason){$('sr-status').hidden=false;$('sr-status').textContent='ⓘ';$('sr-status').title=result.reason;$('sr-status').setAttribute('aria-label',result.reason);return;}
     $('sr-status').textContent=result.zones.length+' zones · '+new Date((day-86400)*1000).toISOString().slice(0,10)+' UTC';
     const right=chartWrap.clientWidth-76,height=chart.panes()[0].getHeight();
     const start=chart.timeScale().timeToCoordinate(day),left=Math.max(0,Number(start ?? 0));
@@ -977,7 +977,7 @@ button:disabled{opacity:.45;cursor:default}
       if(a==null || b==null || Math.max(a,b)<0 || Math.min(a,b)>height)continue;
       const el=document.createElement('div');el.className='sr-zone';
       const support=zone.kind==='support',resistance=zone.kind==='resistance';
-      Object.assign(el.style,{left:left+'px',width:Math.max(0,right-left)+'px',top:Math.max(0,Math.min(a,b))+'px',height:Math.max(2,Math.min(height,Math.max(a,b))-Math.max(0,Math.min(a,b)))+'px',borderColor:support?'#38bda0':resistance?'#e89861':'#a5a1e8',background:support?'rgba(56,189,160,.12)':resistance?'rgba(232,152,97,.12)':'rgba(165,161,232,.12)'});
+      Object.assign(el.style,{left:left+'px',width:Math.max(0,right-left)+'px',top:Math.max(0,Math.min(a,b))+'px',height:Math.max(2,Math.min(height,Math.max(a,b))-Math.max(0,Math.min(a,b)))+'px',borderColor:support?'#45e6bc':resistance?'#ffae73':'#c3b7ff',background:support?'rgba(56,189,160,.08)':resistance?'rgba(232,152,97,.08)':'rgba(165,161,232,.08)'});
       layer.appendChild(el);
     }
   }
