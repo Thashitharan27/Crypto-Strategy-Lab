@@ -144,7 +144,7 @@ def test_v2_trade_box_layer_stays_above_chart_canvas():
 
     assert "#chart{position:absolute;inset:0;z-index:1}" in html
     assert "#trade-box-layer{position:absolute;inset:0;z-index:5" in html
-    assert "const width=Math.max(manual?8:48,right-left)" in html
+    assert "const width=Math.max(manual?72:48,right-left)" in html
 
 
 def test_v2_trade_box_shows_opposite_boundary_without_floating_markers():
