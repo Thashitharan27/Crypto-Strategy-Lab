@@ -45,7 +45,7 @@ def test_replay_manual_plan_controls_history_and_chart_preview():
     assert 'planHistory' in html and 'originalPlan' in html
     assert 'chart.subscribeClick(event=>' in html
     assert 'candles.coordinateToPrice(event.point.y)' in html
-    assert 'Planned entry ' in html and 'Planned SL ' in html and 'Planned TP ' in html
+    assert 'Preview entry ' in html and 'Preview SL ' in html and 'Preview TP ' in html
     assert 'Move box' in html and 'Confirm manual entry' in html
     assert 'manual ? manualPlanDraft.entryTime : Number(open.time)' in html
     assert "payload.candles || []).some(bar=>bar.time===time)" in html
@@ -155,8 +155,8 @@ def test_v2_trade_box_shows_opposite_boundary_without_floating_markers():
     assert "trade['Exit Reason']" in html
     assert "(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason']" in html
     assert "layoutOverlayLabels" in html
-    assert "(manual?'Planned TP ':'Target ')+formatPrice(trade.Target ?? trade.target)" in html
-    assert "(manual?'Planned SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)" in html
+    assert "(manual && !currentReview()?.manualEntry?'Preview TP ':'Target ')+formatPrice(trade.Target ?? trade.target)" in html
+    assert "(manual && !currentReview()?.manualEntry?'Preview SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)" in html
 
 
 def test_v2_fib_overlay_has_structure_only_no_trade_specific_fib_labels():

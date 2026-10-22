@@ -120,6 +120,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 .trade-rect.risk.current-loss{background:rgba(180,36,52,.48);border-color:#fb7185}
 .trade-label{position:absolute;padding:2px 5px;border-radius:3px;font:11px/1.2 Segoe UI,Arial,sans-serif;white-space:nowrap}
 .position-handle{position:absolute;pointer-events:auto;cursor:ns-resize;height:12px;z-index:9;border-top:2px dashed #fff;touch-action:none;background:rgba(255,255,255,.08)}
+#manual-workflow-state{border:1px solid #456078;border-radius:4px;padding:3px 6px;color:#c5e5ff}
 .trade-label.entry{background:rgba(43,108,176,.96);color:#fff}
 .trade-label.exit{background:rgba(184,132,50,.96);color:#fff}
 .trade-label.tp{background:rgba(32,139,85,.96);color:#fff}
@@ -215,7 +216,7 @@ button:disabled{opacity:.45;cursor:default}
     <span id="timeframe-note" class="muted" role="status"></span>
     <div id="replay-controls" hidden>
       <strong>Your judgement:</strong>
-      <button data-replay-decision="Take">Take</button><button data-replay-decision="Skip">Skip</button><button data-replay-decision="Unsure">Unsure</button>
+      <span id="manual-workflow-state" role="status"></span><button data-replay-decision="Wait">Wait</button><button data-replay-decision="Skip">Skip</button><button data-replay-decision="Unsure">Unsure</button>
       <input id="replay-notes" aria-label="Pre-entry judgement note" placeholder="Why would you take or skip it?">
       <button id="replay-step">Next candle</button><button id="replay-play">Play</button>
       <label><input id="replay-follow" type="checkbox" checked> Follow replay</label>
@@ -518,6 +519,12 @@ button:disabled{opacity:.45;cursor:default}
     return JSON.stringify([boot.run.runId,boot.run.symbol,trade.Pair ?? currentTrade,trade['Entry Time']]);
   }
   function currentReview() { return reviewRecords.find(record=>record?.key===replayKey()); }
+  function ensureReview() {
+    let record=currentReview();if(record)return record;
+    const trade=sourcePayload.selectedTrade;
+    record={key:replayKey(),runId:boot.run.runId,symbol:boot.run.symbol,reviewType:dayMode?'manual-day':'automatic-trade',day:dayMode?replayDay:null,tradeIndex:dayMode?null:currentTrade,pair:trade.Pair,entryTime:trade['Entry Time'],side:trade.Side,recordedAt:new Date().toISOString(),outcomePreviouslyShown:normalViewsSeen.has(replayKey()),notes:'',decision:'Wait',initialDecision:'Wait',initialDecisionReplayTime:replayCutoff,workflowVersion:1};
+    reviewRecords.push(record);saveReviews();return record;
+  }
   function saveReviews() {
     try { localStorage.setItem(reviewStorageKey,JSON.stringify(reviewRecords)); }
     catch { reviewStorageAvailable=false; }
@@ -591,7 +598,7 @@ button:disabled{opacity:.45;cursor:default}
     const dirty=!saved || ['entry','stop','target','entryTime','interval','timeframe'].some(key=>saved[key]!==manualPlanDraft[key]);
     const confirmed=currentReview()?.manualEntry;
     $('manual-time').textContent='Entry candle: '+fmtTime(manualEntryTime)+' UTC · '+(confirmed?.timeframe || manualEntryTimeframe || boot.run.timeframe);
-    const status=manualPlanDraft.error || (confirmed?'Manual entry confirmed at '+fmtTime(confirmed.candleTime)+' UTC.':('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Unsaved preview — choose Take/Skip/Unsure or Save plan.':'Saved manual plan.')))+' '+manualEntryMessage+' Drag the box edges to resize SL/TP (and entry before confirmation). Move box selects a candle. Manual results are gross R before fees/slippage. TP/SL checks start after the entry candle; ties use SL.';
+    const status=manualPlanDraft.error || (confirmed?'Manual entry confirmed at '+fmtTime(confirmed.candleTime)+' UTC.':('R:R '+manualPlanDraft.rewardRisk.toFixed(2)+' · '+(dirty?'Preview only — confirm entry to open a position.':'Saved manual plan.')))+' '+manualEntryMessage+' Drag the box edges to resize SL/TP (and entry before confirmation). Move box selects a candle. Manual results are gross R before fees/slippage. TP/SL checks start after the entry candle; ties use SL.';
     $('manual-plan-status').textContent=manualPick?'Click the chart to place '+manualPick+'.':status;
     $('manual-plan-status').style.color=manualPlanDraft.error || manualEntryMessage.startsWith('Entry not confirmed:')?'#fda4af':'#b9d7f5';
     const locked=manualPlanLocked();
@@ -602,8 +609,8 @@ button:disabled{opacity:.45;cursor:default}
     $('manual-move').disabled=locked;$('manual-move').title='Choose a closed candle on this chart.';
     $('manual-current').disabled=locked;
     $('manual-current').title='Set entry to the latest closed chart candle close, then confirm.';
-    $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error) || currentReview()?.decision!=='Take';
-    $('manual-confirm').title=confirmed?'Entry is already confirmed.':currentReview()?.decision!=='Take'?'Choose Take before confirming a manual entry.':'Confirm the selected closed candle and entry price.';
+    $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error);
+    $('manual-confirm').title=confirmed?'Entry is already confirmed.':'Only this button opens your manual position. Confirm the selected closed candle and entry price.';
     $('manual-be').disabled=manualCloseLocked();
     $('manual-close').disabled=manualCloseLocked();$('manual-pick-exit').disabled=manualCloseLocked() || currentTimeframe!==(confirmed?.timeframe || boot.run.timeframe);
     $('manual-pick-exit').title=currentTimeframe!==(confirmed?.timeframe || boot.run.timeframe)?'Select the entry timeframe to pick an exit candle.':'';
@@ -641,6 +648,7 @@ button:disabled{opacity:.45;cursor:default}
     replayEntryTime=Date.parse(sourcePayload?.selectedTrade?.['Entry Time'] || '')/1000;
     replayCutoff=replayEntryTime;
     if(!replayInterval || !Number.isFinite(replayEntryTime)) throw Error('This trade has no usable entry time or strategy interval for replay.');
+    ensureReview();
     $('replay-notes').value=currentReview()?.notes || '';
     loadManualPlan(currentReview()?.manualPlan || automaticPlan());
   }
@@ -649,7 +657,8 @@ button:disabled{opacity:.45;cursor:default}
     $('replay-reveal').textContent=dayMode?'Reveal day':'Reveal result';
     $('replay-restart').textContent=dayMode?'Restart day':'Restart at entry';
     $('manual-reset').textContent=dayMode?'Reset starting levels':'Use auto levels';
-    const locked=dayMode ? replayRevealed || Boolean(record?.manualEntry) : Boolean(record?.revealedAt) || replayAdvanced || replayRevealed;
+    const locked=replayRevealed || Boolean(record?.manualEntry);
+    $('manual-workflow-state').textContent=cslManualReviewState(record);
     for(const button of document.querySelectorAll('[data-replay-decision]')) {
       button.disabled=replayBusy || locked;
       button.setAttribute('aria-pressed',String(record?.decision===button.dataset.replayDecision));
@@ -661,19 +670,19 @@ button:disabled{opacity:.45;cursor:default}
       const days=[...new Set((marketPayload.candles || []).map(bar=>Math.floor(bar.time/86400)*86400))];
       $('previous-day').disabled=replayBusy || !days.some(day=>day<replayDay);
       $('next-day').disabled=replayBusy || !days.some(day=>day>replayDay);
-      $('day-side').disabled=Boolean(record?.decision) || replayBusy || replayRevealed;
+      $('day-side').disabled=Boolean(record?.manualEntry) || replayBusy || replayRevealed;
     }
     $('replay-restart').disabled=replayBusy;
-    let message=String(sourcePayload?.selectedTrade?.Side || '')+' entry preview · '+fmtTime(replayCutoff)+' · '+(record ? 'Your choice: '+record.decision : 'Record Take, Skip or Unsure to unlock future candles.');
-    if(dayMode)message='Manual day review · '+fmtTime(replayCutoff)+' UTC · '+(record?'Your choice: '+record.decision:'Advance freely; choose Take when you find a setup.')+' · No automatic trade is required. Starting prices are editable placeholders.';
+    let message=String(sourcePayload?.selectedTrade?.Side || '')+' entry preview · '+fmtTime(replayCutoff)+' · '+cslManualReviewState(record);
+    if(dayMode)message='Manual day review · '+fmtTime(replayCutoff)+' UTC · '+cslManualReviewState(record)+' · No automatic trade is required. Starting prices are editable placeholders.';
     if(record?.revealedAt && !replayAdvanced && !replayRevealed) message+=' Previously reviewed; original judgement retained.';
-    if(replayOutcomeVisible) message+=' Result: '+String(sourcePayload.selectedTrade['Exit Reason'] || '')+' · '+String(sourcePayload.selectedTrade['Net R'] ?? 'n/a')+' R';
+    if(replayOutcomeVisible) message+=' Auto reference result: '+String(sourcePayload.selectedTrade['Exit Reason'] || '')+' · '+String(sourcePayload.selectedTrade['Net R'] ?? 'n/a')+' R';
     else if(replayAdvanced && !dayMode) message+=' · Result still hidden.';
     if(replayOutcomeVisible) {
       const scored=reviewRecords.filter(r=>r?.runId===boot.run.runId && r?.symbol===boot.run.symbol && r.netR!=null && Number.isFinite(Number(r.netR)));
       const total=scored.reduce((sum,r)=>sum+Number(r.netR),0);
-      const manual=scored.filter(r=>r.decision==='Take').reduce((sum,r)=>sum+Number(r.netR),0);
-      message+=' · Revealed reviews: '+scored.length+' · Auto total '+total.toFixed(2)+' R · Take-only '+manual.toFixed(2)+' R (trade sums).';
+      const manual=cslManualWorkflowSummary(reviewRecords.filter(r=>r.runId===boot.run.runId && r.symbol===boot.run.symbol));
+      message+=' · Auto reference '+total.toFixed(2)+' R · Manual: '+manual.entered+' entered, '+manual.closed+' closed · '+manual.grossR.toFixed(2)+' R gross.';
     }
     message+=' · Saved in this browser; export to keep reviews across visualizer sessions.';
     if(!reviewStorageAvailable) message+=' Browser storage unavailable: export before closing.';
@@ -683,7 +692,7 @@ button:disabled{opacity:.45;cursor:default}
   function refreshReplay(incremental=false) {
     if(!sourcePayload) return;
     if(replayActive) {
-      const projected=cslReplayView(sourcePayload,replayCutoff,replayInterval,replayEntryTime,dayMode?false:replayRevealed,replayAdvanced);
+      const projected=cslReplayView(sourcePayload,replayCutoff,replayInterval,replayEntryTime,dayMode?false:replayRevealed,false);
       payload=projected.view; replayOutcomeVisible=projected.outcomeVisible;
       if(replayChartSource)payload=cslReplayChart(payload,replayChartSource,replayCutoff,chartInterval(),replayEntryTime,!dayMode && replayRevealed);
       warmManualMarket();
@@ -719,7 +728,7 @@ button:disabled{opacity:.45;cursor:default}
   }
   function stepReplay() {
     if(replayActive && !manualPlanLocked()) {
-      refreshManualPlan(); if(manualPlanDraft.error && !dayMode) return; if(!manualPlanDraft.error)storeManualPlan();
+      refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();
     }
     if(replayBusy || !replayActive || replayRevealed || (!dayMode && !markFutureSeen())) return;
     const nextCutoff=cslNextReplayCutoff((replayChartSource || sourcePayload).candles || [],replayCutoff,chartInterval(),dayMode?replayDay+86400:null);
@@ -769,7 +778,14 @@ button:disabled{opacity:.45;cursor:default}
     if((marketPayload?.candles || []).some(bar=>bar.time>=day && bar.time<day+86400))openReplayDay(day);
     else {$('replay-day').value=new Date(replayDay*1000).toISOString().slice(0,10);$('replay-status').textContent='No candles available for that UTC day.';}
   });
-  $('day-side').addEventListener('change',()=>{if(!currentReview()?.decision)openReplayDay(replayDay);});
+  $('day-side').addEventListener('change',()=>{
+    if(replayBusy || replayRevealed || currentReview()?.manualEntry)return;
+    stopReplay();const record=ensureReview();
+    record.sideHistory=[...(record.sideHistory || []),{previous:record.side,side:$('day-side').value,replayTime:replayCutoff,recordedAt:new Date().toISOString(),previousPlan:record.manualPlan}];
+    record.side=$('day-side').value;record.manualPlan=null;saveReviews();
+    sourcePayload=cslDaySource(marketPayload,replayDay,replayInterval,record.side,boot.run.swingStrength);
+    loadManualPlan(automaticPlan());refreshReplay();
+  });
   $('replay-toggle').addEventListener('click',()=>{
     if(dayMode){if(!manualPlanLocked()){refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}dayMode=false;sourcePayload=marketPayload;replayActive=false;$('day-navigation').hidden=true;$('day-replay').setAttribute('aria-pressed','false');tradeSelect.disabled=false;}
     if(replayActive && !manualPlanLocked()) {refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
@@ -786,14 +802,12 @@ button:disabled{opacity:.45;cursor:default}
     refreshReplay();
   });
   document.querySelectorAll('[data-replay-decision]').forEach(button=>button.addEventListener('click',()=>{
-    if(replayBusy || replayRevealed || (dayMode?Boolean(currentReview()?.manualEntry):replayAdvanced || currentReview()?.revealedAt)) return;
-    refreshManualPlan();
-    if(manualPlanDraft.error) return;
-    const trade=sourcePayload.selectedTrade;
-    let record=currentReview();
-    if(!record) { record={key:replayKey(),runId:boot.run.runId,symbol:boot.run.symbol,reviewType:dayMode?'manual-day':'automatic-trade',day:dayMode?replayDay:null,tradeIndex:dayMode?null:currentTrade,pair:trade.Pair,entryTime:trade['Entry Time'],side:trade.Side,recordedAt:new Date().toISOString(),outcomePreviouslyShown:normalViewsSeen.has(replayKey()),notes:'',decision:''}; reviewRecords.push(record); }
-    record.decision=button.dataset.replayDecision; record.notes=$('replay-notes').value;
-    storeManualPlan(); updateReplayControls(); redrawOverlays();
+    if(replayBusy || replayRevealed || currentReview()?.manualEntry)return;
+    stopReplay();refreshManualPlan();
+    const record=ensureReview(),updated=cslReviewDecision(record,button.dataset.replayDecision,replayCutoff,new Date().toISOString(),$('replay-notes').value);
+    if(updated.error)return;
+    reviewRecords=reviewRecords.map(item=>item===record?updated:item);saveReviews();
+    if(!manualPlanDraft.error)storeManualPlan();updateReplayControls();redrawOverlays();
   }));
   for(const key of ['entry','stop','target']) $('manual-'+key).addEventListener('input',()=>{
     if(manualPlanLocked()) return;
@@ -816,9 +830,9 @@ button:disabled{opacity:.45;cursor:default}
     $('manual-entry').value=bar.close;manualEntryMessage='Current closed candle selected. Check SL/TP, then confirm entry.';refreshManualPlan();showManualBox();
   });
   $('manual-confirm').addEventListener('click',()=>{
-    if(manualPlanLocked() || currentReview()?.decision!=='Take') return;
+    if(manualPlanLocked()) return;
     stopReplay();refreshManualPlan();if(manualPlanDraft.error)return;
-    storeManualPlan();const record=currentReview();
+    ensureReview();storeManualPlan();const record=currentReview();
     const result=cslConfirmManualEntry(record,manualMarket(record)?.candles || [],replayCutoff,manualInterval(record),new Date().toISOString());
     if(result.error) {manualEntryMessage=result.error;refreshManualPlan();return;}
     reviewRecords=reviewRecords.map(item=>item===record?result:item);saveReviews();
@@ -834,7 +848,7 @@ button:disabled{opacity:.45;cursor:default}
   }));
   $('replay-notes').addEventListener('input',()=>{
     const record=currentReview();
-    if(record && !replayRevealed && (dayMode || (!record.revealedAt && !replayAdvanced))) { record.notes=$('replay-notes').value; saveReviews(); }
+    if(record && !replayRevealed && !record.manualEntry) { record.notes=$('replay-notes').value; saveReviews(); }
   });
   $('replay-step').addEventListener('click',()=>{stopReplay();stepReplay();});
   $('replay-play').addEventListener('click',()=>{
@@ -862,15 +876,17 @@ button:disabled{opacity:.45;cursor:default}
   $('replay-export').addEventListener('click',()=>{
     if(replayActive && !manualPlanLocked()) {refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
     const records=reviewRecords.filter(record=>record?.runId===boot.run.runId && record?.symbol===boot.run.symbol);
+    const workflowSummary=cslManualWorkflowSummary(records);
     const scored=records.filter(record=>record.netR!=null && Number.isFinite(Number(record.netR)));
     const sum=list=>list.reduce((total,record)=>total+Number(record.netR),0);
     const report={version:3,runId:boot.run.runId,symbol:boot.run.symbol,exportedAt:new Date().toISOString(),
       manualDayReviews:records.filter(record=>record.reviewType==='manual-day').length,
+      workflowSummary,
       summary:{reviewed:records.length,revealed:scored.length,automaticNetR:sum(scored),manualTakeNetR:sum(scored.filter(r=>r.decision==='Take')),skippedNetR:sum(scored.filter(r=>r.decision==='Skip')),unsureNetR:sum(scored.filter(r=>r.decision==='Unsure'))},
       manualPlans:records.filter(record=>record.manualPlan).length,
       confirmedManualEntries:records.filter(record=>record.manualEntry).length,
-      manualResults:{closed:records.filter(record=>record.manualExit).length,grossR:records.reduce((total,record)=>total+Number(record.manualExit?.grossR || 0),0)},
-      interpretation:'Automatic R totals use original automated outcomes. manualResults contains gross R from confirmed manual entries and user exits or replay TP/SL hits. Level checks start after the entry candle; both levels touched uses SL unless a gap opening establishes order. Fees, slippage, portfolio sizing and overlapping positions are not simulated.',reviews:records};
+      manualResults:{closed:workflowSummary.closed,grossR:workflowSummary.grossR},
+      interpretation:'Automatic R totals (including legacy manualTakeNetR) are reference backtest comparisons, not manual P&L. Waiting and skipped setups have no manual position or loss; only confirmed manual entries count. Decision history retains changes made after advancing. manualResults contains gross R from confirmed manual entries and user exits or replay TP/SL hits. Level checks start after the entry candle; both levels touched uses SL unless a gap opening establishes order. Fees, slippage, portfolio sizing and overlapping positions are not simulated.',reviews:records};
     const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
     const link=document.createElement('a'); link.href=url; link.download='csl-manual-replay-reviews.json'; document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
@@ -1522,7 +1538,7 @@ button:disabled{opacity:.45;cursor:default}
       if ([a,b].some(v => v == null || !Number.isFinite(Number(v)))) return;
       const el=document.createElement('div');
       el.className='trade-rect '+className;
-      if(manual && manualPlanDraft.error){el.style.borderStyle='dashed';el.style.opacity='.65';}
+      if(manual && (!currentReview()?.manualEntry || manualPlanDraft.error)){el.style.borderStyle='dashed';el.style.opacity='.65';}
       el.style.left=left+'px';
       el.style.width=width+'px';
       el.style.top=Math.min(Number(a),Number(b))+'px';
@@ -1542,16 +1558,16 @@ button:disabled{opacity:.45;cursor:default}
     rect(entryY,stopY,'risk'+(manual && signedMove<0?' current-loss':''));
     rect(entryY,targetY,'reward'+(manual && signedMove>0?' current-profit':''));
     const manualLabels=[];
-    manualLabels.push([addTradeLabel(left+4,entryY,'entry',(manual?'Planned entry ':'Entry ')+formatPrice(trade.Entry ?? trade.entry)),entryY,'#60a5fa']);
+    manualLabels.push([addTradeLabel(left+4,entryY,'entry',(manual && !currentReview()?.manualEntry?'Preview entry ':'Entry ')+formatPrice(trade.Entry ?? trade.entry)),entryY,'#60a5fa']);
     if(visibleManualExit)addTradeLabel(right+6,candles.priceToCoordinate(manualExit.price),'exit',(manualExit.reason || 'Manual close')+' '+formatPrice(manualExit.price)+' · '+manualExit.grossR.toFixed(2)+' R gross');
-    if (!visibleManualExit && exit && Number.isFinite(exitPrice))
+    if (!manual && !visibleManualExit && exit && Number.isFinite(exitPrice))
       addTradeLabel(Math.max(left+4,right-90),exitY,'exit',(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
 
     const boundaryX=right+6;
     if (Number.isFinite(target))
-      manualLabels.push([addTradeLabel(boundaryX,targetY,'tp',(manual?'Planned TP ':'Target ')+formatPrice(trade.Target ?? trade.target)),targetY,'#34d399']);
+      manualLabels.push([addTradeLabel(boundaryX,targetY,'tp',(manual && !currentReview()?.manualEntry?'Preview TP ':'Target ')+formatPrice(trade.Target ?? trade.target)),targetY,'#34d399']);
     if (Number.isFinite(stop))
-      manualLabels.push([addTradeLabel(boundaryX,stopY,'sl',(manual?'Planned SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)),stopY,'#fb7185']);
+      manualLabels.push([addTradeLabel(boundaryX,stopY,'sl',(manual && !currentReview()?.manualEntry?'Preview SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)),stopY,'#fb7185']);
     if(manual) {
       // Preserve price ordering, with leaders to the exact price when labels
       // need more room than the entry/stop separation provides.

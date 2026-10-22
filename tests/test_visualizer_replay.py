@@ -391,3 +391,44 @@ console.log(JSON.stringify(updated));
     assert len(result['planHistory'])==2
     assert result['manualPlan']['timeframe']=='5m'
     assert result['originalPlan']['timeframe']=='15m'
+
+
+def test_waiting_across_stop_has_no_manual_trade_or_loss_until_confirmation():
+    result=evaluate_manual('''
+const waiting={decision:'Wait',initialDecision:'Wait',side:'LONG',notes:'wait for confirmation',manualPlan:{entry:100,stop:90,target:120,entryTime:0}};
+const bars=[{time:0,open:100,high:105,low:95,close:101},{time:60,open:95,high:99,low:80,close:85}];
+const advanced=cslAdvanceManualPosition(waiting,bars,120,60,'later');
+const skipped=cslReviewDecision(advanced,'Skip',120,'skipped','setup invalidated before entry');
+console.log(JSON.stringify({advanced,skipped,waitingState:cslManualReviewState(advanced),skipState:cslManualReviewState(skipped),summary:cslManualWorkflowSummary([skipped])}));
+''')
+    assert 'manualEntry' not in result['advanced']
+    assert 'manualExit' not in result['advanced']
+    assert result['waitingState']=='Waiting / not entered'
+    assert result['skipState']=='Skipped'
+    assert result['skipped']['initialDecision']=='Wait'
+    assert result['skipped']['decisionHistory'][0]['previous']=='Wait'
+    assert result['summary']['skipped']==1
+    assert result['summary']['entered']==0
+    assert result['summary']['grossR']==0
+
+
+def test_confirmation_is_the_only_transition_from_wait_to_entered_and_keeps_decision_history():
+    result=evaluate_manual('''
+let record={side:'LONG',decision:'Wait',initialDecision:'Wait',manualPlan:{entry:100,stop:90,target:120,entryTime:60},revealedAt:'advanced',netR:-1};
+record=cslReviewDecision(record,'Skip',90,'skip');
+const entered=cslConfirmManualEntry(record,[{time:60,open:100,high:105,low:95,close:102}],120,60,'confirmed');
+const forbidden=cslReviewDecision(entered,'Skip',120,'skip entered');
+console.log(JSON.stringify({record,entered,forbidden,state:cslManualReviewState(entered),summary:cslManualWorkflowSummary([entered,{decision:'Take',netR:-9},{decision:'Skip',manualExit:{grossR:-99}}])}));
+''')
+    assert result['record']['decision']=='Skip'
+    assert 'manualEntry' not in result['record']
+    assert result['entered']['decision']=='Take'
+    assert result['entered']['initialDecision']=='Wait'
+    assert [event['decision'] for event in result['entered']['decisionHistory']]==['Skip','Take']
+    assert result['entered']['decisionHistory'][-1]['automaticOutcomeShown'] is True
+    assert result['state']=='Entered'
+    assert 'error' in result['forbidden']
+    assert result['summary']['entered']==1
+    assert result['summary']['open']==1
+    assert result['summary']['closed']==0
+    assert result['summary']['grossR']==0
