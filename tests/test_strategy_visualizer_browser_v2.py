@@ -418,3 +418,28 @@ function refreshReplay(){
     assert result['preservedCutoff']==1800
     assert [call['chart_timeframe'] for call in result['calls']]==['5m']
     assert not result['errors'].startswith('ERROR:')
+
+def test_review_comparison_api_returns_finite_gross_and_net_without_changing_run():
+    import json
+    from urllib.request import urlopen
+    from crypto_strategy_lab.strategy_visualizer_browser_v2 import StrategyVisualizerV2BrowserServer
+
+    class ComparisonModel(_Model):
+        def _trade_row(self,index):
+            return {'pair_gross_r': 2 if index==0 else float('nan'), 'pair_net_r':1.8 if index==0 else None}
+        def selected_trade_summary(self,index):
+            return {'Pair':index+1,'Side':'LONG','Entry Time':'2020-01-01T00:00:00Z'}
+
+    server=StrategyVisualizerV2BrowserServer(ComparisonModel())
+    try:
+        url=server.start()
+        with urlopen(url+'api/review-comparison',timeout=5) as response:
+            data=json.load(response)
+        assert data['trades'][0]['grossR']==2 and data['trades'][0]['netR']==1.8
+        assert data['trades'][1]['grossR'] is None and data['trades'][1]['netR'] is None
+        page=build_browser_visualizer_v2_html(ComparisonModel(),'report')
+        assert 'Show comparison results' in page and 'Review report' in page
+        assert 'td.textContent=String(value)' in page
+        assert 'comparisonReportViewedAt=viewedAt' in page
+    finally:
+        server.stop()

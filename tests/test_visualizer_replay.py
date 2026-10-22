@@ -432,3 +432,22 @@ console.log(JSON.stringify({record,entered,forbidden,state:cslManualReviewState(
     assert result['summary']['open']==1
     assert result['summary']['closed']==0
     assert result['summary']['grossR']==0
+
+def test_review_comparison_matches_identity_and_keeps_unentered_open_and_days_separate():
+    result=evaluate_manual('''
+const trades=[0,1,2,3,4].map(index=>({index,pair:index+1,grossR:-1,netR:-1.1}));
+const records=[{tradeIndex:0,pair:1,decision:'Wait'},
+ {tradeIndex:1,pair:2,manualEntry:{replayTime:500},manualExit:{grossR:2,method:'REPLAY_LEVEL_HIT',availableAt:400}},
+ {tradeIndex:2,pair:3,manualEntry:{}},
+ {tradeIndex:3,pair:999,manualEntry:{},manualExit:{grossR:99}},
+ {reviewType:'manual-day',day:0,manualEntry:{},manualExit:{grossR:3}}];
+console.log(JSON.stringify(cslReviewComparison(trades,records)));
+''')
+    assert result['before']==-2 and result['after']==2 and result['matched']==2
+    assert result['closed']==2
+    rows=result['rows']
+    assert rows[0]['after']==0 and rows[0]['status']=='Waiting · not entered'
+    assert rows[1]['change']==3 and rows[1]['note']=='Confirmed after stop/target candle'
+    assert rows[2]['after'] is None and rows[2]['change'] is None
+    assert rows[3]['status']=='Not reviewed' and rows[4]['after'] is None
+    assert rows[5]['before'] is None and rows[5]['after']==3 and rows[5]['change'] is None

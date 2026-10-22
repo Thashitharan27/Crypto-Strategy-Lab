@@ -223,6 +223,7 @@ button:disabled{opacity:.45;cursor:default}
       <select id="replay-speed" aria-label="Replay speed"><option value="1500">Slow</option><option value="750" selected>Normal</option><option value="300">Fast</option></select>
       <button id="replay-reveal">Reveal result</button><button id="replay-restart">Restart at entry</button>
       <button id="replay-export">Export reviews</button>
+      <button id="replay-report" aria-haspopup="dialog">Review report</button>
       <div class="manual-plan" role="group" aria-label="Manual trade plan">
         <strong>My plan</strong>
         <label>Entry <input id="manual-entry" type="number" step="any" min="0" aria-label="Manual entry price"></label><button data-pick-level="entry">Pick entry</button>
@@ -268,6 +269,17 @@ button:disabled{opacity:.45;cursor:default}
     <svg id="drawing-layer" width="100%" height="100%" aria-label="Chart drawings"></svg>
   </div><aside id="setup-panel" aria-label="FVG setup explanation" hidden></aside></div>
 </div>
+<dialog id="review-report-dialog" aria-labelledby="review-report-title" style="width:min(1200px,calc(100vw - 32px))">
+  <div class="dialog-header"><h2 id="review-report-title">Manual replay report</h2><button id="close-review-report" aria-label="Close review report">✕</button></div>
+  <div class="dialog-body">
+    <p>Opening this report reveals automatic outcomes. Your saved decisions and positions stay unchanged.</p>
+    <button id="show-review-results">Show comparison results</button>
+    <div id="review-report-content" hidden><p id="review-report-summary"></p>
+      <p>Before and After are gross R before fees and slippage, using each position’s original stop risk. Unentered setups contribute 0R; open positions are unscored. Automatic net R includes backtest costs and is separate. Manual day positions have no automatic comparison.</p>
+      <div style="overflow:auto"><table id="review-report-table" style="width:100%;border-spacing:12px 8px;text-align:left;white-space:nowrap"></table></div>
+    </div>
+  </div>
+</dialog>
 <dialog id="indicator-dialog" aria-labelledby="indicator-title">
   <div class="dialog-header"><h2 id="indicator-title">Indicators</h2><button id="close-indicators" aria-label="Close indicators">✕</button></div>
   <div class="dialog-body">
@@ -873,6 +885,35 @@ button:disabled{opacity:.45;cursor:default}
     if(!manualPlanLocked()) {refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
     initializeReplay();refreshReplay();
   }});
+  $('replay-report').addEventListener('click',()=>{
+    stopReplay();$('review-report-content').hidden=true;$('show-review-results').hidden=false;
+    $('review-report-dialog').showModal();
+  });
+  $('close-review-report').addEventListener('click',()=>$('review-report-dialog').close());
+  $('show-review-results').addEventListener('click',async()=>{
+    const button=$('show-review-results');button.disabled=true;button.textContent='Loading…';
+    try {
+      const data=await getJson(api('/api/review-comparison'));
+      const records=reviewRecords.filter(r=>r.runId===boot.run.runId && r.symbol===boot.run.symbol);
+      const viewedAt=new Date().toISOString();
+      for(const trade of data.trades)normalViewsSeen.add(JSON.stringify([boot.run.runId,boot.run.symbol,trade.pair ?? trade.index,trade.entryTime]));
+      for(const record of records){record.comparisonReportViewedAt=viewedAt;record.outcomePreviouslyShown=true;}
+      saveReviews();
+      const report=cslReviewComparison(data.trades,records),table=$('review-report-table');table.replaceChildren();
+      const addRow=(values,header=false)=>{
+        const tr=document.createElement('tr');
+        for(const value of values){const td=document.createElement(header?'th':'td');td.textContent=String(value);tr.appendChild(td);}
+        table.appendChild(tr);
+      };
+      const number=v=>v==null?'—':(v>0?'+':'')+v.toFixed(2)+'R';
+      addRow(['Setup','Auto entry (UTC)','Side','Before · gross','After · gross','Change','Status','Exit','Auto · net','Manual entry','Initial SL','Initial TP','Manual exit','Note'],true);
+      const price=v=>v==null?'—':v.toLocaleString(undefined,{maximumFractionDigits:4});
+      for(const row of report.rows)addRow([row.label,row.entryTime || '—',row.side || '—',number(row.before),number(row.after),number(row.change),row.status,row.exitMethod,number(row.net),price(row.entry),price(row.stop),price(row.target),price(row.exit),row.note]);
+      $('review-report-summary').textContent=report.rows.length+' setups · '+report.closed+' closed manual positions · Matched scored setups: '+report.matched+' · Before '+number(report.before)+' → After '+number(report.after)+' · Change '+number(report.after-report.before)+'. Unreviewed and open setups are excluded from these totals.';
+      $('review-report-content').hidden=false;button.hidden=true;
+    } catch(error){button.textContent='Retry comparison';$('review-report-summary').textContent=String(error);$('review-report-content').hidden=false;}
+    finally{button.disabled=false;if(!button.hidden)button.textContent='Show comparison results';}
+  });
   $('replay-export').addEventListener('click',()=>{
     if(replayActive && !manualPlanLocked()) {refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
     const records=reviewRecords.filter(record=>record?.runId===boot.run.runId && record?.symbol===boot.run.symbol);
@@ -2099,6 +2140,24 @@ class StrategyVisualizerV2BrowserServer:
                             build_browser_visualizer_v2_html(owner.model, owner.token).encode("utf-8"),
                             "text/html; charset=utf-8",
                         )
+                        return
+                    if parsed.path == prefix + "/api/review-comparison":
+                        with owner._lock:
+                            trades = []
+                            for index in range(owner.model.trade_count):
+                                row = owner.model._trade_row(index)
+                                summary = owner.model.selected_trade_summary(index)
+                                def finite_r(key):
+                                    import math
+                                    try:
+                                        value = float(row.get(key))
+                                        return value if math.isfinite(value) else None
+                                    except (TypeError, ValueError):
+                                        return None
+                                trades.append({"index": index, "pair": summary.get("Pair"),
+                                    "entryTime": summary.get("Entry Time"), "side": summary.get("Side"),
+                                    "grossR": finite_r("pair_gross_r"), "netR": finite_r("pair_net_r")})
+                        self._json({"trades": trades})
                         return
                     if parsed.path != prefix + "/api/payload":
                         self._json({"error":"not found"}, HTTPStatus.NOT_FOUND)

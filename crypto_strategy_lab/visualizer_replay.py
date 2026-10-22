@@ -1,6 +1,30 @@
 """Browser-only replay projection; completed-run evidence remains unchanged."""
 
 REPLAY_HELPERS = r"""
+function cslReviewComparison(trades, records) {
+  const finite=v=>v!=null && Number.isFinite(Number(v))?Number(v):null;
+  const result={rows:[],before:0,after:0,matched:0,closed:0};
+  const make=(trade,record,label)=>{
+    const entered=Boolean(record?.manualEntry),exit=entered?record.manualExit:null;
+    const before=finite(trade?.grossR),after=exit?finite(exit.grossR):entered?null:record?0:null;
+    const status=entered?(exit?(after==null?'Closed · unscored':after>1e-8?'Win':after< -1e-8?'Loss':'Break-even'):'Open'):!record?'Not reviewed':record.decision==='Skip'?'Skipped':record.decision==='Unsure'?'Unsure · not entered':'Waiting · not entered';
+    const retrospective=exit?.method==='REPLAY_LEVEL_HIT' && finite(exit.availableAt)!=null && finite(record.manualEntry.replayTime)!=null && Number(exit.availableAt)<=Number(record.manualEntry.replayTime);
+    const matched=Boolean(record && before!=null && after!=null);
+    if(matched){result.before+=before;result.after+=after;result.matched++;}
+    if(exit)result.closed++;
+    result.rows.push({label,entryTime:trade?.entryTime || record?.entryTime,side:trade?.side || record?.side,before,after,
+      change:matched?after-before:null,net:finite(trade?.netR),status,
+      entry:finite(record?.manualEntry?.entry),stop:finite(record?.manualEntry?.stop),target:finite(record?.manualEntry?.target),exit:finite(exit?.price),
+      exitMethod:exit?(exit.reason || 'Manual close'):'',
+      note:retrospective?'Confirmed after stop/target candle':!trade?'Manual day · no automatic comparison':''});
+  };
+  for(const trade of trades){
+    const record=records.find(r=>r.reviewType!=='manual-day' && r.tradeIndex===trade.index && String(r.pair)===String(trade.pair));
+    make(trade,record,'Trade '+(trade.index+1));
+  }
+  for(const record of records.filter(r=>r.reviewType==='manual-day'))make(null,record,'Day '+(record.day==null?'':new Date(record.day*1000).toISOString().slice(0,10)));
+  return result;
+}
 function cslSeriesTail(previous, next) {
   if(!previous.length)return {reset:false,points:next};
   if(next.length<previous.length || next[0]?.time!==previous[0]?.time || next[previous.length-1]?.time!==previous.at(-1)?.time)
