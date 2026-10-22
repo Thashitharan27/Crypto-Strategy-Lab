@@ -262,3 +262,37 @@ def test_sneaky_minimum_r_config_maps_to_native():
     cfg=ResearchRunConfig(execution=ExecutionConfig(sp_minimum_r_enabled=True,sd_minimum_r=2.))
     native=native_simulator_config(cfg.data,cfg.features,cfg.strategy,cfg.execution)
     assert native.sp_minimum_r_enabled and native.sd_minimum_r==2.
+
+@pytest.mark.parametrize('short',[False,True])
+def test_initial_body_percentage_is_adjustable_with_inclusive_boundary(short):
+    ts,o,h,l,c,atr=candles()
+    o[192]=11.5;c[192]=10.5;h[192]=12.5;l[192]=10. # Body 1 / range 2.5 = 40%.
+    if short:o,h,l,c=30-o,30-l,30-h,30-c
+    args=(ts,o,h,l,c,atr)
+    assert sneaky_setups(*args)[193] is None
+    assert sneaky_setups(*args,min_body_percent=50.)[193] is None
+    assert sneaky_setups(*args,min_body_percent=40.01)[193] is None
+    result=sneaky_setups(*args,min_body_percent=40.)
+    assert result[193] is not None
+    assert sneaky_setups(*args,min_body_percent=0.)[193] is not None
+    # Removing the percentage gate does not remove the ATR body gate.
+    assert sneaky_setups(*args,min_body_percent=0.,body_atr=2.)[193] is None
+    for end in (192,193,194,220,len(ts)):
+        assert sneaky_setups(*(x[:end] for x in args),min_body_percent=40.)==result[:end]
+
+
+@pytest.mark.parametrize('value',[-1,100.01,float('nan'),float('inf')])
+def test_invalid_initial_body_percentage_is_rejected(value):
+    with pytest.raises(ValueError,match='body percentage'):
+        validate_settings(.3,.5,3,1440,value)
+
+
+def test_body_percentage_round_trips_into_native_config():
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig,ExecutionConfig
+    from crypto_strategy_lab.research_adapters import native_simulator_config
+    from crypto_strategy_lab.gui.config_logic import DEFAULT_GUI_CONFIG,build_backtest_config
+    assert DEFAULT_GUI_CONFIG['sp_min_body_percent']==50.
+    cfg=ResearchRunConfig(execution=ExecutionConfig(sp_min_body_percent=35.))
+    cfg.validate()
+    assert native_simulator_config(cfg.data,cfg.features,cfg.strategy,cfg.execution).sp_min_body_percent==35.
+    assert build_backtest_config({'sp_min_body_percent':35.},require_paths=False).sp_min_body_percent==35.

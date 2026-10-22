@@ -46,11 +46,13 @@ def historical_levels(frame, setup_start, strength=2):
     return snapshot_levels({"high":float(prior.high.max()),"low":float(prior.low.min())},pivots,previous)
 
 
-def validate_settings(tolerance, body, wait, hold):
+def validate_settings(tolerance, body, wait, hold, min_body_percent=50.):
     if not np.isfinite(tolerance) or tolerance < 0:
         raise ValueError("Sneaky Pivot level tolerance must be finite and non-negative")
     if not np.isfinite(body) or body <= 0:
         raise ValueError("Sneaky Pivot minimum body ATR must be finite and positive")
+    if not np.isfinite(min_body_percent) or not 0<=min_body_percent<=100:
+        raise ValueError("Sneaky Pivot minimum body percentage must be finite and between 0 and 100")
     if hold < 15*(wait+2):
         raise ValueError("Sneaky Pivot holding limit must cover the confirmation and breakout window")
     for value, label, maximum in ((wait, "confirmation wait", 20), (hold, "holding minutes", 100000)):
@@ -59,14 +61,14 @@ def validate_settings(tolerance, body, wait, hold):
 
 
 def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3,
-                  body_atr=.5, wait=3, strength=2, buffer=.05, recent_swings=False):
+                  body_atr=.5, wait=3, strength=2, buffer=.05, recent_swings=False, min_body_percent=50.):
     """Signal at confirmation close; breakout order expires after the next bar.
 
     Previous complete UTC day and older confirmed pivots are frozen per setup.
     ATR of the preceding completed candle is frozen at setup initiation.
     Missing candles reset context; incomplete UTC days supply no range.
     """
-    validate_settings(tolerance, body_atr, wait, 1440)
+    validate_settings(tolerance, body_atr, wait, 1440, min_body_percent)
     from .supply_demand_retest import validate_settings as validate_zone
     validate_zone(strength, buffer, 1.)
     ts = pd.DatetimeIndex(pd.to_datetime(times, utc=True))
@@ -113,7 +115,7 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
         prior=days.get(previous)
         if prior and prior["count"]==96 and i and np.isfinite(atr[i-1]) and atr[i-1]>0:
             av=float(atr[i-1]);body=abs(c[i]-o[i])
-            if body>=body_atr*av and body>=.5*(h[i]-l[i]):
+            if body>=body_atr*av and body>=(min_body_percent/100)*(h[i]-l[i]):
                 side="LONG" if c[i]<o[i] else "SHORT";long=side=="LONG"
                 tests=[(prior["low"] if long else prior["high"],"Previous range low" if long else "Previous range high")]
                 if recent_swings:
@@ -155,7 +157,7 @@ class SneakyPivotMixin:
         self.sd_setups=sneaky_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
             tolerance=self.config.sp_level_tolerance_atr,body_atr=self.config.sp_body_atr,
             wait=self.config.sp_confirmation_bars,strength=self.config.sd_swing_strength,buffer=self.config.sd_stop_buffer_atr,
-            recent_swings=self.config.sp_recent_swings_enabled)
+            recent_swings=self.config.sp_recent_swings_enabled,min_body_percent=self.config.sp_min_body_percent)
 
     def _entry_decision(self,i,active_at_candle_start=False):
         decision=super()._entry_decision(i,active_at_candle_start)

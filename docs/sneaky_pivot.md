@@ -27,7 +27,7 @@ not a reproduction of its discretionary stock-market results.
   clears context; incomplete days cannot provide levels.
 - Initial red candle testing the previous-day low for long; initial green testing
   the previous-day high for
-  short. Body at least 50% of candle range and 0.5 prior ATR(14). Its extreme
+  short. Body at least the configured percentage of candle range (default 50%) and 0.5 prior ATR(14). Its extreme
   must touch/cross that day boundary and lie within 0.30 ATR of it. An older
   swing alone is not an entry-test level in the default mode.
 - Enable **Also test recent confirmed swing highs / lows** in Risk & Execution to add the latest confirmed high and low formed since the start of the previous UTC day. This includes today’s swings once confirmed. Each test uses the same body, proximity, reversal and breakout rules. Prior-day boundaries take priority if both levels qualify on the same initial candle; earliest initial test still wins. Recent levels are frozen at setup and saved with their pivot and confirmation times. This option is off by default. The older outside swing still anchors SL and the opposite previous-day boundary still supplies TP; invalid geometry is rejected.
@@ -54,9 +54,8 @@ not a reproduction of its discretionary stock-market results.
 
 ## Settings
 
-Risk & Execution exposes level tolerance, minimum body in ATR, confirmation
-wait, holding minutes, swing strength, the recent-swing option and the optional minimum-R filter. The shared stop-buffer setting places SL beyond the older swing. The body/range threshold
-stays 50%. Holding minutes must cover the entire confirmation/breakout window.
+Risk & Execution exposes level tolerance, minimum body in ATR and as a percentage of candle range, confirmation
+wait, holding minutes, swing strength, the recent-swing option and the optional minimum-R filter. The shared stop-buffer setting places SL beyond the older swing. The **Minimum body (% of candle range)** setting ranges from 0 to 100, defaulting to 50. Setting 0 disables only the percentage gate; the separate minimum body in ATR still applies. This controls the initial approach candle and does not change the reversal candle rule. Holding minutes must cover the entire confirmation/breakout window.
 Default entry selection disables daily scheduling and other confirmation
 presets. Existing explicit Entry/Veto rules and market permissions still apply.
 
