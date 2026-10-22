@@ -113,7 +113,7 @@ FEATURE_GROUPS = (
 
 EXECUTION_GROUPS = (
     ("Entry Fill", (
-        "sp_level_tolerance_atr", "sp_body_atr", "sp_confirmation_bars", "sp_hold_minutes", "ls_equal_tolerance_atr", "ls_displacement_atr", "ls_base_bars", "ls_max_wait_bars", "sd_swing_strength", "sd_stop_buffer_atr", "sd_minimum_r", "ema_reversal_min_entry_ema300_atr", "ema_reversal_min_gap_atr", "ema_reversal_target_r", "entry_timing_mode", "ema_920_trade_plan", "ema_320_flip_signals", "ema_320_exit_mode",
+        "sp_recent_swings_enabled", "sp_level_tolerance_atr", "sp_body_atr", "sp_confirmation_bars", "sp_hold_minutes", "ls_equal_tolerance_atr", "ls_displacement_atr", "ls_base_bars", "ls_max_wait_bars", "sd_swing_strength", "sd_stop_buffer_atr", "sd_minimum_r", "ema_reversal_min_entry_ema300_atr", "ema_reversal_min_gap_atr", "ema_reversal_target_r", "entry_timing_mode", "ema_920_trade_plan", "ema_320_flip_signals", "ema_320_exit_mode",
         "ema_cross_entry_confirmation_enabled", "ema_cross_entry_confirmation_r",
         "fvg_confirmation_enabled", "fvg_confirmation_minutes",
         "fvg_context_enabled", "fvg_context_timeframe_minutes",

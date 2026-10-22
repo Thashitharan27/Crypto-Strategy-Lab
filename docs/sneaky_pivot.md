@@ -5,9 +5,9 @@ candles and 1m execution data. Run a backtest and open the completed run in the
 visualizer; **Review setup** shows the initial level test, reversal, defended
 range, breakout trigger and fixed target. Trade replay uses the saved evidence.
 
-The chart shows four named horizontal levels: previous UTC-day high and low
+By default, the chart shows four named horizontal levels: previous UTC-day high and low
 (solid), older swing high and low (dashed). They are saved at setup time on new
-runs. Older runs reconstruct missing display context from the same warmup,
+runs. Swing lines begin at the candle that formed the high/low, extending right only after the pivot is confirmed. Previous-day boundaries begin at the following UTC day. Older runs reconstruct missing display context from the same warmup,
 strictly before setup, and label that source in setup details; saved outcomes
 and entry decisions are unchanged. Missing outer swings are explicitly marked
 unavailable instead of duplicating a range boundary. Reset price fits all known
@@ -29,7 +29,8 @@ not a reproduction of its discretionary stock-market results.
   the previous-day high for
   short. Body at least 50% of candle range and 0.5 prior ATR(14). Its extreme
   must touch/cross that day boundary and lie within 0.30 ATR of it. An older
-  swing alone is not an entry-test level.
+  swing alone is not an entry-test level in the default mode.
+- Enable **Also test recent confirmed swing highs / lows** in Risk & Execution to add the latest confirmed high and low formed since the start of the previous UTC day. This includes today’s swings once confirmed. Each test uses the same body, proximity, reversal and breakout rules. Prior-day boundaries take priority if both levels qualify on the same initial candle; earliest initial test still wins. Recent levels are frozen at setup and saved with their pivot and confirmation times. This option is off by default. The older outside swing still anchors SL and the opposite previous-day boundary still supplies TP; invalid geometry is rejected.
 - Wait for the first opposite-color candle within three subsequent bars.
   Cancel if the older swing stop is touched before entry, including ambiguous
   1m candles touching both the stop and breakout trigger.
@@ -46,7 +47,7 @@ not a reproduction of its discretionary stock-market results.
   No extra minimum-R filter applies. Size risk using the actual stop distance.
 - One open position; discard setups starting during an earlier position.
   If several initial candles confirm together, use the earliest one. Each
-  initial candle has one attempt. A later new candle may start a new setup.
+  initial candle has one executable attempt (day-boundary test wins a simultaneous recent-level test). A later new candle may start a new setup.
 - Close unresolved positions at the first execution bar at/after 1,440 minutes
   from the initial candle. Normal data-end closure still applies. Optional
   trailing, partial exits, break-even and TP extensions are disabled.
@@ -54,8 +55,7 @@ not a reproduction of its discretionary stock-market results.
 ## Settings
 
 Risk & Execution exposes level tolerance, minimum body in ATR, confirmation
-wait, holding minutes and swing strength. The shared zone stop-buffer setting
-does not apply to this strategy. The body/range threshold
+wait, holding minutes, swing strength and the recent-swing option. The shared stop-buffer setting places SL beyond the older swing. The body/range threshold
 stays 50%. Holding minutes must cover the entire confirmation/breakout window.
 Default entry selection disables daily scheduling and other confirmation
 presets. Existing explicit Entry/Veto rules and market permissions still apply.

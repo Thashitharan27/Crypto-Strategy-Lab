@@ -1080,16 +1080,20 @@ button:disabled{opacity:.45;cursor:default}
   function drawSneakyLevels(sd,xAt,height) {
     const right=Math.max(0,chartWrap.clientWidth-76);
     const start=Math.max(0,xAt(sd.opposingZone.pivotTime,0));
-    const colors={rangeHigh:'#fb7185',rangeLow:'#34d399',swingHigh:'#fbbf24',swingLow:'#60a5fa'};
+    const colors={rangeHigh:'#fb7185',rangeLow:'#34d399',swingHigh:'#fbbf24',swingLow:'#60a5fa',recentHigh:'#c4a5ff',recentLow:'#67e8f9'};
     let labelBottom=-2;
     const levels=(sd.levels || []).filter(level=>level.price!=null).slice().sort((a,b)=>Number(b.price)-Number(a.price));
     for(const level of levels) {
       if(level.price==null) continue;
+      const known=level.confirmedAt==null?null:Date.parse(level.confirmedAt)/1000;
+      if(replayActive && Number.isFinite(known) && known>replayCutoff)continue;
+      const origin=level.time==null?null:Date.parse(level.time)/1000;
+      const levelStart=Number.isFinite(origin)?Math.max(0,xAt(origin,0)):start;
       const y=candles.priceToCoordinate(Number(level.price));
       if(y==null || y<0 || y>height) continue;
       const color=colors[level.role] || '#cbd5e1';
       const line=document.createElement('div');line.className='fvg-level sneaky-level';
-      Object.assign(line.style,{left:start+'px',top:y+'px',width:Math.max(0,right-start)+'px',borderColor:color,borderTopStyle:level.role.startsWith('swing')?'dashed':'solid'});fvgLayer.appendChild(line);
+      Object.assign(line.style,{left:levelStart+'px',top:y+'px',width:Math.max(0,right-levelStart)+'px',borderColor:color,borderTopStyle:level.role.startsWith('swing') || level.role.startsWith('recent')?'dashed':'solid'});fvgLayer.appendChild(line);
       const label=document.createElement('span');label.className='fvg-note sneaky-level-label';
       label.textContent=level.label+' · '+formatPrice(level.price);
       const labelY=Math.min(height-25,Math.max(2,y-25,labelBottom+4));
@@ -1184,7 +1188,10 @@ button:disabled{opacity:.45;cursor:default}
       for(const level of payload.dayContext.levels || []) {
         const y=candles.priceToCoordinate(level.price);if(level.price==null || y==null || y<0 || y>height)continue;
         const line=document.createElement('div');line.className='fvg-level';
-        Object.assign(line.style,{left:'0px',top:y+'px',width:right+'px',borderColor:level.role.endsWith('High')?'#fb7185':'#60a5fa'});fvgLayer.appendChild(line);
+        const origin=level.time ?? payload.dayContext.day;
+        const originBar=(payload.candles || []).find(bar=>bar.time>=origin);
+        const left=originBar?Math.max(0,chart.timeScale().timeToCoordinate(originBar.time) ?? 0):0;
+        Object.assign(line.style,{left:left+'px',top:y+'px',width:Math.max(0,right-left)+'px',borderColor:level.role.endsWith('High')?'#fb7185':'#60a5fa'});fvgLayer.appendChild(line);
         const label=document.createElement('span');label.className='fvg-note';label.textContent=level.label+' · '+formatPrice(level.price);
         Object.assign(label.style,{left:'12px',top:Math.max(2,y-24)+'px'});fvgLayer.appendChild(label);
       }

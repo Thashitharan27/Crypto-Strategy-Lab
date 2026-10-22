@@ -446,3 +446,33 @@ def test_review_comparison_api_returns_finite_gross_and_net_without_changing_run
         assert 'cslComparisonReportHtml' in report_page
     finally:
         server.stop()
+
+def test_swing_lines_start_at_the_pivot_and_wait_for_confirmation():
+    import json
+    import shutil
+    import subprocess
+    import pytest
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for chart overlay verification')
+    html=build_browser_visualizer_v2_html(_Model(),'origins')
+    code=html[html.index('  function drawSneakyLevels('):html.index('  function formatPrice(')]
+    script='''
+let replayActive=true,replayCutoff=200;
+const chartWrap={clientWidth:1000},candles={priceToCoordinate:x=>x};
+let drawn=[];
+const fvgLayer={appendChild:x=>drawn.push(x)};
+const document={createElement:()=>({style:{},offsetHeight:10})};
+const formatPrice=String;
+const sd={opposingZone:{pivotTime:50},zone:{touchTime:180,top:125,bottom:90,bounceTime:190},signalTime:190,
+ levels:[{role:'swingHigh',label:'Older',price:100,time:'1970-01-01T00:01:40Z',confirmedAt:'1970-01-01T00:02:00Z'},
+ {role:'rangeHigh',label:'Day',price:110},
+ {role:'recentHigh',label:'Recent',price:120,time:'1970-01-01T00:02:30Z',confirmedAt:'1970-01-01T00:04:10Z'}]};
+'''+code+'''
+drawSneakyLevels(sd,time=>time,500);
+const before=drawn.filter(x=>x.className==='fvg-level sneaky-level').map(x=>x.style.left);
+drawn=[];replayCutoff=300;drawSneakyLevels(sd,time=>time,500);
+console.log(JSON.stringify({before,after:drawn.filter(x=>x.className==='fvg-level sneaky-level').map(x=>x.style.left)}));
+'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['before']==['50px','100px']
+    assert result['after']==['150px','50px','100px']

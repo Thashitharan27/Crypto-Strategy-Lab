@@ -991,6 +991,24 @@ class CompletedRunVisualizer:
                                      {"role":"swingHigh","label":"Older swing high","price":None},
                                      {"role":"swingLow","label":"Older swing low","price":None}]
                     value["levelsSource"]="Saved range only; older swing context unavailable"
+            if value.get("strategy")=="SNEAKY_PIVOT" and any(
+                level.get("price") is not None and level.get("role","").startswith("swing") and not level.get("time")
+                for level in value.get("levels",[])
+            ):
+                # Legacy saved prices stay authoritative. Recover only a matching
+                # pivot's origin; never replace the historical stop/entry geometry.
+                from .sneaky_pivot import historical_levels
+                try:
+                    start=_utc(value["setupStart"])
+                    history_start=_utc(self.seed.request.period_start)-strategy_warmup_period(self.seed.config)
+                    frame=self._market_frame(history_start,start,chart_timeframe="15m")
+                    recovered=historical_levels(frame,start,self.seed.config.execution.sd_swing_strength) or []
+                    for level in value["levels"]:
+                        match=next((p for p in recovered if p["role"]==level["role"] and p["price"]==level["price"]),None)
+                        if not level.get("time") and match and match.get("time"):
+                            level.update(time=match["time"],confirmedAt=match["confirmedAt"])
+                except (ValueError,KeyError,AttributeError,OSError):
+                    pass
             value["signalTime"]=_unix_seconds(_utc(value["signalTime"]))
             if value.get("sweepTime") is not None:
                 value["sweepTime"]=_unix_seconds(_utc(value["sweepTime"]))
