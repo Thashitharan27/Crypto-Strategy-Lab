@@ -408,6 +408,7 @@ class ExecutionConfig:
     sp_recent_swings_enabled: bool = False
     sp_level_tolerance_atr: float = 0.3
     sp_body_atr: float = 0.5
+    sp_min_body_percent: float = 50.0
     sp_confirmation_bars: int = 3
     sp_hold_minutes: int = 1440
     ls_max_wait_bars: int = 20
@@ -501,7 +502,7 @@ class ResearchRunConfig:
         from crypto_strategy_lab.supply_demand_retest import validate_settings
         validate_settings(self.execution.sd_swing_strength,self.execution.sd_stop_buffer_atr,self.execution.sd_minimum_r)
         from crypto_strategy_lab.sneaky_pivot import validate_settings as validate_sneaky
-        validate_sneaky(self.execution.sp_level_tolerance_atr,self.execution.sp_body_atr,self.execution.sp_confirmation_bars,self.execution.sp_hold_minutes)
+        validate_sneaky(self.execution.sp_level_tolerance_atr,self.execution.sp_body_atr,self.execution.sp_confirmation_bars,self.execution.sp_hold_minutes,self.execution.sp_min_body_percent)
         from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
         validate_liquidity(self.execution.ls_equal_tolerance_atr,self.execution.ls_displacement_atr,self.execution.ls_base_bars,self.execution.ls_max_wait_bars)
         if any(r.get("_strategy_direction_mode")=="SUPPLY_DEMAND_RETEST" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())) and self.data.strategy_timeframe_minutes!=60:
