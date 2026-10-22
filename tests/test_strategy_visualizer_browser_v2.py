@@ -363,3 +363,58 @@ def test_v2_partial_thread_start_cleanup():
             assert str(exc) == "thread start blocked"
     assert server._server is None
     server.stop()
+
+
+def test_switching_to_second_trade_keeps_chart_and_strategy_candles_separate():
+    import json
+    import shutil
+    import subprocess
+    import pytest
+    from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
+
+    node=shutil.which('node')
+    if not node:pytest.skip('Node is required for replay load regression')
+    html=build_browser_visualizer_v2_html(_Model(),'second-trade')
+    loader=html[html.index('  async function load('):html.index("  timeframeSelect.addEventListener('change'")]
+    script=REPLAY_HELPERS+r'''
+let replayActive=true,replayBusy=false,replayRevealed=false,replayAdvanced=false,dayMode=false;
+let currentTimeframe='5m',currentTrade=1,loadGeneration=0,manualPick=null;
+let sourcePayload=null,marketPayload=null,payload=null,replayChartSource=null,replayEntryTime=0,replayCutoff=0;
+const manualMarkets=new Map(),calls=[],controls={},diag={},chartWrap={style:{}},boot={run:{timeframe:'15m'}};
+const timeframeSelect={replaceChildren(){},add(){},value:'5m'};
+function Option(label,value){this.label=label;this.value=value;}
+function $(id){return controls[id] || (controls[id]={style:{}});}
+function stopReplay(){}
+function updateReplayControls(){}
+function api(path,query){return query;}
+async function getJson(query){
+  calls.push(query);
+  const step=query.chart_timeframe==='5m'?300:900;
+  return {chartTimeframe:query.chart_timeframe,run:{availableChartTimeframes:[{interval:'5m'},{interval:'15m'}]},
+    selectedTrade:{Side:'LONG',Entry:100,'Entry Time':'1970-01-01T00:25:00Z'},markers:[{kind:'selected-open',time:900}],
+    candles:Array.from({length:10},(_,i)=>({time:i*step,open:100,high:110,low:90,close:101})),overlays:[]};
+}
+function initializeReplay(){replayEntryTime=Date.parse(sourcePayload.selectedTrade['Entry Time'])/1000;replayCutoff=replayEntryTime;}
+function refreshReplay(){
+  payload=cslReplayView(sourcePayload,replayCutoff,900,replayEntryTime,false,true).view;
+  if(replayChartSource)payload=cslReplayChart(payload,replayChartSource,replayCutoff,300,replayEntryTime);
+}
+'''+loader+r'''
+(async()=>{
+  await load();
+  replayCutoff=1800;refreshReplay();
+  const secondTrade={strategyTimes:sourcePayload.candles.map(bar=>bar.time),chartTimes:payload.candles.map(bar=>bar.time),cutoff:replayCutoff};
+  const strategy=sourcePayload;calls.length=0;
+  await load(true);
+  console.log(JSON.stringify({secondTrade,preserved:sourcePayload===strategy,preservedCutoff:replayCutoff,calls,errors:diag.textContent}));
+})().catch(error=>{process.stderr.write(error.stack);process.exit(1);});
+'''
+    output=subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True)
+    result=json.loads(output.stdout)
+    assert result['secondTrade']['strategyTimes'][:3]==[0,900,1800]
+    assert 1500 in result['secondTrade']['chartTimes']  # Latest closed 5m entry must be drawable.
+    assert max(result['secondTrade']['chartTimes'])==1500
+    assert result['preserved'] is True
+    assert result['preservedCutoff']==1800
+    assert [call['chart_timeframe'] for call in result['calls']]==['5m']
+    assert not result['errors'].startswith('ERROR:')

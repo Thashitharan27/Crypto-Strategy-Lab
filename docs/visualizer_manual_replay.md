@@ -217,3 +217,8 @@ room for it on the right of the chart. If the new entry crosses SL/TP, the
 manual preview stays visible with dashed edges while you adjust those levels;
 confirmation remains blocked until the plan is valid. SL/TP are not moved
 automatically and an invalid manual preview never falls back to auto levels.
+
+When changing trades while replay is on another chart timeframe, the new trade
+loads its own strategy candles separately from the retained chart view. This
+prevents treating 5m candles as 15m candles and dropping the selected manual
+entry candle from the display after switching to trade 2 or later.
