@@ -1910,9 +1910,19 @@ button:disabled{opacity:.45;cursor:default}
         full_run:'1',
       }));
       if (generation !== loadGeneration) return;
+      // A new trade still needs strategy candles even when the retained chart
+      // timeframe differs. Never project chart candles with the strategy interval.
+      const strategyPayload=replayActive && !preserveReplay && requestedTimeframe!==boot.run.timeframe
+        ? await getJson(api('/api/payload',{trade_index:String(currentTrade),chart_timeframe:boot.run.timeframe,full_run:'1'}))
+        : nextPayload;
+      if (generation !== loadGeneration) return;
       manualMarkets.set(requestedTimeframe,nextPayload);
       if(preserveReplay && replayActive)replayChartSource=nextPayload;
-      else {sourcePayload=nextPayload;marketPayload=nextPayload;payload=nextPayload;replayChartSource=null;}
+      else {
+        sourcePayload=strategyPayload;marketPayload=strategyPayload;payload=strategyPayload;
+        replayChartSource=replayActive && requestedTimeframe!==boot.run.timeframe?nextPayload:null;
+        if(replayActive)manualMarkets.set(boot.run.timeframe,strategyPayload);
+      }
       timeframeSelect.replaceChildren();
       for (const item of (nextPayload.run.availableChartTimeframes || [{interval:boot.run.timeframe}])) {
         const label = item.interval + (item.interval === boot.run.timeframe ? ' (strategy)' : '') + (item.coverage === 'partial' ? ' (partial data)' : '');
