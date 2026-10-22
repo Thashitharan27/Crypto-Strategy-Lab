@@ -199,6 +199,15 @@ and Day replay. Switching pauses Play and keeps the exact strategy replay cutoff
 judgement, manual plan, and confirmed position. Chart candles and indicators are
 clipped to what was closed at that cutoff; an entry-only placeholder never exposes
 an unfinished candle's final high/low/close. Next candle and Play advance one candle of the selected chart timeframe.
-Manual execution checks remain on the strategy timeframe. Return to that timeframe to Move box or Pick
-exit at a specific candle; prices and open-position SL/TP can still be adjusted
-from another chart view. Timeframe loading failures retain the replay state.
+Move box selects a closed candle on the current chart timeframe. Enter at current
+candle sets the entry price to the latest closed candle close; choose Take, check
+SL/TP and confirm. The confirmed position records its candle timeframe/interval,
+which remains fixed for management when the chart view changes. Its candles load
+automatically when restoring a saved review. Pick exit uses that entry timeframe;
+break-even and Close work from any chart view once entry is confirmed. Timeframe loading failures retain the replay state.
+
+Manual entry confirmation rejects prices outside the selected candle's range and
+shows that range in the error. It does not silently move your entry to another
+candle. Break-even and Close require a confirmed, still-open position; disabled
+button tooltips explain the requirement. Automatic TP/SL detection continues to
+start after the confirmed entry candle and uses its recorded timeframe.

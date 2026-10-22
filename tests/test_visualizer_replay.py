@@ -361,3 +361,33 @@ console.log(JSON.stringify({first,second,exhausted:cslNextReplayCutoff(bars,8*in
     assert result['mid']==2*interval
     assert result['exhausted'] is None
     assert result['boundary'] is None
+
+
+def test_five_minute_entry_enables_management_before_strategy_candle_closes():
+    result=evaluate_manual('''
+const record={side:'LONG',decision:'Take',manualPlan:{entry:100,stop:90,target:120,entryTime:300,interval:300,timeframe:'5m'}};
+const bars=[{time:300,open:99,high:106,low:95,close:105},{time:600,open:105,high:108,low:101,close:107}];
+const confirmed=cslConfirmManualEntry(record,bars,600,300,'confirmed');
+const amended=cslAmendManualPosition(confirmed,100,120,600,'amended',105);
+const closed=cslCloseManualPosition(amended,bars,900,confirmed.manualEntry.interval,'closed');
+console.log(JSON.stringify({confirmed,amended,closed,early:cslConfirmManualEntry(record,bars,599,300,'early')}));
+''')
+    assert result['confirmed']['manualEntry']['interval']==300
+    assert result['confirmed']['manualEntry']['timeframe']=='5m'
+    assert result['amended']['positionHistory'][0]['stop']==100
+    assert result['closed']['manualExit']['price']==107
+    assert result['closed']['manualExit']['grossR']==.7
+    assert result['closed']['manualExit']['availableAt']==900
+    assert 'error' in result['early']
+
+
+def test_manual_plan_timeframe_changes_are_recorded_even_with_same_prices_and_time():
+    result=evaluate_manual('''
+const plan={entry:100,stop:90,target:120,entryTime:900,interval:900,timeframe:'15m'};
+const record=cslRecordManualPlan({},plan,plan,{recordedAt:'first'});
+const updated=cslRecordManualPlan(record,{...plan,interval:300,timeframe:'5m'},plan,{recordedAt:'changed'});
+console.log(JSON.stringify(updated));
+''')
+    assert len(result['planHistory'])==2
+    assert result['manualPlan']['timeframe']=='5m'
+    assert result['originalPlan']['timeframe']=='15m'
