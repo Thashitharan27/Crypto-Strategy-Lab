@@ -483,3 +483,32 @@ def test_previous_day_zones_default_to_enabled_narrow_and_start_at_origin():
     assert '<option value="1" selected>Narrow zones</option>' in html
     assert 'timeToCoordinate(zone.time)' in html
     assert 'timeToCoordinate(item.time)' in html
+
+def test_drag_target_updates_live_box_and_r_label_without_saving_preview():
+    import json
+    import shutil
+    import subprocess
+    import pytest
+    from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for live resize verification')
+    html=build_browser_visualizer_v2_html(_Model(),'live-r')
+    start=html.index("  chartWrap.addEventListener('pointermove',event=>{\n    if(!positionResize)")
+    end=html.index('  const finishPositionResize=',start)
+    code=html[start:end]
+    script=REPLAY_HELPERS+'''
+let handler,draws=0;
+const chartWrap={addEventListener:(name,fn)=>handler=fn,getBoundingClientRect:()=>({top:0})};
+const candles={coordinateToPrice:()=>130},handle={style:{}};
+const tradeBoxLayer={querySelector:()=>handle},sourcePayload={selectedTrade:{Side:'LONG'}};
+const manualPlanDraft={entry:100,stop:90,target:120};
+let positionResize={key:'target',price:null};
+const currentReview=()=>null,formatPrice=String,drawTradeBox=()=>draws++;
+'''+code+'''
+handler({clientY:50,preventDefault(){},stopImmediatePropagation(){}});
+console.log(JSON.stringify({draws,text:handle.textContent,draft:manualPlanDraft,preview:positionResize.price}));
+'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['draws']==1 and result['text']=='130 · 3.00R'
+    assert result['draft']['target']==120 and result['preview']==130
+    assert 'formatPrice(trade.Target ?? trade.target)+targetRText' in html
