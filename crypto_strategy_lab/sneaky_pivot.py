@@ -5,14 +5,24 @@ import pandas as pd
 MODE = "SNEAKY_PIVOT"
 
 
-def snapshot_levels(prior, pivots, previous):
+def snapshot_levels(prior, pivots, previous, recent_swings=False):
     """Four distinct roles; absent outside swings stay explicitly unavailable."""
     levels=[{"role":"rangeHigh","label":"Previous day high","price":prior["high"]},
             {"role":"rangeLow","label":"Previous day low","price":prior["low"]}]
     for side,role,label in (("SHORT","swingHigh","Older swing high"),("LONG","swingLow","Older swing low")):
         older=[p for p in pivots[side] if p["time"]<previous and
                (p["price"]>prior["high"] if side=="SHORT" else p["price"]<prior["low"])]
-        levels.append({"role":role,"label":label,"price":older[-1]["price"] if older else None})
+        pivot=older[-1] if older else None
+        levels.append({"role":role,"label":label,"price":pivot["price"] if pivot else None,
+                       "time":pivot["time"].isoformat() if pivot else None,
+                       "confirmedAt":pivot["confirmedAt"].isoformat() if pivot else None})
+    if recent_swings:
+        for side,role,label in (("SHORT","recentHigh","Recent swing high"),("LONG","recentLow","Recent swing low")):
+            recent=[p for p in pivots[side] if p["time"]>=previous]
+            if recent:
+                pivot=recent[-1]
+                levels.append({"role":role,"label":label,"price":pivot["price"],
+                               "time":pivot["time"].isoformat(),"confirmedAt":pivot["confirmedAt"].isoformat()})
     return levels
 
 
@@ -31,7 +41,8 @@ def historical_levels(frame, setup_start, strength=2):
         prices=frame[key].to_numpy(float)
         for j in range(strength,len(frame)-strength):
             if compare(prices[j],np.r_[prices[j-strength:j],prices[j+1:j+strength+1]]).all():
-                pivots[side].append({"time":times[j],"price":float(prices[j])})
+                pivots[side].append({"time":times[j],"price":float(prices[j]),
+                                     "confirmedAt":times[j+strength]+pd.Timedelta(minutes=15)})
     return snapshot_levels({"high":float(prior.high.max()),"low":float(prior.low.min())},pivots,previous)
 
 
@@ -48,7 +59,7 @@ def validate_settings(tolerance, body, wait, hold):
 
 
 def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3,
-                  body_atr=.5, wait=3, strength=2, buffer=.05):
+                  body_atr=.5, wait=3, strength=2, buffer=.05, recent_swings=False):
     """Signal at confirmation close; breakout order expires after the next bar.
 
     Previous complete UTC day and older confirmed pivots are frozen per setup.
@@ -104,17 +115,21 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
             av=float(atr[i-1]);body=abs(c[i]-o[i])
             if body>=body_atr*av and body>=.5*(h[i]-l[i]):
                 side="LONG" if c[i]<o[i] else "SHORT";long=side=="LONG"
-                level=prior["low"] if long else prior["high"]
+                tests=[(prior["low"] if long else prior["high"],"Previous range low" if long else "Previous range high")]
+                if recent_swings:
+                    recent=[p for p in pivots[side] if p["time"]>=previous]
+                    if recent and recent[-1]["price"]!=tests[0][0]:
+                        tests.append((recent[-1]["price"],"Recent swing low" if long else "Recent swing high"))
                 older=[p for p in pivots[side] if p["time"]<previous and (p["price"]<prior["low"] if long else p["price"]>prior["high"])]
-                # The day boundary is the entry test; the outside swing is
-                # exclusively the stop anchor. Never substitute one for the other.
-                touches=l[i]<=level<=h[i]
-                near=abs((l[i] if long else h[i])-level)<=tolerance*av
+                # Optional recent tests augment the day boundary. The older
+                # outside swing remains exclusively the stop anchor.
                 swing=older[-1] if older else None
                 intact=swing is not None and (l[i]>swing["price"] if long else h[i]<swing["price"])
-                if touches and near and intact:
-                    name="Previous range low" if long else "Previous range high"
-                    pending.append({"levels":snapshot_levels(prior,pivots,previous),"rangeStart":previous.isoformat(),"rangeEnd":day.isoformat(),"index":i,"side":side,"start":t.isoformat(),"level":float(level),"levelName":name,"atr":av,
+                for level,name in tests:
+                    touches=l[i]<=level<=h[i]
+                    near=abs((l[i] if long else h[i])-level)<=tolerance*av
+                    if not (touches and near and intact):continue
+                    pending.append({"levels":snapshot_levels(prior,pivots,previous,recent_swings),"rangeStart":previous.isoformat(),"rangeEnd":day.isoformat(),"index":i,"side":side,"start":t.isoformat(),"level":float(level),"levelName":name,"atr":av,
                         "low":float(l[i]),"high":float(h[i]),"rangeLow":prior["low"],"rangeHigh":prior["high"],
                         "stop":float(swing["price"])+(-1 if long else 1)*float(buffer)*av,
                         "stopSwingPrice":float(swing["price"]),"stopBufferPrice":float(buffer)*av,"stopSwingTime":swing["time"].isoformat()})
@@ -123,7 +138,7 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
         if j-strength>=segment:
             for side,prices,compare in (("LONG",l,np.less),("SHORT",h,np.greater)):
                 if compare(prices[j],np.r_[prices[j-strength:j],prices[j+1:i+1]]).all():
-                    pivots[side].append({"time":ts[j],"price":float(prices[j])})
+                    pivots[side].append({"time":ts[j],"price":float(prices[j]),"confirmedAt":t+step})
         d=days.setdefault(day,{"count":0,"high":-np.inf,"low":np.inf})
         d["count"]+=1;d["high"]=max(d["high"],float(h[i]));d["low"]=min(d["low"],float(l[i]))
         days={key:value for key,value in days.items() if key>=previous}
@@ -139,7 +154,8 @@ class SneakyPivotMixin:
             raise ValueError("Sneaky Pivot requires 15m strategy candles and 1m execution data")
         self.sd_setups=sneaky_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
             tolerance=self.config.sp_level_tolerance_atr,body_atr=self.config.sp_body_atr,
-            wait=self.config.sp_confirmation_bars,strength=self.config.sd_swing_strength,buffer=self.config.sd_stop_buffer_atr)
+            wait=self.config.sp_confirmation_bars,strength=self.config.sd_swing_strength,buffer=self.config.sd_stop_buffer_atr,
+            recent_swings=self.config.sp_recent_swings_enabled)
 
     def _entry_decision(self,i,active_at_candle_start=False):
         decision=super()._entry_decision(i,active_at_candle_start)

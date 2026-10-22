@@ -404,6 +404,7 @@ class ExecutionConfig:
     ls_equal_tolerance_atr: float = 0.15
     ls_displacement_atr: float = 1.0
     ls_base_bars: int = 3
+    sp_recent_swings_enabled: bool = False
     sp_level_tolerance_atr: float = 0.3
     sp_body_atr: float = 0.5
     sp_confirmation_bars: int = 3

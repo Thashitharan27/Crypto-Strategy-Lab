@@ -98,6 +98,14 @@ def test_legacy_visualizer_recovers_four_roles_without_rewriting_trade():
     assert result['levels']==expected
     assert result['levelsSource']=='Reconstructed historical context (legacy run)'
     assert model.trades.iloc[0].supply_demand_setup==raw
+    # Runs that saved four prices before origin timestamps were introduced
+    # recover line starts without changing those saved prices or the trade.
+    setup['levels']=[{k:v for k,v in level.items() if k not in ('time','confirmedAt')} for level in expected]
+    saved=json.dumps(setup)
+    model.trades.iloc[0,0]=saved
+    recovered=model.supply_demand_derivation(0)
+    assert recovered['levels']==expected
+    assert model.trades.iloc[0].supply_demand_setup==saved
 
 
 @pytest.mark.parametrize('change',['gap','weak','wrong_colour','break_level','no_prior_day'])
@@ -197,3 +205,34 @@ def test_stop_buffer_uses_frozen_setup_atr_and_preserves_swing_anchor(short,buff
     assert setup['stop']==pytest.approx(anchor+(1 if short else -1)*buffer*2)
     assert setup['stopBufferAtr']==buffer
     assert setup['stopBufferPrice']==pytest.approx(buffer*2)
+
+@pytest.mark.parametrize('short',[False,True])
+def test_optional_recent_swing_entries_have_causal_origins_and_preserve_stop_target(short):
+    ts,o,h,l,c,atr=candles()
+    l[170]=12
+    o[192]=14;c[192]=12.2;h[192]=14.1;l[192]=12
+    o[193]=12.3;c[193]=13;h[193]=13.2;l[193]=12.1
+    if short:o,h,l,c=30-o,30-l,30-h,30-c
+    args=(ts,o,h,l,c,atr)
+    assert sneaky_setups(*args)[193] is None
+    all_setups=sneaky_setups(*args,recent_swings=True)
+    setup=all_setups[193]
+    assert setup['levelName']==('Recent swing high' if short else 'Recent swing low')
+    assert setup['level']==(18 if short else 12)
+    assert setup['stop']==pytest.approx(25.05 if short else 4.95)
+    assert setup['target']==(10 if short else 20)
+    role='recentHigh' if short else 'recentLow'
+    level=next(x for x in setup['levels'] if x['role']==role)
+    assert pd.Timestamp(level['time'])==ts[170]
+    assert pd.Timestamp(level['confirmedAt'])==ts[173]
+    for end in (171,172,173,192,193,194,220,len(ts)):
+        assert sneaky_setups(*(x[:end] for x in args),recent_swings=True)==all_setups[:end]
+
+
+def test_recent_swing_option_round_trips_into_native_config():
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig, ExecutionConfig
+    from crypto_strategy_lab.research_adapters import native_simulator_config
+    from crypto_strategy_lab.gui.config_logic import DEFAULT_GUI_CONFIG
+    cfg=ResearchRunConfig(execution=ExecutionConfig(sp_recent_swings_enabled=True))
+    assert native_simulator_config(cfg.data,cfg.features,cfg.strategy,cfg.execution).sp_recent_swings_enabled
+    assert DEFAULT_GUI_CONFIG['sp_recent_swings_enabled'] is False

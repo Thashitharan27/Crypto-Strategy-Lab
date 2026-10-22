@@ -161,6 +161,9 @@ class RiskExecutionWorkspace(QWidget):
         self.account["ls_displacement_atr"].setRange(.01,100.)
         self.account["ls_base_bars"].setRange(1,20)
         self.account["ls_max_wait_bars"].setRange(1,500)
+        self.account["sp_recent_swings_enabled"].setText("Also test recent confirmed swing highs / lows")
+        self.account["sp_recent_swings_enabled"].setToolTip("Adds the latest confirmed high/low formed since the start of the previous UTC day. Previous-day levels remain active; SL stays beyond the older outside swing and TP stays at the opposite previous-day boundary.")
+        self.sd_card.add_control("sp_recent_swings_enabled", self.account["sp_recent_swings_enabled"])
         for name,label in (("sp_level_tolerance_atr","Distance to level (ATR)"),("sp_body_atr","Minimum initial body (ATR)"),("sp_confirmation_bars","Wait for reversal (candles)"),("sp_hold_minutes","Maximum hold from setup (minutes)")):
             self.sd_card.add_field(name,label,self.account[name])
         self.account["sp_level_tolerance_atr"].setRange(0.,10.)
@@ -874,7 +877,7 @@ class RiskExecutionWorkspace(QWidget):
         self.sd_card.set_row_visible("sd_minimum_r",not sneaky)
         self.sd_card.set_row_visible("sd_stop_buffer_atr",True)
         self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond swing (ATR)" if sneaky else "Stop buffer beyond zone (ATR)")
-        for name in ("sp_level_tolerance_atr","sp_body_atr","sp_confirmation_bars","sp_hold_minutes"):
+        for name in ("sp_recent_swings_enabled","sp_level_tolerance_atr","sp_body_atr","sp_confirmation_bars","sp_hold_minutes"):
             self.sd_card.set_row_visible(name,sneaky)
         self.sd_card.setVisible(supply_demand)
         self.ema_gap_card.setVisible(automatic_reversal)
@@ -932,7 +935,7 @@ class RiskExecutionWorkspace(QWidget):
 
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "SNEAKY_PIVOT":
-            self.summary_label.setText(f"All-day 15m Sneaky Pivot; test the previous complete UTC-day low/high. Initial body ≥50% of range and {execution.sp_body_atr:g} ATR; wick must touch the boundary within {execution.sp_level_tolerance_atr:g} ATR. First reversal within {execution.sp_confirmation_bars} candles; break its high/low during the next candle using 1m data. SL {execution.sd_stop_buffer_atr:g} ATR beyond the older confirmed swing low/high; skip if unavailable or breached. TP opposite prior-day boundary. Hold cap {execution.sp_hold_minutes} minutes from setup. One open trade; no session restriction or minimum-R filter.")
+            self.summary_label.setText(f"All-day 15m Sneaky Pivot; test the previous complete UTC-day low/high{' plus the latest recent confirmed swings' if execution.sp_recent_swings_enabled else ''}. Initial body ≥50% of range and {execution.sp_body_atr:g} ATR; wick must touch the selected level within {execution.sp_level_tolerance_atr:g} ATR. First reversal within {execution.sp_confirmation_bars} candles; break its high/low during the next candle using 1m data. SL {execution.sd_stop_buffer_atr:g} ATR beyond the older confirmed swing low/high; skip if unavailable or breached. TP opposite prior-day boundary. Hold cap {execution.sp_hold_minutes} minutes from setup. One open trade; no session restriction or minimum-R filter.")
             return
         if self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST":
             self.summary_label.setText(

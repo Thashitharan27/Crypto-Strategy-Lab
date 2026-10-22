@@ -62,13 +62,13 @@ function cslDaySource(source, day, interval, side='LONG', strength=2) {
     const high=Math.max(...prior.map(bar=>bar.high)), low=Math.min(...prior.map(bar=>bar.low));
     levels.push({role:'rangeHigh',label:'Previous day high',price:high},{role:'rangeLow',label:'Previous day low',price:low});
     for(const [role,key,bound,greater] of [['swingHigh','high',high,true],['swingLow','low',low,false]]) {
-      let price=null;
+      let price=null,time=null,confirmedAt=null;
       for(let i=strength;i<history.length-strength;i++) {
         const bar=history[i];if(bar.time>=previous)break;
         const value=bar[key];if(!(greater?value>bound:value<bound))continue;
-        if(history.slice(i-strength,i+strength+1).every((other,j)=>j===strength || (greater?value>other[key]:value<other[key])))price=value;
+        if(history.slice(i-strength,i+strength+1).every((other,j)=>j===strength || (greater?value>other[key]:value<other[key]))){price=value;time=bar.time;confirmedAt=history[i+strength].time+interval;}
       }
-      levels.push({role,label:greater?'Older swing high':'Older swing low',price});
+      levels.push({role,label:greater?'Older swing high':'Older swing low',price,time,confirmedAt});
     }
   }
   const first=all.find(bar=>bar.time>=day && bar.time<day+86400);
