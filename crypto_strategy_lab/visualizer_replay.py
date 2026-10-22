@@ -77,6 +77,26 @@ function cslRecordManualPlan(record, plan, original, context) {
   return {...record,originalPlan:record.originalPlan || {...original},manualPlan:{...plan},
     planHistory:[...(record.planHistory || []),revision]};
 }
+function cslReviewDecision(record, decision, cutoff, recordedAt, notes=record.notes || '') {
+  if(!['Wait','Skip','Unsure','Take'].includes(decision))return {error:'Unknown review choice.'};
+  if(record.manualEntry && decision!=='Take')return {error:'This position is already entered. Close it to finish the review.'};
+  if(record.decision===decision && record.notes===notes)return record;
+  return {...record,initialDecision:record.initialDecision || record.decision || decision,decision,notes,
+    decisionHistory:[...(record.decisionHistory || []),{previous:record.decision || null,decision,replayTime:cutoff,recordedAt,notes,
+      futureSeen:Boolean(record.revealedAt),automaticOutcomeShown:record.netR!=null,outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)}]};
+}
+function cslManualReviewState(record) {
+  if(record?.manualEntry)return record.manualExit?'Closed':'Entered';
+  return record?.decision==='Skip'?'Skipped':record?.decision==='Unsure'?'Unsure / not entered':'Waiting / not entered';
+}
+function cslManualWorkflowSummary(records) {
+  const entered=records.filter(record=>record.manualEntry),closed=entered.filter(record=>record.manualExit);
+  return {waiting:records.filter(record=>!record.manualEntry && !['Skip','Unsure'].includes(record.decision)).length,
+    skipped:records.filter(record=>!record.manualEntry && record.decision==='Skip').length,
+    unsure:records.filter(record=>!record.manualEntry && record.decision==='Unsure').length,
+    entered:entered.length,open:entered.length-closed.length,closed:closed.length,
+    grossR:closed.reduce((total,record)=>total+Number(record.manualExit.grossR || 0),0)};
+}
 function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
   if(record.manualEntry) return {error:'Manual entry is already confirmed.'};
   const plan=record.manualPlan;
@@ -84,7 +104,7 @@ function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
   const bar=bars.find(item=>item.time===plan.entryTime && item.time+interval<=cutoff);
   if(!bar) return {error:'Advance until the selected entry candle has closed.'};
   if(!(bar.low<=plan.entry && plan.entry<=bar.high)) return {error:'Entry not confirmed: '+plan.entry+' is outside the selected candle range '+bar.low+'–'+bar.high+'. Use Move box or Enter at current candle.'};
-  return {...record,manualEntry:{...plan,interval,candleTime:bar.time,confirmedAt:recordedAt,
+  return {...cslReviewDecision(record,'Take',cutoff,recordedAt),manualEntry:{...plan,interval,candleTime:bar.time,confirmedAt:recordedAt,
     replayTime:cutoff,candle:{...bar},confirmation:'User confirmed; candle range includes price. Intrabar fill time is unknown.',
     planSavedAt:record.planHistory?.at(-1)?.recordedAt,
     futureSeen:Boolean(record.revealedAt) || Boolean(record.planHistory?.some(revision=>revision.futureSeen)),automaticOutcomeShown:record.netR!=null,
