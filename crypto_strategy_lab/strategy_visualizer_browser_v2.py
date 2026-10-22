@@ -584,7 +584,7 @@ button:disabled{opacity:.45;cursor:default}
   }
   function refreshManualPlan() {
     if(manualPlanLocked() && manualPick!=='exit' || manualPick==='exit' && manualCloseLocked()) {manualPick=null;chartWrap.style.cursor='';}
-    manualPlanDraft=cslManualPlan($('manual-entry').value,$('manual-stop').value,$('manual-target').value,sourcePayload?.selectedTrade?.Side);
+    manualPlanDraft={...cslManualPlan($('manual-entry').value,$('manual-stop').value,$('manual-target').value,sourcePayload?.selectedTrade?.Side),entry:Number($('manual-entry').value),stop:Number($('manual-stop').value),target:Number($('manual-target').value)};
     manualPlanDraft.entryTime=manualEntryTime;manualPlanDraft.interval=manualEntryInterval || replayInterval;manualPlanDraft.timeframe=manualEntryTimeframe || boot.run.timeframe;
     if(currentReview()?.manualEntry){const levels=cslManualLevels(currentReview(),replayCutoff);manualPlanDraft={...levels,entry:currentReview().manualEntry.entry,entryTime:manualEntryTime};for(const key of ['entry','stop','target'])$('manual-'+key).value=manualPlanDraft[key];}
     const saved=currentReview()?.manualPlan;
@@ -813,7 +813,7 @@ button:disabled{opacity:.45;cursor:default}
     const first=dayMode?replayDay:automaticPlan().entryTime;
     if(!bar || bar.time<first){manualEntryMessage='Advance until a chart candle at or after entry has closed.';refreshManualPlan();return;}
     manualEntryTime=bar.time;manualEntryInterval=interval;manualEntryTimeframe=currentTimeframe;
-    $('manual-entry').value=bar.close;manualEntryMessage='Current closed candle selected. Check SL/TP, then confirm entry.';refreshManualPlan();redrawOverlays();
+    $('manual-entry').value=bar.close;manualEntryMessage='Current closed candle selected. Check SL/TP, then confirm entry.';refreshManualPlan();showManualBox();
   });
   $('manual-confirm').addEventListener('click',()=>{
     if(manualPlanLocked() || currentReview()?.decision!=='Take') return;
@@ -934,9 +934,9 @@ button:disabled{opacity:.45;cursor:default}
     }
     const trade=payload?.selectedTrade || {};
     for(const level of payload?.dayContext?.levels || [])if(level.price!=null && Number.isFinite(Number(level.price))){low=Math.min(low,Number(level.price));high=Math.max(high,Number(level.price));}
-    if(replayActive && manualPlanDraft && !manualPlanDraft.error) {
+    if(replayActive && manualPlanDraft) {
       for(const price of [manualPlanDraft.entry,manualPlanDraft.stop,manualPlanDraft.target]) {
-        low=Math.min(low,price);high=Math.max(high,price);
+        if(Number.isFinite(price) && price>0){low=Math.min(low,price);high=Math.max(high,price);}
       }
     }
     for (const value of [
@@ -1473,15 +1473,28 @@ button:disabled{opacity:.45;cursor:default}
     }
   }
 
+  function showManualBox() {
+    if(chart && payload && manualPlanDraft){
+      const time=displayCandleTime(manualPlanDraft.entryTime),index=(payload.candles || []).findIndex(bar=>bar.time===time);
+      const range=chart.timeScale().getVisibleLogicalRange();
+      if(range && index>=0){
+        const padding=Math.max(12,Math.ceil(72/chart.timeScale().options().barSpacing));
+        const shift=index<range.from?index-range.from-2:Math.max(0,index+padding-range.to);
+        if(shift)chart.timeScale().setVisibleLogicalRange({from:range.from+shift,to:range.to+shift});
+      }
+    }
+    resetPriceScale();redrawOverlays();
+  }
+
   function drawTradeBox() {
     tradeBoxLayer.replaceChildren();
     if (!payload || !chart || !candles) return;
-    const manual=replayActive && manualPlanDraft && !manualPlanDraft.error;
+    const manual=Boolean(replayActive && manualPlanDraft);
     const trade=manual ? {...payload.selectedTrade,Entry:manualPlanDraft.entry,Stop:manualPlanDraft.stop,Target:manualPlanDraft.target} : (payload.selectedTrade || {});
     const markers=payload.markers || [];
     const open=markers.find(m => String(m.kind)==='selected-open');
     const exit=markers.find(m => String(m.kind)==='exit');
-    if (!open) return;
+    if (!open && !manual) return;
 
     const entry=Number(trade.Entry ?? trade.entry);
     const stop=Number(trade.Stop ?? trade.stop);
@@ -1494,7 +1507,7 @@ button:disabled{opacity:.45;cursor:default}
     const lastVisible=(payload.candles || []).at(-1);
     const manualEnd=visibleManualExit?manualExit.candleTime:lastVisible?.time;
     const endX=manual?chart.timeScale().timeToCoordinate(displayCandleTime(manualEnd)):null;
-    const x2=manual && endX!=null?Math.max(Number(x1)+8,Number(endX)+chart.timeScale().options().barSpacing/2):(replayActive && !replayOutcomeVisible)?Number(x1)+100:chart.timeScale().timeToCoordinate(endTime);
+    const x2=manual && endX!=null?Math.max(Number(x1)+72,Number(endX)+chart.timeScale().options().barSpacing/2):(replayActive && !replayOutcomeVisible)?Number(x1)+100:chart.timeScale().timeToCoordinate(endTime);
     const entryY=candles.priceToCoordinate(entry);
     const stopY=candles.priceToCoordinate(stop);
     const targetY=candles.priceToCoordinate(target);
@@ -1503,12 +1516,13 @@ button:disabled{opacity:.45;cursor:default}
 
     const left=Math.min(Number(x1),Number(x2));
     const right=Math.max(Number(x1),Number(x2));
-    const width=Math.max(manual?8:48,right-left);
+    const width=Math.max(manual?72:48,right-left);
 
     function rect(a,b,className){
       if ([a,b].some(v => v == null || !Number.isFinite(Number(v)))) return;
       const el=document.createElement('div');
       el.className='trade-rect '+className;
+      if(manual && manualPlanDraft.error){el.style.borderStyle='dashed';el.style.opacity='.65';}
       el.style.left=left+'px';
       el.style.width=width+'px';
       el.style.top=Math.min(Number(a),Number(b))+'px';
@@ -1613,7 +1627,7 @@ button:disabled{opacity:.45;cursor:default}
         if(!closed || !Number.isFinite(time) || time<first || !(payload.candles || []).some(bar=>bar.time===time)) {
           manualEntryMessage=dayMode?'Choose a closed candle in this UTC day.':'Choose a closed candle at or after the automatic entry.';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();return;
         }
-        manualEntryTime=time;manualEntryInterval=chartInterval();manualEntryTimeframe=currentTimeframe;manualEntryMessage='';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();resetPriceScale();return;
+        manualEntryTime=time;manualEntryInterval=chartInterval();manualEntryTimeframe=currentTimeframe;manualEntryMessage='';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();showManualBox();return;
       }
       const price=candles.coordinateToPrice(event.point.y);
       if(price==null || !Number.isFinite(price) || price<=0) return;

@@ -211,3 +211,9 @@ shows that range in the error. It does not silently move your entry to another
 candle. Break-even and Close require a confirmed, still-open position; disabled
 button tooltips explain the requirement. Automatic TP/SL detection continues to
 start after the confirmed entry candle and uses its recorded timeframe.
+
+Selecting the current entry candle keeps a minimum-width trade box and makes
+room for it on the right of the chart. If the new entry crosses SL/TP, the
+manual preview stays visible with dashed edges while you adjust those levels;
+confirmation remains blocked until the plan is valid. SL/TP are not moved
+automatically and an invalid manual preview never falls back to auto levels.
