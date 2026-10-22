@@ -135,7 +135,7 @@ def test_settings_round_trip_and_requirements():
 
 
 @pytest.mark.parametrize('short',[False,True])
-@pytest.mark.parametrize('event',['fill','no_break','missing','stop_first','ambiguous_stop','gap_stop'])
+@pytest.mark.parametrize('event',['fill','no_break','missing','stop_first','ambiguous_stop','gap_stop','minimum_r'])
 def test_native_breakout_fill_saved_evidence_and_timeout(short,event):
     from crypto_strategy_lab.config import BacktestConfig
     from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
@@ -165,13 +165,14 @@ def test_native_breakout_fill_saved_evidence_and_timeout(short,event):
         strategy_profiles={k:StrategyProfile(**asdict(p)) for k,p in profiles.items()},
         use_intrabar_data=True,enable_support_resistance_analysis=False,
         market_regime_method='ASSET_RETURN',enable_trade_telemetry=False,sp_hold_minutes=75)
+    if event=='minimum_r':config=replace(config,sp_minimum_r_enabled=True,sd_minimum_r=100.)
     engine=RuleAwareDataLakeProductionBacktestEngine(frame,config,intrabar_data=minute)
     engine.market_regime_values[:]='SIDEWAYS'
     if event=='missing':
         with pytest.raises(ValueError,match='complete 1m'):engine.run()
         return
     trades=engine.run()
-    if event in ('no_break','stop_first','ambiguous_stop'):
+    if event in ('no_break','stop_first','ambiguous_stop','minimum_r'):
         assert len(trades)==0
         return
     assert len(trades)>0
@@ -236,3 +237,28 @@ def test_recent_swing_option_round_trips_into_native_config():
     cfg=ResearchRunConfig(execution=ExecutionConfig(sp_recent_swings_enabled=True))
     assert native_simulator_config(cfg.data,cfg.features,cfg.strategy,cfg.execution).sp_recent_swings_enabled
     assert DEFAULT_GUI_CONFIG['sp_recent_swings_enabled'] is False
+
+@pytest.mark.parametrize('side',['LONG','SHORT'])
+@pytest.mark.parametrize('enabled,minimum,slippage,passed',[(False,100,0,True),(True,.5,0,True),(True,1,0,False),(True,.5,.01,False)])
+def test_sneaky_minimum_r_uses_actual_slippage_adjusted_breakout(side,enabled,minimum,slippage,passed):
+    from types import SimpleNamespace
+    from crypto_strategy_lab.sneaky_pivot import SneakyPivotMixin
+    class Engine(SneakyPivotMixin):
+        signal_strategy_mode=MODE
+        _sneaky_fill=100.
+        def _effective_trade_direction(self,i):return side
+    engine=Engine()
+    engine.config=SimpleNamespace(sp_minimum_r_enabled=enabled,sd_minimum_r=minimum,slippage=slippage)
+    engine.sd_setups=[{'side':side,'stop':90 if side=='LONG' else 110,'target':105 if side=='LONG' else 95,'setupAtr':1}]
+    plan=engine._sr_stop_plan(0,1)
+    assert plan['passed']==passed
+    if not passed:assert plan['reason']=='SNEAKY_MINIMUM_R_REJECTED'
+    else:assert plan['stop_price']==engine.sd_setups[0]['stop']
+
+
+def test_sneaky_minimum_r_config_maps_to_native():
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig,ExecutionConfig
+    from crypto_strategy_lab.research_adapters import native_simulator_config
+    cfg=ResearchRunConfig(execution=ExecutionConfig(sp_minimum_r_enabled=True,sd_minimum_r=2.))
+    native=native_simulator_config(cfg.data,cfg.features,cfg.strategy,cfg.execution)
+    assert native.sp_minimum_r_enabled and native.sd_minimum_r==2.
