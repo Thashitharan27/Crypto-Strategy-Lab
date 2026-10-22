@@ -44,7 +44,7 @@ not a reproduction of its discretionary stock-market results.
   the initial test; do not replace it with a later swing or candle low/high.
   TP is the opposite
   previous-day boundary. Reject wrong-side targets/stops and direction flips.
-  No extra minimum-R filter applies. Size risk using the actual stop distance.
+  Optional **Require minimum reward / risk** rejects a trade if its executable reward/risk is below **Minimum reward / risk**. This switch defaults off; the threshold defaults to 1R. For example, 2R requires target distance at least twice stop distance. Check this at the actual breakout fill including configured slippage, not the initial signal price; do not move SL/TP to meet it. This is gross price R before fees/funding. Size risk using the actual stop distance.
 - One open position; discard setups starting during an earlier position.
   If several initial candles confirm together, use the earliest one. Each
   initial candle has one executable attempt (day-boundary test wins a simultaneous recent-level test). A later new candle may start a new setup.
@@ -55,7 +55,7 @@ not a reproduction of its discretionary stock-market results.
 ## Settings
 
 Risk & Execution exposes level tolerance, minimum body in ATR, confirmation
-wait, holding minutes, swing strength and the recent-swing option. The shared stop-buffer setting places SL beyond the older swing. The body/range threshold
+wait, holding minutes, swing strength, the recent-swing option and the optional minimum-R filter. The shared stop-buffer setting places SL beyond the older swing. The body/range threshold
 stays 50%. Holding minutes must cover the entire confirmation/breakout window.
 Default entry selection disables daily scheduling and other confirmation
 presets. Existing explicit Entry/Veto rules and market permissions still apply.

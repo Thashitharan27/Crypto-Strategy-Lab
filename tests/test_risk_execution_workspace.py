@@ -60,6 +60,14 @@ def test_sneaky_pivot_selection_and_settings_round_trip():
         assert config.execution.sd_stop_buffer_atr==pytest.approx(.15)
         assert 'All-day 15m Sneaky Pivot' in workspace.summary_label.text()
         assert window.execution_form.widgets['sd_minimum_r'].isHidden()
+        window.execution_form.widgets['sp_minimum_r_enabled'].setChecked(True)
+        app.processEvents()
+        assert not window.execution_form.widgets['sd_minimum_r'].isHidden()
+        window.execution_form.widgets['sd_minimum_r'].setValue(2.)
+        filtered=window.build_config()
+        assert filtered.execution.sp_minimum_r_enabled
+        assert filtered.execution.sd_minimum_r==2.
+        assert '2.0R' in workspace.summary_label.text()
     finally:
         window.close()
 

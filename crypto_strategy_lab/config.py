@@ -82,6 +82,7 @@ class BacktestConfig:
     ls_equal_tolerance_atr: float = 0.15
     ls_displacement_atr: float = 1.0
     ls_base_bars: int = 3
+    sp_minimum_r_enabled: bool = False
     sp_recent_swings_enabled: bool = False
     sp_level_tolerance_atr: float = 0.3
     sp_body_atr: float = 0.5

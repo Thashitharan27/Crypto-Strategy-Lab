@@ -243,5 +243,9 @@ class SneakyPivotMixin:
         entry=self._expected_entry_price(i,execution_i,side);stop=setup["stop"]
         sign=1 if side=="LONG" else -1;risk=sign*(entry-stop);reward=sign*(setup["target"]-entry)
         if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0:return reject
+        # The breakout fill can differ from the signal or next-bar open.
+        # Apply the threshold only once that executable fill is known.
+        if self.config.sp_minimum_r_enabled and getattr(self,"_sneaky_fill",None) is not None and reward/risk<self.config.sd_minimum_r:
+            return {**reject,"reason":"SNEAKY_MINIMUM_R_REJECTED"}
         return {"passed":True,"applied":True,"reason":"SNEAKY_OLDER_SWING_STOP","distance":risk,"stop_price":stop,
                 "boundary_price":stop,"level_price":setup["target"],"distance_atr":risk/setup["setupAtr"],"timeframe_minutes":15}
