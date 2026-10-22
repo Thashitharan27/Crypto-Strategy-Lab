@@ -1526,7 +1526,8 @@ button:disabled{opacity:.45;cursor:default}
     tradeBoxLayer.replaceChildren();
     if (!payload || !chart || !candles) return;
     const manual=Boolean(replayActive && manualPlanDraft);
-    const trade=manual ? {...payload.selectedTrade,Entry:manualPlanDraft.entry,Stop:manualPlanDraft.stop,Target:manualPlanDraft.target} : (payload.selectedTrade || {});
+    const shownPlan=manual && positionResize?.price!=null?{...manualPlanDraft,[positionResize.key]:positionResize.price}:manualPlanDraft;
+    const trade=manual ? {...payload.selectedTrade,Entry:shownPlan.entry,Stop:shownPlan.stop,Target:shownPlan.target} : (payload.selectedTrade || {});
     const markers=payload.markers || [];
     const open=markers.find(m => String(m.kind)==='selected-open');
     const exit=markers.find(m => String(m.kind)==='exit');
@@ -1584,8 +1585,10 @@ button:disabled{opacity:.45;cursor:default}
       addTradeLabel(Math.max(left+4,right-90),exitY,'exit',(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
 
     const boundaryX=right+6;
+    const targetR=cslTargetR({entry,stop,target},trade.Side,manual?currentReview()?.manualEntry:null);
+    const targetRText=targetR==null?'':' · '+targetR.toFixed(2)+'R';
     if (Number.isFinite(target))
-      manualLabels.push([addTradeLabel(boundaryX,targetY,'tp',(manual && !currentReview()?.manualEntry?'Preview TP ':'Target ')+formatPrice(trade.Target ?? trade.target)),targetY,'#34d399']);
+      manualLabels.push([addTradeLabel(boundaryX,targetY,'tp',(manual && !currentReview()?.manualEntry?'Preview TP ':'Target ')+formatPrice(trade.Target ?? trade.target)+targetRText),targetY,'#34d399']);
     if (Number.isFinite(stop))
       manualLabels.push([addTradeLabel(boundaryX,stopY,'sl',(manual && !currentReview()?.manualEntry?'Preview SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)),stopY,'#fb7185']);
     if(manual) {
@@ -1838,8 +1841,9 @@ button:disabled{opacity:.45;cursor:default}
     const y=event.clientY-chartWrap.getBoundingClientRect().top;
     const price=candles.coordinateToPrice(y);if(!Number.isFinite(price) || price<=0)return;
     positionResize.price=price;
+    drawTradeBox();
     const handle=tradeBoxLayer.querySelector('[data-position-level="'+positionResize.key+'"]');
-    if(handle){handle.style.top=(y-6)+'px';handle.textContent=formatPrice(price);}
+    if(handle){handle.style.top=(y-6)+'px';const preview={...manualPlanDraft,[positionResize.key]:price};const r=cslTargetR(preview,sourcePayload?.selectedTrade?.Side,currentReview()?.manualEntry);handle.textContent=formatPrice(price)+(positionResize.key==='target' && r!=null?' · '+r.toFixed(2)+'R':'');}
   },{capture:true});
   const finishPositionResize=event=>{
     if(!positionResize)return;event.preventDefault();event.stopImmediatePropagation();

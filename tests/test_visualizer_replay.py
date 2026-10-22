@@ -485,3 +485,17 @@ console.log(JSON.stringify(cslPreviousDayZones(bars,day,interval,1)));
     assert resistance['time']==10*900
     assert resistance['touches']>=2
     assert all(zone['time']<86400 for zone in result['zones'])
+
+@pytest.mark.parametrize('side,plan,original,expected',[
+ ('LONG',{'entry':100,'stop':90,'target':130},None,3),
+ ('SHORT',{'entry':100,'stop':110,'target':70},None,3),
+ ('LONG',{'entry':100,'stop':95,'target':130},None,6),
+ ('LONG',{'entry':105,'stop':95,'target':130},None,2.5),
+ ('LONG',{'entry':100,'stop':100,'target':130},{'entry':100,'stop':90},3),
+ ('SHORT',{'entry':100,'stop':95,'target':70},{'entry':100,'stop':110},3),
+ ('LONG',{'entry':100,'stop':100,'target':130},None,None),
+ ('LONG',{'entry':100,'stop':90,'target':None},None,None),
+])
+def test_target_r_uses_draft_risk_before_entry_and_original_risk_after_entry(side,plan,original,expected):
+    result=evaluate_manual('console.log(JSON.stringify(cslTargetR('+json.dumps(plan)+','+json.dumps(side)+','+json.dumps(original)+')));')
+    assert result==expected

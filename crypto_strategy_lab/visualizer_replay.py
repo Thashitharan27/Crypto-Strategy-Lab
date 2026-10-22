@@ -92,6 +92,13 @@ function cslManualPlan(entry, stop, target, side) {
     return {error:long?'Long plan needs SL < entry < TP.':'Short plan needs TP < entry < SL.'};
   return {entry,stop,target,rewardRisk:Math.abs(target-entry)/Math.abs(entry-stop)};
 }
+function cslTargetR(plan, side, originalEntry=null) {
+  if(!['LONG','SHORT'].includes(String(side).toUpperCase()))return null;
+  const base=originalEntry || plan,sign=String(side).toUpperCase()==='SHORT'?-1:1;
+  if([base?.entry,base?.stop,plan?.target].some(v=>v==null || !Number.isFinite(Number(v))))return null;
+  const risk=sign*(Number(base.entry)-Number(base.stop));
+  return risk>0?sign*(Number(plan.target)-Number(base.entry))/risk:null;
+}
 function cslRecordManualPlan(record, plan, original, context) {
   if(plan.error) throw Error(plan.error);
   const previous=record.manualPlan;
