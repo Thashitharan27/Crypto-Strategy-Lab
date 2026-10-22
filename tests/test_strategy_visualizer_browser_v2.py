@@ -134,7 +134,7 @@ def test_v2_html_includes_trade_box_and_correct_summary_keys():
 
     assert 'id="trade-box-layer"' in html
     assert "function drawTradeBox()" in html
-    assert "timeToCoordinate(manual ? manualPlanDraft.entryTime : Number(open.time))" in html
+    assert "timeToCoordinate(displayCandleTime(manual ? manualPlanDraft.entryTime : Number(open.time)))" in html
     assert "trade.Entry ?? trade.entry" in html
     assert "trade['Entry Time'] || trade.entryTime" in html
 

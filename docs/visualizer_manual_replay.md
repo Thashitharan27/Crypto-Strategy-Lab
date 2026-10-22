@@ -193,3 +193,12 @@ extremes then number of pivot levels. Bands have no visible labels; hover over a
 remain fixed throughout its replay. Colors describe their previous-day origin,
 not a prediction of future reactions. This display does not change automatic
 entries or exits; use manual TP resizing or closing to record your decision.
+
+Replay timeframe views: chart timeframe remains selectable during Trade replay
+and Day replay. Switching pauses Play and keeps the exact strategy replay cutoff,
+judgement, manual plan, and confirmed position. Chart candles and indicators are
+clipped to what was closed at that cutoff; an entry-only placeholder never exposes
+an unfinished candle's final high/low/close. Next candle and manual execution
+remain on the strategy timeframe. Return to that timeframe to Move box or Pick
+exit at a specific candle; prices and open-position SL/TP can still be adjusted
+from another chart view. Timeframe loading failures retain the replay state.
