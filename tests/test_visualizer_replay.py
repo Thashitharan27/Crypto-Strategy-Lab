@@ -451,3 +451,23 @@ console.log(JSON.stringify(cslReviewComparison(trades,records)));
     assert rows[2]['after'] is None and rows[2]['change'] is None
     assert rows[3]['status']=='Not reviewed' and rows[4]['after'] is None
     assert rows[5]['before'] is None and rows[5]['after']==3 and rows[5]['change'] is None
+
+
+def test_standalone_report_escapes_data_and_keeps_prices_in_expandable_details():
+    from crypto_strategy_lab.visualizer_review_report import REPORT_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node is required for report presentation verification')
+    script=REPORT_HELPERS+'''
+const row={label:'Trade <img src=x onerror=alert(1)>',entryTime:'2020-01-01T00:00:00Z',side:'LONG',before:-1,after:2,change:3,status:'Win',entry:100,stop:90,target:120,exit:120,net:-1.1,note:'<script>unsafe</script>'};
+console.log(JSON.stringify(cslComparisonReportHtml({rows:[row],before:-1,after:2,matched:1,closed:1},{symbol:'BTC<script>',timeframe:'15m',runId:'test'})));
+'''
+    result=subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True)
+    page=json.loads(result.stdout)
+    assert '<img src=x' not in page and '&lt;img src=x' in page
+    assert 'BTC&lt;script&gt;' in page
+    assert '<details><summary>Details' in page
+    assert 'Initial stop' in page and 'Automatic net R' in page
+    assert '<option value="losses">Losers</option>' in page
+    assert 'data-state="wins"' in page
+    assert "row.dataset.state!==this.value" in page
+    assert '</script></body></html>' in page
