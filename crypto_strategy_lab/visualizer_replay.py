@@ -144,6 +144,10 @@ function cslAdvanceManualPosition(record, bars, cutoff, interval, recordedAt) {
   }
   return record;
 }
+function cslReplayChart(view, chartSource, cutoff, interval, entryTime, revealed=false) {
+  const projected=cslReplayView({...chartSource,selectedTrade:view.selectedTrade,markers:view.markers},cutoff,interval,entryTime,revealed,true).view;
+  return {...view,candles:projected.candles,overlays:projected.overlays,markers:projected.markers,chartTimeframe:chartSource.chartTimeframe};
+}
 function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanced=false) {
   if (reveal) return {view:source,outcomeVisible:true};
   const original=source.selectedTrade || {};

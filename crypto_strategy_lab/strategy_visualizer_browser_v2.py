@@ -384,6 +384,7 @@ button:disabled{opacity:.45;cursor:default}
   let payload = null;
   let sourcePayload = null;
   let marketPayload = null;
+  let replayChartSource = null;
   let dayMode = false;
   let replayDay = null;
   let replayActive = false;
@@ -573,10 +574,12 @@ button:disabled{opacity:.45;cursor:default}
     for(const button of document.querySelectorAll('[data-pick-level]')) button.disabled=locked;
     $('manual-save').disabled=locked || Boolean(manualPlanDraft.error) || !currentReview()?.decision;
     $('manual-reset').disabled=locked;
-    $('manual-move').disabled=locked;
+    $('manual-move').disabled=locked || currentTimeframe!==boot.run.timeframe;
+    $('manual-move').title=currentTimeframe!==boot.run.timeframe?'Select the strategy timeframe to choose an entry candle.':'';
     $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error) || currentReview()?.decision!=='Take';
     $('manual-be').disabled=manualCloseLocked();
-    $('manual-close').disabled=manualCloseLocked();$('manual-pick-exit').disabled=manualCloseLocked();
+    $('manual-close').disabled=manualCloseLocked();$('manual-pick-exit').disabled=manualCloseLocked() || currentTimeframe!==boot.run.timeframe;
+    $('manual-pick-exit').title=currentTimeframe!==boot.run.timeframe?'Select the strategy timeframe to pick an exit candle.':'';
     const closed=currentReview()?.manualExit;
     const closedKnown=closed && (closed.availableAt ?? closed.candleTime+replayInterval)<=replayCutoff;
     $('manual-exit-status').textContent=closed && !closedKnown?'Previously reviewed manual position; advance to its exit candle to reveal the result.':closed?'Manual position closed ('+(closed.reason || 'Manual')+') · '+(closed.exitTime!=null?'Exit time '+fmtTime(closed.exitTime):'Exit candle '+fmtTime(closed.candleTime))+' UTC · '+formatPrice(closed.price)+' · Gross '+closed.grossR.toFixed(2)+' R ('+closed.returnPercent.toFixed(2)+'%) · before fees/slippage.'+(closed.ambiguous?' Both levels touched: conservative SL used.':''):confirmed?'Manual position open. Close at the latest closed candle, pick an exit, or advance until TP/SL is reached.':'';
@@ -622,6 +625,7 @@ button:disabled{opacity:.45;cursor:default}
       button.disabled=replayBusy || locked;
       button.setAttribute('aria-pressed',String(record?.decision===button.dataset.replayDecision));
     }
+    $('replay-step').title='Advance one '+boot.run.timeframe+' strategy candle; chart timeframe changes the view only.';
     $('replay-notes').disabled=replayBusy || locked;
     for(const id of ['replay-step','replay-play','replay-reveal']) $(id).disabled=replayBusy || (!dayMode && !record) || replayRevealed;
     if(dayMode) {
@@ -652,6 +656,7 @@ button:disabled{opacity:.45;cursor:default}
     if(replayActive) {
       const projected=cslReplayView(sourcePayload,replayCutoff,replayInterval,replayEntryTime,dayMode?false:replayRevealed,replayAdvanced);
       payload=projected.view; replayOutcomeVisible=projected.outcomeVisible;
+      if(replayChartSource)payload=cslReplayChart(payload,replayChartSource,replayCutoff,chartInterval(),replayEntryTime,!dayMode && replayRevealed);
       const record=currentReview();
       if(record && replayOutcomeVisible) {
         record.netR=sourcePayload.selectedTrade['Net R'] ?? null;
@@ -711,13 +716,13 @@ button:disabled{opacity:.45;cursor:default}
     $('replay-day').value=new Date(day*1000).toISOString().slice(0,10);
     $('day-navigation').hidden=false;$('replay-controls').hidden=false;
     $('day-replay').setAttribute('aria-pressed','true');$('replay-toggle').setAttribute('aria-pressed','false');
-    tradeSelect.disabled=true;timeframeSelect.disabled=true;updateTradeLabels();initializeReplay();refreshReplay();
+    tradeSelect.disabled=true;timeframeSelect.disabled=false;updateTradeLabels();initializeReplay();refreshReplay();
   }
   $('day-replay').addEventListener('click',()=>{
     if(replayBusy || !marketPayload)return;
     if(dayMode){
       stopReplay();if(!manualPlanLocked()){refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
-      dayMode=false;replayActive=false;sourcePayload=marketPayload;
+      dayMode=false;replayActive=false;sourcePayload=replayChartSource || marketPayload;marketPayload=sourcePayload;replayChartSource=null;
       $('day-navigation').hidden=true;$('replay-controls').hidden=true;$('day-replay').setAttribute('aria-pressed','false');
       tradeSelect.disabled=false;timeframeSelect.disabled=false;updateTradeLabels();refreshReplay();return;
     }
@@ -743,12 +748,13 @@ button:disabled{opacity:.45;cursor:default}
     stopReplay(); replayActive=!replayActive;
     $('replay-toggle').setAttribute('aria-pressed',String(replayActive));
     $('replay-controls').hidden=!replayActive;
-    timeframeSelect.disabled=replayActive;
+    timeframeSelect.disabled=false;
     updateTradeLabels();
     if(replayActive && currentTimeframe!==boot.run.timeframe) {
       currentTimeframe=boot.run.timeframe; timeframeSelect.value=currentTimeframe; load(); return;
     }
     if(replayActive) initializeReplay();
+    else if(replayChartSource){sourcePayload=replayChartSource;marketPayload=replayChartSource;replayChartSource=null;}
     refreshReplay();
   });
   document.querySelectorAll('[data-replay-decision]').forEach(button=>button.addEventListener('click',()=>{
@@ -965,7 +971,7 @@ button:disabled{opacity:.45;cursor:default}
     const interval=Number(String(currentTimeframe).match(/^([0-9]+)/)?.[1])*({m:60,h:3600,d:86400,w:604800}[String(currentTimeframe).slice(-1)] || 0);
     const anchor=replayActive?replayEntryTime:Date.parse(sourcePayload?.selectedTrade?.['Entry Time'] || '')/1000;
     const day=dayMode?sourcePayload?.dayContext?.day:Math.floor(anchor/86400)*86400;
-    const bars=(marketPayload || sourcePayload)?.candles || [],width=Number($('sr-width').value);
+    const bars=(replayChartSource || marketPayload || sourcePayload)?.candles || [],width=Number($('sr-width').value);
     if(!srCache || srCache.bars!==bars || srCache.day!==day || srCache.width!==width || srCache.interval!==interval)srCache={bars,day,width,interval,result:cslPreviousDayZones(bars,day,interval,width)};
     const result=srCache.result;
     if(result.reason){$('sr-status').textContent=result.reason;return;}
@@ -1445,13 +1451,13 @@ button:disabled{opacity:.45;cursor:default}
     const stop=Number(trade.Stop ?? trade.stop);
     const target=Number(trade.Target ?? trade.target);
     const exitPrice=Number(trade.Exit ?? trade.exit);
-    const x1=chart.timeScale().timeToCoordinate(manual ? manualPlanDraft.entryTime : Number(open.time));
+    const x1=chart.timeScale().timeToCoordinate(displayCandleTime(manual ? manualPlanDraft.entryTime : Number(open.time)));
     const endTime=exit ? Number(exit.time) : Number(payload.selectedTradeViewEnd);
     const manualExit=manual && currentReview()?.manualExit;
     const visibleManualExit=manualExit && manualExit.candleTime+replayInterval<=replayCutoff;
     const lastVisible=(payload.candles || []).at(-1);
     const manualEnd=visibleManualExit?manualExit.candleTime:lastVisible?.time;
-    const endX=manual?chart.timeScale().timeToCoordinate(manualEnd):null;
+    const endX=manual?chart.timeScale().timeToCoordinate(displayCandleTime(manualEnd)):null;
     const x2=manual && endX!=null?Math.max(Number(x1)+8,Number(endX)+chart.timeScale().options().barSpacing/2):(replayActive && !replayOutcomeVisible)?Number(x1)+100:chart.timeScale().timeToCoordinate(endTime);
     const entryY=candles.priceToCoordinate(entry);
     const stopY=candles.priceToCoordinate(stop);
@@ -1830,8 +1836,16 @@ button:disabled{opacity:.45;cursor:default}
   chartWrap.addEventListener('pointerup',finishVerticalPan,{capture:true});
   chartWrap.addEventListener('pointercancel',finishVerticalPan,{capture:true});
 
-  async function load() {
-    stopReplay(); replayBusy=true;
+  function chartInterval() {
+    const match=String(currentTimeframe).match(/^([0-9]+)([mhdw])$/);
+    return match?Number(match[1])*({m:60,h:3600,d:86400,w:604800}[match[2]]):replayInterval;
+  }
+  function displayCandleTime(time) {
+    const bar=((replayChartSource || sourcePayload)?.candles || []).find(item=>item.time<=time && time<item.time+chartInterval());
+    return bar?.time ?? time;
+  }
+  async function load(preserveReplay=false) {
+    stopReplay(); replayBusy=true;manualPick=null;chartWrap.style.cursor='';
     $('replay-toggle').disabled=true;
     if(replayActive) { chartWrap.style.visibility='hidden'; $('setup-panel').hidden=true; updateReplayControls(); $('replay-status').textContent='Loading entry preview…'; }
     const generation = ++loadGeneration;
@@ -1845,11 +1859,10 @@ button:disabled{opacity:.45;cursor:default}
         full_run:'1',
       }));
       if (generation !== loadGeneration) return;
-      sourcePayload = nextPayload;
-      marketPayload = nextPayload;
-      payload = nextPayload;
+      if(preserveReplay && replayActive)replayChartSource=nextPayload;
+      else {sourcePayload=nextPayload;marketPayload=nextPayload;payload=nextPayload;replayChartSource=null;}
       timeframeSelect.replaceChildren();
-      for (const item of (payload.run.availableChartTimeframes || [{interval:boot.run.timeframe}])) {
+      for (const item of (nextPayload.run.availableChartTimeframes || [{interval:boot.run.timeframe}])) {
         const label = item.interval + (item.interval === boot.run.timeframe ? ' (strategy)' : '') + (item.coverage === 'partial' ? ' (partial data)' : '');
         timeframeSelect.add(new Option(label, item.interval));
       }
@@ -1860,6 +1873,7 @@ button:disabled{opacity:.45;cursor:default}
       replayBusy=false;
       $('day-replay').disabled=!(nextPayload.candles || []).length;
       $('replay-toggle').disabled=!sourcePayload.selectedTrade?.['Entry Time'];
+      if(preserveReplay && replayActive){refreshReplay();return;}
       if(dayMode){
         const match=String(boot.run.timeframe).match(/^([0-9]+)([mhdw])$/);
         replayInterval=match?Number(match[1])*({m:60,h:3600,d:86400,w:604800}[match[2]]):900;
@@ -1874,13 +1888,14 @@ button:disabled{opacity:.45;cursor:default}
       timeframeSelect.value = currentTimeframe;
       $('timeframe-note').textContent = 'Could not load ' + requestedTimeframe + ': ' + error.message;
       diag.textContent = 'ERROR: ' + error.message;
-      if(replayActive) { replayBusy=true; updateReplayControls(); $('replay-status').textContent='Replay could not load: '+error.message+' · select another trade to retry.'; }
+      if(replayActive) { replayBusy=false;chartWrap.style.visibility='visible';updateReplayControls(); $('replay-status').textContent='Could not load that timeframe: '+error.message+' · Your replay position is preserved; choose another timeframe.'; }
     }
   }
 
   timeframeSelect.addEventListener('change', () => {
+    if(replayActive && !manualPlanLocked()){refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
     currentTimeframe = timeframeSelect.value;
-    load();
+    load(replayActive);
   });
 
   tradeSelect.addEventListener('change',() => {

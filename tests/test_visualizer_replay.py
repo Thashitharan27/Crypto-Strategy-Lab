@@ -331,3 +331,19 @@ const bars=Array.from({length:96},(_,i)=>({time:i*900,high:110,low:90}));bars[4]
 console.log(JSON.stringify([cslPreviousDayZones(bars,86400,900),cslPreviousDayZones([],86400,14400)]));
 ''')
     assert all(item['zones']==[] and item['reason'] for item in result)
+
+@pytest.mark.parametrize('interval',[300,3600])
+def test_replay_chart_timeframe_switch_clips_future_and_preserves_trade(interval):
+    result=evaluate_manual('''
+const view={selectedTrade:{Side:'LONG',Entry:100,'Entry Time':'1970-01-01T01:00:00Z'},markers:[{kind:'selected-open',time:3600}],dayContext:{day:0},supplyDemandDerivation:{status:'AVAILABLE'}};
+const bars=[0,INTERVAL,INTERVAL*2,INTERVAL*3,INTERVAL*4,3600,7200].filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a-b).map(time=>({time,open:100,high:999,low:1,close:500}));
+const chart={chartTimeframe:'alternate',candles:bars,overlays:[{kind:'ema',data:bars.map(bar=>({time:bar.time,value:500}))}]};
+const result=cslReplayChart(view,chart,4500,INTERVAL,3600);
+console.log(JSON.stringify({view,result}));
+'''.replace('INTERVAL',str(interval)))
+    projected=result['result']
+    assert projected['selectedTrade']==result['view']['selectedTrade']
+    assert projected['dayContext']==result['view']['dayContext']
+    assert projected['supplyDemandDerivation']==result['view']['supplyDemandDerivation']
+    assert all(bar['time']+interval<=4500 or bar['open']==bar['high']==bar['low']==bar['close']==100 for bar in projected['candles'])
+    assert all(point['time']+interval<=4500 for point in projected['overlays'][0]['data'])
