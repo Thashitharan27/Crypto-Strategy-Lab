@@ -438,8 +438,11 @@ def test_review_comparison_api_returns_finite_gross_and_net_without_changing_run
         assert data['trades'][0]['grossR']==2 and data['trades'][0]['netR']==1.8
         assert data['trades'][1]['grossR'] is None and data['trades'][1]['netR'] is None
         page=build_browser_visualizer_v2_html(ComparisonModel(),'report')
-        assert 'Show comparison results' in page and 'Review report' in page
-        assert 'td.textContent=String(value)' in page
-        assert 'comparisonReportViewedAt=viewedAt' in page
+        assert "window.open(api('/review-report'),'_blank')" in page and 'Review report' in page
+        assert 'review-report-dialog' not in page
+        with urlopen(url+'review-report',timeout=5) as response:
+            report_page=response.read().decode('utf-8')
+        assert 'comparisonReportViewedAt=viewedAt' in report_page
+        assert 'cslComparisonReportHtml' in report_page
     finally:
         server.stop()

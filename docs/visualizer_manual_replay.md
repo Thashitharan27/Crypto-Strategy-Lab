@@ -227,7 +227,7 @@ prevents treating 5m candles as 15m candles and dropping the selected manual
 entry candle from the display after switching to trade 2 or later.
 
 ### In-app review report
-In Trade replay or Day replay, click **Review report**, then **Show comparison results**.
+In Trade replay or Day replay, click **Review report** to open a separate browser tab. Opening the report reveals automatic outcomes.
 The report uses reviews saved in this browser for the current run. It lists every automatic setup and any manual day positions, with gross before/after R, change, status, automatic net R, and the confirmed entry, initial SL/TP and exit prices. Waiting/Skipped/Unsure setups contribute zero manual R; open and unreviewed setups are excluded from matched totals. Manual day positions are shown separately without an automatic comparison. Missing automatic gross R is shown as unavailable, never inferred from net R. Each side uses its own initial stop risk, so the comparison is risk-normalized, not a dollar portfolio simulation.
 
-Showing comparison results reveals all automatic outcomes. This pauses playback and records report-view metadata for later review; it does not change decisions, plans, entries or exits. Retrospective level-hit confirmations are flagged. Reopen the dialog to refresh after more trading. Reviews from another browser/session must still be retained through the existing export workflow.
+Showing comparison results reveals all automatic outcomes. This pauses playback and records report-view metadata for later review; it does not change decisions, plans, entries or exits. Retrospective level-hit confirmations are flagged. Reopen the report to refresh after more trading. Summary cards show before/after/change, status filters narrow the table, Details expands prices and notes, and Print / Save PDF provides a printable copy. Reviews from another browser/session must still be retained through the existing export workflow.
