@@ -82,6 +82,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #chart{position:absolute;inset:0;z-index:1}
 #fib-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
 #structure-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+#chart-wrap[style*="crosshair"] #structure-layer *{pointer-events:none!important}
 #fvg-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
 #sr-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
 .sr-zone{position:absolute;border-top:1px solid;border-bottom:1px solid;box-sizing:border-box}
