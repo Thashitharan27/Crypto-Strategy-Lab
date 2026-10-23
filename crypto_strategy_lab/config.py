@@ -87,6 +87,7 @@ class BacktestConfig:
     ls_base_bars: int = 3
     sp_minimum_r_enabled: bool = False
     sp_recent_swings_enabled: bool = False
+    sp_require_level_reclaim: bool = False
     sp_level_tolerance_atr: float = 0.3
     sp_body_atr: float = 0.5
     sp_min_body_percent: float = 50.0

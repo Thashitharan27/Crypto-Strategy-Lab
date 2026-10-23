@@ -61,7 +61,7 @@ def validate_settings(tolerance, body, wait, hold, min_body_percent=50.):
 
 
 def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3,
-                  body_atr=.5, wait=3, strength=2, buffer=.05, recent_swings=False, min_body_percent=50.):
+                  body_atr=.5, wait=3, strength=2, buffer=.05, recent_swings=False, min_body_percent=50., require_level_reclaim=False):
     """Signal at confirmation close; breakout order expires after the next bar.
 
     Previous complete UTC day and older confirmed pivots are frozen per setup.
@@ -93,7 +93,9 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
             side=p["side"];long=side=="LONG"
             if (l[i]<=p["stopSwingPrice"] if long else h[i]>=p["stopSwingPrice"]):
                 continue
-            if (c[i]>o[i] if long else c[i]<o[i]):
+            reversal = c[i]>o[i] if long else c[i]<o[i]
+            reclaimed = c[i]>p["level"] if long else c[i]<p["level"]
+            if reversal and (not require_level_reclaim or reclaimed):
                 zone={"bottom":min(p["low"],l[i],p["level"]),"top":max(p["high"],h[i],p["level"]),
                       "pivotTime":p["start"],"confirmedTime":(t+step).isoformat(),
                       "touchTime":p["start"],"bounceTime":t.isoformat()}
@@ -104,7 +106,7 @@ def sneaky_setups(times, opens, highs, lows, closes, atr_values, *, tolerance=.3
                     "stopSource":"Older swing low" if long else "Older swing high",
                     "stopSwingTime":p["stopSwingTime"],"stopSwingPrice":p["stopSwingPrice"],
                     "stopBufferAtr":float(buffer),"stopBufferPrice":p["stopBufferPrice"],
-                    "setupStart":p["start"],"level":p["level"],"levelName":p["levelName"],"setupAtr":p["atr"],
+                    "requireLevelReclaim":bool(require_level_reclaim),"setupStart":p["start"],"level":p["level"],"levelName":p["levelName"],"setupAtr":p["atr"],
                     "levels":p["levels"],"levelsSource":"Saved at setup"})
             elif i-p["index"] < wait:
                 surviving.append(p)
@@ -157,7 +159,8 @@ class SneakyPivotMixin:
         self.sd_setups=sneaky_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
             tolerance=self.config.sp_level_tolerance_atr,body_atr=self.config.sp_body_atr,
             wait=self.config.sp_confirmation_bars,strength=self.config.sd_swing_strength,buffer=self.config.sd_stop_buffer_atr,
-            recent_swings=self.config.sp_recent_swings_enabled,min_body_percent=self.config.sp_min_body_percent)
+            recent_swings=self.config.sp_recent_swings_enabled,min_body_percent=self.config.sp_min_body_percent,
+            require_level_reclaim=self.config.sp_require_level_reclaim)
 
     def _entry_decision(self,i,active_at_candle_start=False):
         decision=super()._entry_decision(i,active_at_candle_start)

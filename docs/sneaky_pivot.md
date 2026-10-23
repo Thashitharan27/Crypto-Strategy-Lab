@@ -74,3 +74,8 @@ were optimized against the historical sample.
 Completed runs retain their original trades and stops. Rerun the strategy to
 use the previous-day-test / older-swing-stop rules. The visualizer labels
 older saved setups without a stop source as using the legacy defended-level rule.
+
+
+### Optional level-reclaim rejection confirmation
+
+In Risk / Execution, the Sneaky Pivot settings include **Require rejection: reversal closes back across tested level** (off by default). Long confirmations must be green and close strictly above the tested level; short confirmations must be red and close strictly below it. A close exactly on the level fails. A non-qualifying candle leaves the setup waiting within its original confirmation window, unless the older swing is breached. The existing next-candle breakout entry, stop, target and initial-body rules still apply. This option does not require a pin bar, wick ratio or engulfing pattern.
