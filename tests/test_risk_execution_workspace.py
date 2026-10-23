@@ -603,12 +603,23 @@ def test_ema_cost_cycle_option_summary_and_roundtrip():
         app.processEvents()
         assert window.execution_form.value().ema_cross_reentry_widening_enabled
         assert "previous actual entry gap" in workspace.summary_label.text()
+        initial = window.execution_form.widgets["ema_cross_initial_phantom_enabled"]
+        assert not initial.isHidden()
+        initial.setChecked(True)
+        app.processEvents()
+        assert window.execution_form.value().ema_cross_initial_phantom_enabled
+        assert "immediately previous checkpoint" in workspace.summary_label.text()
+        assert not window.execution_form.widgets["ema_cross_entry_confirmation_enabled"].isEnabled()
+        initial.setChecked(False)
+        app.processEvents()
+        assert window.execution_form.widgets["ema_cross_entry_confirmation_enabled"].isEnabled()
         assert "at 1R cover costs" in workspace.summary_label.text()
         assert "repeat re-entry" in workspace.summary_label.text()
         assert not workspace.trade["partial_profit_enabled"].isEnabled()
         cycle.setChecked(False)
         app.processEvents()
         assert widening.isHidden()
+        assert initial.isHidden()
         assert workspace.trade["partial_profit_enabled"].isEnabled()
         assert workspace.trade["timeout_enabled"].isEnabled()
     finally:

@@ -79,3 +79,32 @@ Trade rows save `ema_cycle_entry_ema_gap`, `ema_cycle_reference_ema_gap`,
 belong to the stopped parent trade, including when no later real entry occurs;
 they contain the checkpoint time, hypothetical entry / stop, EMA comparison and
 rejection status, without hypothetical P&L being mixed into portfolio results.
+
+## Optional initial phantom mode
+
+Enable **Initial entry + 1R phantom; enter from 2R when EMA gap widens versus
+previous checkpoint** under cost-cover cycles. The default remains off. This
+replaces immediate crossover entry; it cannot be combined with confirmation-
+distance entry (the UI switches that option off).
+
+The crossover defines a hypothetical entry 100 and SL 90 using the normal stop
+plan. No position is opened. The first touch of 110 is always phantom and saves
+the completed EMA gap. At 120 compare with the gap saved at 110. Enter only if
+strictly wider, using SL 110; otherwise save 120 as phantom and compare 130
+against 120, continuing in the original 10-unit steps. Unlike the optional
+post-entry filter, this initial phase compares **consecutive checkpoints**,
+not the initial signal or last actual entry. Same-strategy-candle touches have
+equal gaps and cannot qualify, even when several levels are touched at once.
+
+Phantom SL touches do not cancel monitoring; opposite completed EMA alignment or
+data end does. Market permissions and ordinary entry filters are checked at the
+actual fill too. Gaps/slippage and current-equity sizing apply to actual fills.
+After entry, normal 1R cost-cover / BE management resumes; the existing optional
+post-entry widening filter keeps its previous-actual-entry comparison.
+
+Initial setups, their rejected checkpoints, cancellations and actual entry links
+are written to `ema_initial_phantoms.json`, referenced by the run manifest. This
+includes setups that never enter and runs with zero real trades. Actual trade
+rows also contain `ema_cycle_initial_phantom_id` and
+`ema_cycle_initial_phantom_records`. Initial phantom setups and checkpoints
+never count as trades, charge fees or change the account balance.

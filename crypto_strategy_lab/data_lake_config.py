@@ -396,6 +396,7 @@ class ExecutionConfig:
     ema_320_flip_signals: bool = False
     ema_320_exit_mode: str = "BOTH"
     ema_cross_cost_cycle_enabled: bool = False
+    ema_cross_initial_phantom_enabled: bool = False
     ema_cross_reentry_widening_enabled: bool = False
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
@@ -728,6 +729,8 @@ class ResearchRunConfig:
             )
         )
         if ema_cross_selected and execution.ema_cross_cost_cycle_enabled:
+            if execution.ema_cross_initial_phantom_enabled and execution.ema_cross_entry_confirmation_enabled:
+                raise ValueError("Initial phantom mode replaces EMA cross entry confirmation; disable confirmation distance")
             if strategy.enable_daily_entry_schedule or execution.max_active_pairs != 1 or execution.di_ladder_enabled:
                 raise ValueError("EMA cost-cover cycles require one active trade, no daily schedule and no DI ladder")
         if execution.ema_320_exit_mode not in {"BOTH", "EMA_ONLY", "FIXED_TP_ONLY"}:

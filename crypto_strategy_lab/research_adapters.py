@@ -649,6 +649,8 @@ class NativeSimulator:
 
         run_stage("adapter cleanup", cleanup)
         self.last_adapter_cleanup_seconds = time.perf_counter() - started
+        if getattr(engine, "ema_initial_phantom_setups", None):
+            trades.attrs["ema_initial_phantom_setups"] = engine.ema_initial_phantom_setups
         return trades
 
 

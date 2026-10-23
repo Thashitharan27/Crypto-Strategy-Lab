@@ -3,12 +3,61 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from types import SimpleNamespace
 
 from .config import IntrabarMissingPolicy
 from .trade import ExitReason, ExitSource, Side
 
 
 class EmaCostCycleMixin:
+    def _ema_initial_phantom_enabled(self):
+        return self._ema_cost_cycle_enabled() and bool(getattr(self.config, "ema_cross_initial_phantom_enabled", False))
+
+    def run(self):
+        result = super().run()
+        records = getattr(self, "ema_initial_phantom_setups", [])
+        for record in records:
+            if record["status"] == "PENDING":
+                record["status"] = "END_OF_DATA"
+        if records:
+            result.attrs["ema_initial_phantom_setups"] = records
+        return result
+
+    def _arm_ema_initial_phantom(self, i, decision):
+        indicator = int(decision["indicator_index"])
+        if self.active_pairs:
+            return
+        passed, reason = self._entry_filter_result(indicator, i)
+        plan = self._ema_100_cross_stop_plan(indicator, i)
+        if not passed or not plan.get("passed"):
+            self._record_skipped_signal(indicator, reason if not passed else plan.get("reason", "INVALID_PHANTOM_STOP"))
+            return
+        direction = self._selected_direction(indicator)
+        sign = 1 if direction == "LONG" else -1
+        entry = float(self._expected_entry_price(indicator, i, direction))
+        distance = float(plan["distance"])
+        if not np.isfinite(distance) or distance <= 0:
+            return
+        previous = getattr(self, "_ema_cycle_pending", None)
+        if previous and previous.get("initial_phantom"):
+            previous["initial_phantom"].update(status="CANCELLED_EMA_ALIGNMENT", cancelled_at=pd.Timestamp(self.times[i]).isoformat())
+        records = getattr(self, "ema_initial_phantom_setups", [])
+        self.ema_initial_phantom_setups = records
+        record = {"setup_id": len(records)+1, "side": direction,
+                  "initial_time": pd.Timestamp(self.times[i]).isoformat(),
+                  "initial_entry": entry, "initial_stop": entry-sign*distance,
+                  "initial_ema_gap": self._ema_cycle_gap(i-1),
+                  "distance": distance, "status": "PENDING", "checkpoints": []}
+        records.append(record)
+        self._ema_cycle_pending = {
+            "direction": direction, "trigger": entry+sign*distance, "stop": entry,
+            "available": pd.Timestamp(self.times[i]), "cycle": 0, "parent": None,
+            "root": None, "reference_gap": self._ema_cycle_gap(i-1),
+            "distance": distance, "checkpoint": 1,
+            "owner": SimpleNamespace(ema_cycle_phantom_records=record["checkpoints"]),
+            "initial_phantom": record,
+        }
+
     def _ema_cost_cycle_enabled(self):
         return bool(
             getattr(self.config, "ema_cross_cost_cycle_enabled", False)
@@ -24,7 +73,16 @@ class EmaCostCycleMixin:
             pos.ema_cycle_intrabar_entry = str((schedule or {}).get("fill_price_source", "")) in {"EMA_CROSS_CONFIRMATION", "EMA_COST_CYCLE_REENTRY"}
             pos.ema_cycle_number = pending["cycle"] if pending else 0
             pos.ema_cycle_parent_id = pending["parent"] if pending else None
-            pos.ema_cycle_root_id = pending["root"] if pending else pair.pair_id
+            pos.ema_cycle_root_id = (pending["root"] or pair.pair_id) if pending else pair.pair_id
+            initial = pending.get("initial_phantom") if pending else None
+            pos.ema_cycle_initial_phantom_id = initial["setup_id"] if initial else None
+            pos.ema_cycle_initial_phantom_records = list(initial["checkpoints"]) if initial else []
+            if initial:
+                initial.update(status="ENTERED", entry_time=pd.Timestamp(pos.entry_time).isoformat(),
+                               entry_price=float(pos.entry_price), stop=float(pos.original_sl),
+                               entry_ema_gap=self._ema_cycle_gap(pos.entry_index-1),
+                               reference_ema_gap=pending["reference_gap"],
+                               entry_checkpoint=pending["checkpoint"], pair_id=pair.pair_id)
             pos.ema_cycle_entry_ema_gap = self._ema_cycle_gap(pos.entry_index - 1)
             pos.ema_cycle_reference_ema_gap = pending["reference_gap"] if pending else np.nan
             pos.ema_cycle_reentry_checkpoint = pending.get("checkpoint", 1) if pending else 0
@@ -59,22 +117,28 @@ class EmaCostCycleMixin:
 
     def _ema_cycle_phantom_checkpoints(self, pending, i, timestamp, high, low):
         """Advance rejected levels without placing orders or changing capital."""
-        if not getattr(self.config, "ema_cross_reentry_widening_enabled", False):
+        initial = pending.get("initial_phantom")
+        if not initial and not getattr(self.config, "ema_cross_reentry_widening_enabled", False):
             return
         gap = self._ema_cycle_gap(i - 1)
         reference = pending["reference_gap"]
-        if np.isfinite(gap) and np.isfinite(reference) and gap > reference:
+        if not initial and np.isfinite(gap) and np.isfinite(reference) and gap > reference:
             return
         sign = 1 if pending["direction"] == "LONG" else -1
         while (high >= pending["trigger"] if sign > 0 else low <= pending["trigger"]):
+            reference = pending["reference_gap"]
+            if (not initial or pending["checkpoint"] >= 2) and np.isfinite(gap) and np.isfinite(reference) and gap > reference:
+                break
             pending["owner"].ema_cycle_phantom_records.append({
                 "time": pd.Timestamp(timestamp).isoformat(),
                 "checkpoint": pending["checkpoint"], "side": pending["direction"],
                 "entry": pending["trigger"], "stop": pending["stop"],
                 "ema_gap": gap if np.isfinite(gap) else None,
                 "reference_ema_gap": reference if np.isfinite(reference) else None,
-                "status": "PHANTOM_EMA_NOT_WIDER",
+                "status": "PHANTOM_FIRST_1R" if initial and pending["checkpoint"] == 1 else "PHANTOM_EMA_NOT_WIDER",
             })
+            if initial:
+                pending["reference_gap"] = gap
             pending["stop"] = pending["trigger"]
             pending["trigger"] += sign * pending["distance"]
             if not np.isfinite(pending["trigger"]) or pending["trigger"] == pending["stop"]:
@@ -118,6 +182,8 @@ class EmaCostCycleMixin:
         self._ema_cycle_scanned_index = i
         pending = getattr(self, "_ema_cycle_pending", None)
         if pending and not self._ema_cycle_aligned(i - 1, pending["direction"]):
+            if pending.get("initial_phantom"):
+                pending["initial_phantom"].update(status="CANCELLED_EMA_ALIGNMENT", cancelled_at=pd.Timestamp(self.times[i]).isoformat())
             self._ema_cycle_pending = None
         for pair in list(self.active_pairs):
             self._close_on_ema_20_100_cross(pair.positions(), i)
