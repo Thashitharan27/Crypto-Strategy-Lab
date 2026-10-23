@@ -96,7 +96,8 @@ class SupplyDemandRetestMixin:
                 displacement_atr=self.config.tc_displacement_atr,max_wait=self.config.tc_max_wait_bars,
                 fvg_lookback=self.config.tc_fvg_lookback,min_body_percent=self.config.tc_min_reversal_body_percent,
                 require_structure=self.config.tc_require_structure,require_ifvg=self.config.tc_require_ifvg,
-                require_equilibrium=self.config.tc_require_equilibrium)
+                require_equilibrium=self.config.tc_require_equilibrium,
+                require_live_confirmations=self.config.tc_require_live_confirmations,min_sweep_atr=self.config.tc_min_sweep_atr)
         elif "LIQUIDITY_SWEEP_RETEST" in modes:
             from crypto_strategy_lab.liquidity_sweep_retest import liquidity_sweep_setups
             self.sd_setups=liquidity_sweep_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
@@ -153,6 +154,10 @@ class SupplyDemandRetestMixin:
         if not np.isfinite(atr) or atr<=0:
             return reject
         if self.signal_strategy_mode=="TJR_CONFLUENCE":
+            from crypto_strategy_lab.tjr_confluence import confirmations_hold
+            if self.config.tc_require_live_confirmations and not confirmations_hold(
+                    setup,entry,side,self.config.tc_require_structure,self.config.tc_require_ifvg):
+                return {**reject,"reason":"CONFLUENCE_CONFIRMATION_FAILED_AT_ENTRY"}
             sign=1 if side=="LONG" else -1
             stop=setup["sweepExtreme"]-sign*self.config.sd_stop_buffer_atr*setup["setupAtr"]
             risk=sign*(entry-stop)

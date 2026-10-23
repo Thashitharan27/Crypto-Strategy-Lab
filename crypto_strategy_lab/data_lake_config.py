@@ -410,6 +410,8 @@ class ExecutionConfig:
     ls_equal_tolerance_atr: float = 0.15
     ls_displacement_atr: float = 1.0
     ls_base_bars: int = 3
+    tc_require_live_confirmations: bool = True
+    tc_min_sweep_atr: float = 0.1
     tc_require_structure: bool = True
     tc_require_ifvg: bool = True
     tc_require_equilibrium: bool = True
@@ -526,7 +528,7 @@ class ResearchRunConfig:
             if profile.enabled and any(r.get("_strategy_direction_mode")=="SNEAKY_PIVOT" for r in profile.entry_rules):
                 validate_cost_cover(self.execution.sp_cost_cover_enabled,self.execution.sp_cost_cover_close_pct,(self.execution.profiles[key],))
         from crypto_strategy_lab.tjr_confluence import validate_settings as validate_confluence
-        validate_confluence(self.execution.tc_displacement_atr,self.execution.tc_max_wait_bars,self.execution.tc_fvg_lookback,self.execution.tc_min_reversal_body_percent,self.execution.tc_target_r)
+        validate_confluence(self.execution.tc_displacement_atr,self.execution.tc_max_wait_bars,self.execution.tc_fvg_lookback,self.execution.tc_min_reversal_body_percent,self.execution.tc_target_r,self.execution.tc_min_sweep_atr)
         from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
         validate_liquidity(self.execution.ls_equal_tolerance_atr,self.execution.ls_displacement_atr,self.execution.ls_base_bars,self.execution.ls_max_wait_bars)
         if any(r.get("_strategy_direction_mode")=="SUPPLY_DEMAND_RETEST" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())) and self.data.strategy_timeframe_minutes!=60:

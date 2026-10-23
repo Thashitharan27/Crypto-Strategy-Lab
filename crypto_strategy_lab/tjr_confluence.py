@@ -10,7 +10,9 @@ import pandas as pd
 MODE = "TJR_CONFLUENCE"
 
 
-def validate_settings(displacement, wait, lookback, body_percent, target_r):
+def validate_settings(displacement, wait, lookback, body_percent, target_r, min_sweep_atr=.1):
+    if not np.isfinite(min_sweep_atr) or min_sweep_atr<0:
+        raise ValueError("Confluence minimum sweep depth must be finite and non-negative")
     if not np.isfinite(displacement) or displacement <= 0:
         raise ValueError("Confluence displacement must be finite and positive")
     for value,label,limit in ((wait,"maximum wait",500),(lookback,"FVG lookback",500)):
@@ -25,10 +27,11 @@ def validate_settings(displacement, wait, lookback, body_percent, target_r):
 def confluence_setups(times, opens, highs, lows, closes, atr_values, *, strength=2,
                       timeframe_minutes=15, displacement_atr=.5, max_wait=30,
                       fvg_lookback=64, min_body_percent=50., require_structure=True,
-                      require_ifvg=True, require_equilibrium=True):
+                      require_ifvg=True, require_equilibrium=True,
+                      require_live_confirmations=True, min_sweep_atr=.1):
     from crypto_strategy_lab.supply_demand_retest import validate_settings as validate_swing
     validate_swing(strength,0.,1.)
-    validate_settings(displacement_atr,max_wait,fvg_lookback,min_body_percent,3.)
+    validate_settings(displacement_atr,max_wait,fvg_lookback,min_body_percent,3.,min_sweep_atr)
     ts=pd.DatetimeIndex(pd.to_datetime(times,utc=True))
     arrays=[np.asarray(a,dtype=float) for a in (opens,highs,lows,closes,atr_values)]
     if any(a.ndim!=1 or len(a)!=len(ts) for a in arrays) or ts.has_duplicates or not ts.is_monotonic_increasing:
@@ -64,6 +67,8 @@ def confluence_setups(times, opens, highs, lows, closes, atr_values, *, strength
             inv=p["inverseFvg"]
             if inv and p["inverseTime"] is None and (c[i]>inv["top"] if long else c[i]<inv["bottom"]):
                 p["inverseTime"]=(t+step).isoformat()
+            if require_live_confirmations and not confirmations_hold(p,c[i],side,require_structure,require_ifvg):
+                del pending[side];continue
             if p.get("zone"):
                 z=p["zone"]
                 invalid=c[i]<z["bottom"] if long else c[i]>z["top"]
@@ -79,6 +84,7 @@ def confluence_setups(times, opens, highs, lows, closes, atr_values, *, strength
                         setup.pop(key,None)
                     setup.update(version=1,strategy=MODE,side=side,signalTime=t.isoformat(),
                                  requiredStructure=bool(require_structure),requiredIfvg=bool(require_ifvg),requiredEquilibrium=bool(require_equilibrium),
+                                 requiredLiveConfirmations=bool(require_live_confirmations),minimumSweepDepthAtr=float(min_sweep_atr),
                                  minReversalBodyPercent=float(min_body_percent),reversalBodyPercent=float(100*body/span),
                                  target=None,opposingZone=None)
                     setup["zone"]["touchTime"]=t.isoformat();setup["zone"]["bounceTime"]=t.isoformat()
@@ -120,13 +126,15 @@ def confluence_setups(times, opens, highs, lows, closes, atr_values, *, strength
                     structure=structures[-1] if structures else None
                     opposite=[g for g in gaps if g["side"]==other]
                     inv=copy.deepcopy(opposite[-1]) if opposite else None
-                    if reclaimed and side not in pending and (not require_structure or structure) and (not require_ifvg or inv):
+                    depth=abs(pivot["price"]-(l[i] if long else h[i]))/atr[i]
+                    if depth>=min_sweep_atr and reclaimed and side not in pending and (not require_structure or structure) and (not require_ifvg or inv):
                         sweeps.append((side,pivot,structure,inv))
             if len(sweeps)==1:
                 side,pivot,structure,inv=sweeps[0];long=side=="LONG"
                 pending[side]={"side":side,"sweepIndex":i,"sweepTime":t.isoformat(),
                     "liquidityLevel":pivot["price"],"liquidityTime":pivot["time"],
                     "sweepExtreme":float(l[i] if long else h[i]),"setupAtr":float(atr[i]),
+                    "sweepDepthAtr":float(abs(pivot["price"]-(l[i] if long else h[i]))/atr[i]),
                     "impulseExtreme":float(h[i] if long else l[i]),
                     "structureLevel":structure["price"] if structure else None,
                     "structureTime":None,"inverseFvg":inv,"inverseTime":None}
@@ -140,3 +148,21 @@ def confluence_setups(times, opens, highs, lows, closes, atr_values, *, strength
                     pivots[side].append({"index":j,"price":float(prices[j]),"time":ts[j].isoformat(),"used":False})
                     pivots[side]=[p for p in pivots[side] if i-p["index"]<=fvg_lookback]
     return result
+
+
+def confirmations_hold(setup, price, side, require_structure=True, require_ifvg=True):
+    """Only activated, required confirmations can invalidate a pending setup.
+
+    Equality holds; a close (or actual entry fill) strictly through the defended
+    edge fails. An IFVG defends its far edge, not the inversion breakout edge.
+    """
+    long=side=="LONG"
+    if require_structure and setup.get("structureTime") is not None:
+        level=setup["structureLevel"]
+        if price<level if long else price>level:
+            return False
+    if require_ifvg and setup.get("inverseTime") is not None and setup.get("inverseFvg"):
+        gap=setup["inverseFvg"]
+        if price<gap["bottom"] if long else price>gap["top"]:
+            return False
+    return True
