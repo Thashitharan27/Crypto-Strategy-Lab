@@ -884,6 +884,9 @@ def test_confluence_strategy_settings_and_visibility():
         w=window.execution_form.widgets;workspace=window.risk_execution_workspace
         assert window.strategy_tf.currentData()=='15m'
         assert w['entry_timing_mode'].currentData()=='NEXT_CANDLE_OPEN'
+        assert w['tc_require_live_confirmations'].isChecked()
+        assert w['tc_min_sweep_atr'].value()==pytest.approx(.1)
+        w['tc_min_sweep_atr'].setValue(.2)
         assert not w['tc_require_ifvg'].isHidden() and w['tc_require_ifvg'].isChecked()
         assert not w['tc_require_structure'].isHidden() and w['tc_require_structure'].isChecked()
         assert not w['tc_require_equilibrium'].isHidden() and w['tc_require_equilibrium'].isChecked()
@@ -891,6 +894,7 @@ def test_confluence_strategy_settings_and_visibility():
         w['tc_target_r'].setValue(4.);w['tc_min_reversal_body_percent'].setValue(60.)
         w['tc_require_ifvg'].setChecked(False)
         cfg=window.build_config();cfg.validate()
+        assert cfg.execution.tc_require_live_confirmations and cfg.execution.tc_min_sweep_atr==pytest.approx(.2)
         assert cfg.execution.tc_target_r==4. and cfg.execution.tc_min_reversal_body_percent==60.
         assert not cfg.execution.tc_require_ifvg
         assert 'TP 4R' in workspace.summary_label.text()

@@ -157,17 +157,21 @@ class RiskExecutionWorkspace(QWidget):
         self.account["sd_minimum_r"].setRange(.01,100.)
         for name,label in (("ls_equal_tolerance_atr","Equal-high/low tolerance (ATR)"),("ls_displacement_atr","Minimum displacement body (ATR)"),("ls_base_bars","Maximum zone base candles"),("ls_max_wait_bars","Maximum wait per stage (candles)")):
             self.sd_card.add_field(name,label,self.account[name])
-        for name,label in (("tc_require_structure","Require close beyond structure"),
+        for name,label in (("tc_require_live_confirmations","Cancel if confirmed structure / IFVG fails before entry"),
+                           ("tc_require_structure","Require close beyond structure"),
                            ("tc_require_ifvg","Require inversion of an opposing FVG"),
                            ("tc_require_equilibrium","Require discount / premium overlap")):
             self.account[name].setText(label)
             self.sd_card.add_control(name,self.account[name])
-        for name,label in (("tc_displacement_atr","Minimum FVG middle body (ATR)"),
+        for name,label in (("tc_min_sweep_atr","Minimum sweep depth (ATR; 0 disables)"),
+                           ("tc_displacement_atr","Minimum FVG middle body (ATR)"),
                            ("tc_max_wait_bars","Maximum candles from sweep"),
                            ("tc_fvg_lookback","Swing / opposing FVG lookback (candles)"),
                            ("tc_min_reversal_body_percent","Minimum reversal body (% of range)"),
                            ("tc_target_r","Final target (R)")):
             self.sd_card.add_field(name,label,self.account[name])
+        self.account["tc_min_sweep_atr"].setRange(0.,100.)
+        self.account["tc_require_live_confirmations"].setToolTip("After confirmation, cancel a long on a close below its structure level or inverted FVG bottom; reverse for shorts. Recheck the actual next-open entry too. Only required confirmations are enforced.")
         self.account["tc_displacement_atr"].setRange(.01,100.)
         self.account["tc_max_wait_bars"].setRange(1,500)
         self.account["tc_fvg_lookback"].setRange(1,500)
@@ -974,7 +978,7 @@ class RiskExecutionWorkspace(QWidget):
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
             self.sd_card.set_row_visible(name,liquidity)
         self.sd_card.set_row_visible("sp_cost_cover_close_pct", sp_cost)
-        for name in ("tc_require_structure","tc_require_ifvg","tc_require_equilibrium","tc_displacement_atr",
+        for name in ("tc_require_live_confirmations","tc_min_sweep_atr","tc_require_structure","tc_require_ifvg","tc_require_equilibrium","tc_displacement_atr",
                      "tc_max_wait_bars","tc_fvg_lookback","tc_min_reversal_body_percent","tc_target_r"):
             self.sd_card.set_row_visible(name,confluence)
         if confluence:self.sd_card.setTitle("Confluence - sweep, structure and FVG")
@@ -1047,6 +1051,7 @@ class RiskExecutionWorkspace(QWidget):
         if self._signal_strategy_mode() == "TJR_CONFLUENCE":
             self.summary_label.setText(
                 f"Confluence research preset: sweep and reclaim a confirmed swing; {execution.sd_swing_strength} candles each side. "
+                f"Minimum sweep {execution.tc_min_sweep_atr:g} ATR; cancel failed confirmations {'on' if execution.tc_require_live_confirmations else 'off'}. "
                 f"Structure close {'required' if execution.tc_require_structure else 'optional'}; opposing FVG inversion {'required' if execution.tc_require_ifvg else 'optional'}. "
                 f"New directional FVG with middle body >= {execution.tc_displacement_atr:g} ATR; discount/premium overlap {'required' if execution.tc_require_equilibrium else 'optional'}. "
                 f"Later directional retest candle body >= {execution.tc_min_reversal_body_percent:g}% of range; enter next open, recheck equilibrium and SL geometry. "
