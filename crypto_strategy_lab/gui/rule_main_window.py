@@ -102,6 +102,8 @@ class MainWindow(LegacyMainWindow):
         if timing is None or not hasattr(timing, "findData"):
             return
         strategy = self.rule_builder.direction_mode.currentData()
+        if strategy != "DI":
+            self.base_execution_form.widgets["di_partial_1r_enabled"].setChecked(False)
         if strategy in {"SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST"}:
             self.strategy_tf.setCurrentIndex(self.strategy_tf.findData("1h"))
         if strategy == "SNEAKY_PIVOT":

@@ -1111,15 +1111,35 @@ class BacktestEngine(DILadderExecutionMixin):
         entry = raw * (1 + self.config.slippage) if side == Side.LONG else raw * (1 - self.config.slippage)
         partial_sl_enabled = active_profile.partial_stop_enabled
         partial_tp_enabled = active_profile.partial_profit_enabled
+        di_partial = bool(getattr(active_profile, "di_partial_1r_enabled", False) and self.signal_strategy_mode == "DI")
         sl1_r = active_profile.sl1_r
         sl1_close_pct = active_profile.sl1_close_pct
         sl2_r = active_profile.sl2_r
         tp1_r = active_profile.tp1_r
         tp1_close_pct = active_profile.tp1_close_pct
         tp2_r = active_profile.tp2_r
+        if di_partial:
+            partial_tp_enabled = True
+            tp1_r = 1.0
+            tp1_close_pct = active_profile.di_partial_1r_close_pct
+            tp2_r = active_profile.reward_risk_ratio
         r = float(self.risk[ind_i])
         stop_mult = sl2_r if partial_sl_enabled else active_profile.stop_loss_multiple
         stop = stop_mult * r
+        original_di_stop = stop
+        di_minimum_stop = 0.0
+        if di_partial and active_profile.di_partial_cost_atr_enabled:
+            from crypto_strategy_lab.di_partial_cost import minimum_cost_cover_distance
+            if self.config.risk_mode != RiskMode.ATR:
+                raise ValueError("DI cost-cover adjustment requires ATR risk mode")
+            di_minimum_stop = minimum_cost_cover_distance(
+                entry, side_sign, tp1_close_pct/100.0,
+                self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee,
+                self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee,
+                self.config.slippage,
+            )
+            stop = max(stop, di_minimum_stop)
+            r = stop/stop_mult
         risk_amt = self.current_equity * self.config.risk_per_leg * active_profile.risk_multiplier
         sizing_stop, sizing_stop_mult, sizing_override_applied = (
             self._position_sizing_stop_distance(active_profile, r, stop)
@@ -1201,11 +1221,22 @@ class BacktestEngine(DILadderExecutionMixin):
             pos.final_active_stop = pos.sl2_price
 
         pos.be_enabled = bool(active_profile.break_even_enabled)
+        pos.di_partial_1r_enabled = di_partial
+        pos.di_partial_cost_atr_enabled = bool(di_partial and active_profile.di_partial_cost_atr_enabled)
+        pos.di_partial_original_stop_distance = original_di_stop if di_partial else None
+        pos.di_partial_minimum_cost_stop_distance = di_minimum_stop if di_partial else None
+        pos.di_partial_effective_atr_multiplier = stop/(float(self.atr_values[ind_i])*stop_mult) if di_partial and self.atr_values[ind_i] > 0 else None
         pos.be_offset_r = active_profile.break_even_offset_r
         pos.profile_break_even_activation_r = (
             active_profile.break_even_activation_r if active_profile.break_even_enabled else None
         )
         pos.trailing_enabled = bool(active_profile.trailing_enabled)
+        if di_partial:
+            pos.be_enabled = True
+            pos.be_mode = "ENTRY_PRICE"
+            pos.be_offset_r = 0.0
+            # Activation follows the actual TP1 fill and old-stop checks.
+            pos.profile_break_even_activation_r = None
         if pos.trailing_enabled:
             pos.trailing_distance_r = active_profile.trailing_distance_r
             pos.trailing_activation_price = pos.entry_price + side_sign * pos.risk * active_profile.trailing_activation_r
@@ -1831,13 +1862,23 @@ class BacktestEngine(DILadderExecutionMixin):
             return self._finish_partial_stop(pos,i,timestamp,source)
         changed=False
         if tp1_hit:
-            changed=self._partial_fill(pos,pos.tp1_quantity,pos.tp1_price,"tp1",i,timestamp,source)
+            price = pos.tp1_price
+            if getattr(pos, "di_partial_1r_enabled", False):
+                price *= 1-self.config.slippage if pos.side == Side.LONG else 1+self.config.slippage
+            changed=self._partial_fill(pos,pos.tp1_quantity,price,"tp1",i,timestamp,source)
         if pos.is_open and pos.tp1_hit and tp2_hit:
             self._partial_fill(pos,pos.remaining_quantity,pos.tp2_price,"tp2",i,timestamp,source); self._finalize_partial(pos,ExitReason.TP); return True
         if pos.is_open and stop_hit:
             return self._finish_partial_stop(pos,i,timestamp,source)
         if pos.is_open and pos.trailing_enabled and not pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
+        if pos.is_open and changed and pos.tp1_hit and getattr(pos, "di_partial_1r_enabled", False):
+            pos.sl = pos.be_stop_price = pos.entry_price
+            pos.be_triggered = True
+            pos.be_trigger_time = pd.Timestamp(timestamp)
+            pos.be_triggered_by_side = pos.side
+            pos.be_exit_reason = ExitReason.BE
+            pos.final_active_stop = pos.sl
         return changed
 
     def _finish_partial_stop(self,pos,i,timestamp,source):
@@ -2230,6 +2271,12 @@ class BacktestEngine(DILadderExecutionMixin):
         prefix = primary.side.value.lower()
         row.update(self._pos_cols(prefix, primary))
         row.update(self._partial_sl_cols(prefix, primary))
+        for name, default in (("di_partial_1r_enabled", False), ("di_partial_cost_atr_enabled", False),
+                              ("di_partial_original_stop_distance", None), ("di_partial_minimum_cost_stop_distance", None),
+                              ("di_partial_effective_atr_multiplier", None)):
+            row[name] = getattr(primary, name, default)
+        if getattr(primary, "di_partial_1r_enabled", False):
+            row["break_even_activation_r"] = 1.0
         return self._decorate_ladder_result_row(p, row)
 
     def results_frame(self):

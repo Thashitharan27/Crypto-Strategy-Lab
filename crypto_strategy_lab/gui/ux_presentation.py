@@ -117,6 +117,19 @@ FIELDS = {
         "Initial Entry and 1R Are Phantom",
         "No position at the crossover or first 1R touch. At 2R compare the completed EMA20/100 gap with the gap recorded at 1R; if not strictly wider, compare 3R with 2R, and continue. SL is one checkpoint behind. Cancel on opposite alignment; phantom SL touches do not cancel. Actual entries then use normal cost-cover management. Replaces confirmation-distance entry.",
     ),
+    "di_partial_1r_enabled": FieldPresentation(
+        "DI Partial at 1R + Break-even",
+        "DI Direction only. Close the configured fraction at one actual stop-distance of profit, then move remaining SL to entry for subsequent execution candles. The remainder keeps the final reward/risk target. Replaces other partial, BE and trailing protection modes.",
+    ),
+    "di_partial_1r_close_pct": FieldPresentation(
+        "DI Partial Close Percentage",
+        "Percentage of the original quantity closed at 1R. Default 10%; must be greater than zero and below 100%.",
+        unit="%", decimals=2,
+    ),
+    "di_partial_cost_atr_enabled": FieldPresentation(
+        "Adjust ATR to Cover Partial Costs",
+        "ATR risk only. Increase the actual entry-to-SL distance just enough that the chosen 1R partial covers entry/exit fees and estimated exit slippage if the remainder stops at entry. Never tightens the existing ATR stop. Quantity is recalculated from the adjusted stop to preserve the sizing budget. Funding and gap losses are excluded.",
+    ),
     "ema_cross_cost_cycle_enabled": FieldPresentation(
         "1R Cost Cover + Break-even + Re-entry",
         "EMA 20/100 cross plans only. At one initial entry-to-SL distance, close enough to cover entry/exit fees and a slipped break-even exit, then move SL to entry. After a BE stop, re-enter at that 1R level with the prior entry as SL while the completed EMA alignment holds. Repeat; the opposite cross exits the runner. Overrides other optional position management. Each re-entry uses the current account sizing budget.",

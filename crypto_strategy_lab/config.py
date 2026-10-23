@@ -206,6 +206,9 @@ class BacktestConfig:
         if not math.isfinite(self.ema_reversal_min_entry_ema300_atr) or self.ema_reversal_min_entry_ema300_atr < 0:
             raise ValueError("EMA 300 entry distance must be finite and non-negative")
         object.__setattr__(self, "strategy_profiles", normalize_profiles(self.strategy_profiles))
+        from crypto_strategy_lab.di_partial_cost import validate_di_partial_risk_mode
+        for di_profile in self.strategy_profiles.values():
+            validate_di_partial_risk_mode(di_profile, self.risk_mode, di_profile.entry_rules, getattr(self, "sr_take_profit_mode", "FIXED_R"))
         ema_cost_cycle_selected = (
             self.ema_cross_cost_cycle_enabled
             and self.ema_920_trade_plan.startswith("EMA_20_100_CROSS")
