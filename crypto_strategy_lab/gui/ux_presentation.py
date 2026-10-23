@@ -109,6 +109,10 @@ FIELDS = {
         "Entry Fill Timing",
         "Signal Close preserves historical fills. Next Candle Open queues a completed signal and fills at the next strategy candle open before that candle is processed.",
     ),
+    "ema_cross_reentry_widening_enabled": FieldPresentation(
+        "Require Wider EMA Gap for Re-entry",
+        "Compare the absolute EMA 20 minus EMA 100 gap on the latest completed strategy candle with the gap saved at the previous actual entry. Only a strictly wider gap permits re-entry. Otherwise record a phantom checkpoint and advance another original 1R. Entry at 120 after skipping 110 uses SL 110. Phantom checkpoints place no orders; the opposite cross cancels monitoring.",
+    ),
     "ema_cross_cost_cycle_enabled": FieldPresentation(
         "1R Cost Cover + Break-even + Re-entry",
         "EMA 20/100 cross plans only. At one initial entry-to-SL distance, close enough to cover entry/exit fees and a slipped break-even exit, then move SL to entry. After a BE stop, re-enter at that 1R level with the prior entry as SL while the completed EMA alignment holds. Repeat; the opposite cross exits the runner. Overrides other optional position management. Each re-entry uses the current account sizing budget.",

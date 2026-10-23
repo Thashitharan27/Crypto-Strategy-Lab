@@ -195,6 +195,7 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.add_control("ema_320_flip_signals", self.account["ema_320_flip_signals"])
         self.entry_card.add_field("ema_320_exit_mode", "EMA 320 Exit Policy", self.account["ema_320_exit_mode"])
         self.entry_card.add_control("ema_cross_cost_cycle_enabled", self.account["ema_cross_cost_cycle_enabled"])
+        self.entry_card.add_control("ema_cross_reentry_widening_enabled", self.account["ema_cross_reentry_widening_enabled"])
         self.entry_card.add_control(
             "ema_cross_entry_confirmation_enabled",
             self.account["ema_cross_entry_confirmation_enabled"],
@@ -518,6 +519,7 @@ class RiskExecutionWorkspace(QWidget):
         self.account["entry_timing_mode"].currentIndexChanged.connect(self.refresh_summary_from_widgets)
         self.account["ema_920_trade_plan"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["ema_cross_cost_cycle_enabled"].toggled.connect(self.refresh_visibility)
+        self.account["ema_cross_reentry_widening_enabled"].toggled.connect(self.refresh_summary_from_widgets)
         self.account["ema_cross_entry_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_minutes"].valueChanged.connect(self.refresh_summary_from_widgets)
@@ -564,6 +566,7 @@ class RiskExecutionWorkspace(QWidget):
             "fvg_confirmation_enabled": "Require directional FVG confirmation before entry",
             "fvg_context_enabled": "Require the execution-timeframe FVG to overlap an active higher-timeframe FVG",
             "ema_cross_cost_cycle_enabled": "At 1R cover costs + break-even; repeat re-entry while EMA trend holds",
+            "ema_cross_reentry_widening_enabled": "Re-enter only with a wider EMA gap; track phantom checkpoints otherwise",
             "ema_cross_entry_confirmation_enabled": "Wait for confirmation distance before EMA-cross entry",
             "ema_320_flip_signals": "Flip EMA 320 Signals (Long ↔ Short)",
         }.items():
@@ -626,6 +629,7 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.set_row_visible("ema_320_flip_signals", self._signal_strategy_mode() == "EMA_320_CLOSE_CROSS")
         self.entry_card.set_row_visible("ema_320_exit_mode", self._signal_strategy_mode() == "EMA_320_CLOSE_CROSS")
         self.entry_card.set_row_visible("ema_cross_cost_cycle_enabled", cross_plan)
+        self.entry_card.set_row_visible("ema_cross_reentry_widening_enabled", cross_plan and self.account["ema_cross_cost_cycle_enabled"].isChecked())
         self.entry_card.set_row_visible("ema_cross_entry_confirmation_enabled", cross_plan)
         self.entry_card.set_row_visible(
             "ema_cross_entry_confirmation_r",
@@ -1273,6 +1277,10 @@ class RiskExecutionWorkspace(QWidget):
                 )
                 if execution.di_ladder_enabled else
                 "DI ladder disabled. "
+            )
+            + (
+                "Re-entry filter: EMA 20/100 gap must exceed the previous actual entry gap; otherwise record phantom 1R checkpoints, with SL one checkpoint behind. "
+                if cross_plan and getattr(execution, "ema_cross_cost_cycle_enabled", False) and getattr(execution, "ema_cross_reentry_widening_enabled", False) else ""
             )
             + (
                 "Management: at 1R cover costs and move SL to entry; after a BE stop, repeat re-entry at the previous 1R level with the previous entry as SL while EMA alignment holds; runner exits on the opposite cross."
