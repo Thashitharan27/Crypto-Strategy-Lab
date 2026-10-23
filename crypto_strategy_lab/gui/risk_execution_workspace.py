@@ -157,6 +157,24 @@ class RiskExecutionWorkspace(QWidget):
         self.account["sd_minimum_r"].setRange(.01,100.)
         for name,label in (("ls_equal_tolerance_atr","Equal-high/low tolerance (ATR)"),("ls_displacement_atr","Minimum displacement body (ATR)"),("ls_base_bars","Maximum zone base candles"),("ls_max_wait_bars","Maximum wait per stage (candles)")):
             self.sd_card.add_field(name,label,self.account[name])
+        for name,label in (("tc_require_structure","Require close beyond structure"),
+                           ("tc_require_ifvg","Require inversion of an opposing FVG"),
+                           ("tc_require_equilibrium","Require discount / premium overlap")):
+            self.account[name].setText(label)
+            self.sd_card.add_control(name,self.account[name])
+        for name,label in (("tc_displacement_atr","Minimum FVG middle body (ATR)"),
+                           ("tc_max_wait_bars","Maximum candles from sweep"),
+                           ("tc_fvg_lookback","Swing / opposing FVG lookback (candles)"),
+                           ("tc_min_reversal_body_percent","Minimum reversal body (% of range)"),
+                           ("tc_target_r","Final target (R)")):
+            self.sd_card.add_field(name,label,self.account[name])
+        self.account["tc_displacement_atr"].setRange(.01,100.)
+        self.account["tc_max_wait_bars"].setRange(1,500)
+        self.account["tc_fvg_lookback"].setRange(1,500)
+        self.account["tc_min_reversal_body_percent"].setRange(0.,100.)
+        self.account["tc_min_reversal_body_percent"].setSuffix("%")
+        self.account["tc_target_r"].setRange(.01,100.)
+        self.account["tc_target_r"].setSuffix(" R")
         self.account["ls_equal_tolerance_atr"].setRange(0.,10.)
         self.account["ls_displacement_atr"].setRange(.01,100.)
         self.account["ls_base_bars"].setRange(1,20)
@@ -949,16 +967,21 @@ class RiskExecutionWorkspace(QWidget):
             self.trade["position_sizing_stop_override_enabled"].setEnabled(False)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
         liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
+        confluence = self._signal_strategy_mode() == "TJR_CONFLUENCE"
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
-        supply_demand = self._signal_strategy_mode() in {"SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT"}
+        supply_demand = self._signal_strategy_mode() in {"SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
         self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
             self.sd_card.set_row_visible(name,liquidity)
         self.sd_card.set_row_visible("sp_cost_cover_close_pct", sp_cost)
+        for name in ("tc_require_structure","tc_require_ifvg","tc_require_equilibrium","tc_displacement_atr",
+                     "tc_max_wait_bars","tc_fvg_lookback","tc_min_reversal_body_percent","tc_target_r"):
+            self.sd_card.set_row_visible(name,confluence)
+        if confluence:self.sd_card.setTitle("Confluence - sweep, structure and FVG")
         if sneaky:self.sd_card.setTitle("Sneaky Pivot — all day")
         self.sd_card.set_row_visible("sd_minimum_r",not sneaky or self.account["sp_minimum_r_enabled"].isChecked())
         self.sd_card.set_row_visible("sd_stop_buffer_atr",True)
-        self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond swing (ATR)" if sneaky else "Stop buffer beyond zone (ATR)")
+        self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond sweep (ATR)" if confluence else "Stop buffer beyond swing (ATR)" if sneaky else "Stop buffer beyond zone (ATR)")
         for name in ("sp_minimum_r_enabled","sp_recent_swings_enabled","sp_require_level_reclaim","sp_cost_cover_enabled","sp_level_tolerance_atr","sp_body_atr","sp_min_body_percent","sp_confirmation_bars","sp_hold_minutes"):
             self.sd_card.set_row_visible(name,sneaky)
         self.sd_card.setVisible(supply_demand)
@@ -1020,6 +1043,16 @@ class RiskExecutionWorkspace(QWidget):
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "SNEAKY_PIVOT":
             self.summary_label.setText(f"All-day 15m Sneaky Pivot; test the previous complete UTC-day low/high{' plus the latest recent confirmed swings' if execution.sp_recent_swings_enabled else ''}. Initial body ≥{execution.sp_min_body_percent:g}% of range and {execution.sp_body_atr:g} ATR; wick must touch the selected level within {execution.sp_level_tolerance_atr:g} ATR. First reversal within {execution.sp_confirmation_bars} candles{' closing back across the tested level' if execution.sp_require_level_reclaim else ''}; break its high/low during the next candle using 1m data. SL {execution.sd_stop_buffer_atr:g} ATR beyond the older confirmed swing low/high; skip if unavailable or breached. TP opposite prior-day boundary. Hold cap {execution.sp_hold_minutes} minutes from setup. One open trade; no session restriction. Cost-cover partial {str(execution.sp_cost_cover_close_pct) + '% at 1R, then SL to entry; widen swing stop only as needed' if execution.sp_cost_cover_enabled else 'off'}. Minimum-R filter {str(execution.sd_minimum_r) + 'R' if execution.sp_minimum_r_enabled else 'off'}.")
+            return
+        if self._signal_strategy_mode() == "TJR_CONFLUENCE":
+            self.summary_label.setText(
+                f"Confluence research preset: sweep and reclaim a confirmed swing; {execution.sd_swing_strength} candles each side. "
+                f"Structure close {'required' if execution.tc_require_structure else 'optional'}; opposing FVG inversion {'required' if execution.tc_require_ifvg else 'optional'}. "
+                f"New directional FVG with middle body >= {execution.tc_displacement_atr:g} ATR; discount/premium overlap {'required' if execution.tc_require_equilibrium else 'optional'}. "
+                f"Later directional retest candle body >= {execution.tc_min_reversal_body_percent:g}% of range; enter next open, recheck equilibrium and SL geometry. "
+                f"SL beyond sweep +{execution.sd_stop_buffer_atr:g} ATR frozen at sweep; TP {execution.tc_target_r:g}R; minimum {execution.sd_minimum_r:g}R. "
+                f"Expire after {execution.tc_max_wait_bars} candles from sweep; lookback {execution.tc_fvg_lookback} candles. No session restriction. "
+                "Mechanical interpretation of the five concepts; not the creator's complete discretionary system.")
             return
         if self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST":
             self.summary_label.setText(

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 MODE = "SUPPLY_DEMAND_RETEST"
-MODES = {MODE, "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT"}
+MODES = {MODE, "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE"}
 
 
 def validate_settings(strength, buffer, minimum_r):
@@ -89,7 +89,15 @@ class SupplyDemandRetestMixin:
         modes={r.get("_strategy_direction_mode") for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())}
         if "SNEAKY_PIVOT" in modes:
             return  # Configured by SneakyPivotMixin.
-        if "LIQUIDITY_SWEEP_RETEST" in modes:
+        if "TJR_CONFLUENCE" in modes:
+            from crypto_strategy_lab.tjr_confluence import confluence_setups
+            self.sd_setups=confluence_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
+                strength=self.config.sd_swing_strength,timeframe_minutes=self.config.strategy_timeframe_minutes,
+                displacement_atr=self.config.tc_displacement_atr,max_wait=self.config.tc_max_wait_bars,
+                fvg_lookback=self.config.tc_fvg_lookback,min_body_percent=self.config.tc_min_reversal_body_percent,
+                require_structure=self.config.tc_require_structure,require_ifvg=self.config.tc_require_ifvg,
+                require_equilibrium=self.config.tc_require_equilibrium)
+        elif "LIQUIDITY_SWEEP_RETEST" in modes:
             from crypto_strategy_lab.liquidity_sweep_retest import liquidity_sweep_setups
             self.sd_setups=liquidity_sweep_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
                 strength=self.config.sd_swing_strength,timeframe_minutes=self.config.strategy_timeframe_minutes,
@@ -127,7 +135,7 @@ class SupplyDemandRetestMixin:
         context=super()._profile_context(i)
         if getattr(self,"signal_strategy_mode",None) not in MODES or context is None:
             return context
-        profile=replace(context[3],reward_risk_ratio=1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
+        profile=replace(context[3],reward_risk_ratio=self.config.tc_target_r if self.signal_strategy_mode=="TJR_CONFLUENCE" else 1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
                         partial_profit_enabled=False,partial_stop_enabled=False,trailing_enabled=False,break_even_enabled=False,
                         r_step_trailing_enabled=False,atr_checkpoint_tp_extension_enabled=False,timeout_enabled=False)
         return (*context[:3],profile)
@@ -144,6 +152,19 @@ class SupplyDemandRetestMixin:
         atr=float(self.atr_values[i])
         if not np.isfinite(atr) or atr<=0:
             return reject
+        if self.signal_strategy_mode=="TJR_CONFLUENCE":
+            sign=1 if side=="LONG" else -1
+            stop=setup["sweepExtreme"]-sign*self.config.sd_stop_buffer_atr*setup["setupAtr"]
+            risk=sign*(entry-stop)
+            equilibrium_ok=not self.config.tc_require_equilibrium or (entry<=setup["equilibrium"] if sign>0 else entry>=setup["equilibrium"])
+            if not np.isfinite([entry,stop,risk]).all() or stop<=0 or risk<=0 or not equilibrium_ok or self.config.tc_target_r<self.config.sd_minimum_r:
+                return {**reject,"reason":"CONFLUENCE_ENTRY_GEOMETRY_REJECTED"}
+            target=entry+sign*self.config.tc_target_r*risk
+            if target<=0:
+                return {**reject,"reason":"CONFLUENCE_ENTRY_GEOMETRY_REJECTED"}
+            return {"passed":True,"applied":True,"reason":"CONFLUENCE_SWEEP_STOP","distance":risk,"stop_price":stop,
+                    "boundary_price":setup["sweepExtreme"],"level_price":target,"distance_atr":risk/setup["setupAtr"],
+                    "timeframe_minutes":self.config.strategy_timeframe_minutes}
         zone=setup["zone"]
         buffer=self.config.sd_stop_buffer_atr*atr
         stop=zone["bottom"]-buffer if side=="LONG" else zone["top"]+buffer
@@ -158,7 +179,10 @@ class SupplyDemandRetestMixin:
         if getattr(self,"signal_strategy_mode",None) not in MODES:
             return super()._apply_sr_take_profit(i,pair)
         for pos in pair.positions():
-            pos.tp=float(self.sd_setups[i]["target"])
+            if self.signal_strategy_mode=="TJR_CONFLUENCE":
+                pos.tp=pos.entry_price+(1 if pos.side.value=="LONG" else -1)*self.config.tc_target_r*pos.risk
+            else:
+                pos.tp=float(self.sd_setups[i]["target"])
 
     def _sr_tp_filter_result(self,i,execution_i=None):
         if getattr(self,"signal_strategy_mode",None) in MODES:
@@ -171,10 +195,15 @@ class SupplyDemandRetestMixin:
         if getattr(self,"signal_strategy_mode",None) in MODES and len(self.active_pairs)>before:
             j=schedule["indicator_index"] if schedule else i
             self.active_pairs[-1].sd_setup=copy.deepcopy(self.sd_setups[j])
+            if self.signal_strategy_mode=="TJR_CONFLUENCE":
+                pos=self.active_pairs[-1].position
+                self.active_pairs[-1].sd_setup.update(stop=float(pos.original_sl),target=float(pos.tp),targetR=float(self.config.tc_target_r))
         return result
 
     def _build_result_row(self,pair,row_kind,positions):
         row=super()._build_result_row(pair,row_kind,positions)
         if getattr(self,"signal_strategy_mode",None) in MODES:
             row["supply_demand_setup"]=json.dumps(getattr(pair,"sd_setup",None),allow_nan=False)
+            if self.signal_strategy_mode=="TJR_CONFLUENCE":
+                row["applied_reward_risk_ratio"]=float(self.config.tc_target_r)
         return row

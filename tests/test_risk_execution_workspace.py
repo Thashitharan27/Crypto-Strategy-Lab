@@ -873,3 +873,29 @@ def test_liquidity_preset_and_parameter_round_trip():
         selector.setCurrentIndex(selector.findData("SUPPLY_DEMAND_RETEST"));workspace.refresh_visibility()
         assert window.execution_form.widgets["ls_equal_tolerance_atr"].isHidden()
     finally:window.close()
+
+
+def test_confluence_strategy_settings_and_visibility():
+    app,window=_window()
+    try:
+        selector=window.rule_builder.direction_mode
+        index=selector.findData('TJR_CONFLUENCE');assert index>=0
+        selector.setCurrentIndex(index);selector.activated.emit(index);app.processEvents()
+        w=window.execution_form.widgets;workspace=window.risk_execution_workspace
+        assert window.strategy_tf.currentData()=='15m'
+        assert w['entry_timing_mode'].currentData()=='NEXT_CANDLE_OPEN'
+        assert not w['tc_require_ifvg'].isHidden() and w['tc_require_ifvg'].isChecked()
+        assert not w['tc_require_structure'].isHidden() and w['tc_require_structure'].isChecked()
+        assert not w['tc_require_equilibrium'].isHidden() and w['tc_require_equilibrium'].isChecked()
+        assert w['sp_require_level_reclaim'].isHidden()
+        w['tc_target_r'].setValue(4.);w['tc_min_reversal_body_percent'].setValue(60.)
+        w['tc_require_ifvg'].setChecked(False)
+        cfg=window.build_config();cfg.validate()
+        assert cfg.execution.tc_target_r==4. and cfg.execution.tc_min_reversal_body_percent==60.
+        assert not cfg.execution.tc_require_ifvg
+        assert 'TP 4R' in workspace.summary_label.text()
+        assert workspace.target_card.isHidden()
+        index=selector.findData('DI');selector.setCurrentIndex(index);selector.activated.emit(index);app.processEvents()
+        assert w['tc_target_r'].isHidden()
+    finally:
+        window.close();window.deleteLater();app.processEvents()
