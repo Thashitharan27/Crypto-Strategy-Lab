@@ -157,15 +157,19 @@ def test_cost_cycle_gui_and_native_config_roundtrip():
     from crypto_strategy_lab.research_adapters import native_simulator_config
     values = default_gui_config()
     assert not values["ema_cross_cost_cycle_enabled"]
+    assert not values["ema_cross_initial_phantom_enabled"]
     assert not values["ema_cross_reentry_widening_enabled"]
     values["ema_cross_cost_cycle_enabled"] = True
     values["ema_cross_reentry_widening_enabled"] = True
+    values["ema_cross_initial_phantom_enabled"] = True
     assert build_backtest_config(values, require_paths=False).ema_cross_cost_cycle_enabled
     assert build_backtest_config(values, require_paths=False).ema_cross_reentry_widening_enabled
+    assert build_backtest_config(values, require_paths=False).ema_cross_initial_phantom_enabled
     c = ResearchRunConfig()
-    c = replace(c, execution=replace(c.execution, ema_cross_cost_cycle_enabled=True, ema_cross_reentry_widening_enabled=True))
+    c = replace(c, execution=replace(c.execution, ema_cross_cost_cycle_enabled=True, ema_cross_reentry_widening_enabled=True, ema_cross_initial_phantom_enabled=True))
     assert native_simulator_config(c.data,c.features,c.strategy,c.execution).ema_cross_cost_cycle_enabled
     assert native_simulator_config(c.data,c.features,c.strategy,c.execution).ema_cross_reentry_widening_enabled
+    assert native_simulator_config(c.data,c.features,c.strategy,c.execution).ema_cross_initial_phantom_enabled
 
 
 def test_array_backed_intrabar_path_preserves_same_interval_cycles():
@@ -342,3 +346,128 @@ def test_intrabar_phantoms_use_closed_strategy_ema_without_extra_trades(short):
     assert [p["entry"] for p in phantoms] == [100+sign*10,100+sign*20]
     assert all(p["ema_gap"] == 1. for p in phantoms)
     assert [pd.Timestamp(p["time"]) for p in phantoms] == [pd.Timestamp(e.times[111])+pd.Timedelta(minutes=m) for m in (2,3)]
+
+
+@pytest.mark.parametrize("short", [False, True])
+def test_initial_and_1r_are_phantom_before_2r_actual_entry(short):
+    e = engine(short)
+    e.config = replace(e.config, ema_cross_initial_phantom_enabled=True)
+    sign = -1 if short else 1
+    e.ema_20_values[113:117] = e.ema_100_values[113:117] + sign*2
+    rows = e.run()
+    assert len(rows) == 1
+    p = e.completed_pairs[0].position
+    assert p.entry_price == 100+sign*20
+    assert p.original_sl == 100+sign*10
+    assert p.ema_cycle_trigger == 100+sign*30
+    assert p.ema_cycle_number == 0
+    assert p.ema_cycle_root_id == 1
+    assert p.ema_cycle_parent_id is None
+    assert p.ema_cycle_reentry_checkpoint == 2
+    setup = rows.attrs["ema_initial_phantom_setups"][0]
+    assert setup["status"] == "ENTERED"
+    assert setup["checkpoints"][0]["status"] == "PHANTOM_FIRST_1R"
+    assert setup["checkpoints"][0]["entry"] == 100+sign*10
+    assert setup["pair_id"] == 1
+    assert e.current_equity == pytest.approx(e.config.initial_equity+p.net_pnl)
+
+
+def test_initial_phantoms_compare_consecutive_checkpoints_not_initial_or_1r_gap():
+    e = engine()
+    e.config = replace(e.config, ema_cross_initial_phantom_enabled=True)
+    e.ema_20_values[110] = 95.
+    e.ema_20_values[113] = 93.
+    e.ema_20_values[115] = 94.
+    e.open[116],e.high[116],e.low[116] = 125.,131.,124.
+    rows = e.run()
+    assert len(rows) == 1
+    p = e.completed_pairs[0].position
+    assert p.entry_price == 130.
+    assert p.original_sl == 120.
+    assert p.ema_cycle_reference_ema_gap == 3.
+    assert p.ema_cycle_entry_ema_gap == 4.
+    record = rows.attrs["ema_initial_phantom_setups"][0]
+    assert [c["ema_gap"] for c in record["checkpoints"]] == [5.,3.]
+    assert record["entry_checkpoint"] == 3
+
+
+def test_initial_phantom_cancelled_without_balance_change_or_trade():
+    e = engine()
+    e.config = replace(e.config, ema_cross_initial_phantom_enabled=True)
+    e.ema_20_values[112:] = 89.
+    rows = e.run()
+    assert rows.empty
+    assert not e.completed_pairs
+    assert e.current_equity == e.config.initial_equity
+    assert rows.attrs["ema_initial_phantom_setups"][0]["status"] == "CANCELLED_EMA_ALIGNMENT"
+
+
+def test_same_bar_1r_and_2r_cannot_qualify_using_unfinished_ema():
+    e = engine()
+    e.config = replace(e.config, ema_cross_initial_phantom_enabled=True)
+    e.high[111] = 121.
+    e.ema_20_values[111] = 95.  # Unknown within candle 111.
+    e.ema_20_values[112] = 92.
+    e.open[113],e.high[113],e.low[113] = 125.,131.,124.
+    e.run()
+    p = e.completed_pairs[0].position
+    assert p.entry_price == 130.
+    assert p.original_sl == 120.
+    assert [c["ema_gap"] for c in e.ema_initial_phantom_setups[0]["checkpoints"]] == [1.,1.]
+
+
+def test_initial_phantom_config_rejects_simultaneous_confirmation_distance():
+    e = engine()
+    with pytest.raises(ValueError, match="replaces EMA cross entry confirmation"):
+        replace(e.config, ema_cross_initial_phantom_enabled=True, ema_cross_entry_confirmation_enabled=True)
+
+
+@pytest.mark.parametrize("entered", [False, True])
+def test_initial_phantom_log_published_even_without_real_trade(tmp_path, entered):
+    import json
+    from crypto_strategy_lab.research_reporting import _publish_ema_initial_phantoms
+    e = engine()
+    e.config = replace(e.config, ema_cross_initial_phantom_enabled=True)
+    if entered:
+        e.ema_20_values[113:117] = 92.
+    else:
+        e.ema_20_values[112:] = 89.
+    trades = e.run()
+    manifest = {"artifacts": {"existing": "preserved"}}
+    _publish_ema_initial_phantoms(tmp_path, trades, manifest)
+    saved = json.loads((tmp_path/"ema_initial_phantoms.json").read_text())
+    assert len(saved["setups"]) == 1
+    assert saved["setups"][0]["status"] == ("ENTERED" if entered else "CANCELLED_EMA_ALIGNMENT")
+    assert manifest["research"]["ema_initial_phantoms"]["entered"] == int(entered)
+    assert manifest["artifacts"]["ema_initial_phantoms"]["path"] == "ema_initial_phantoms.json"
+    assert manifest["artifacts"]["ema_initial_phantoms"]["sha256"]
+    assert manifest["artifacts"]["existing"] == "preserved"
+
+
+def test_initial_phantom_keeps_normal_cost_cover_after_actual_fill():
+    e = engine()
+    e.config = replace(e.config, ema_cross_initial_phantom_enabled=True)
+    e.ema_20_values[113:117] = 92.
+    e.open[115],e.high[115],e.low[115] = 125.,131.,121.
+    e.open[116],e.high[116],e.low[116] = 125.,126.,119.
+    e.run()
+    p = e.completed_pairs[0].position
+    assert p.entry_price == 120.
+    assert p.tp1_hit
+    assert p.sl == 120.
+    assert p.exit_reason.value == "BE"
+    assert p.net_pnl == pytest.approx(0, abs=1e-9)
+
+
+def test_both_direction_mode_cancels_old_phantom_before_new_opposite_setup():
+    e = engine()
+    e.config = replace(e.config, ema_cross_initial_phantom_enabled=True, ema_920_trade_plan="EMA_20_100_CROSS_BOTH")
+    e.ema_100_values[117:] = 140.
+    e.ema_20_values[117:] = 139.
+    rows = e.run()
+    records = rows.attrs["ema_initial_phantom_setups"]
+    assert len(records) == 2
+    assert records[0]["side"] == "LONG"
+    assert records[0]["status"] == "CANCELLED_EMA_ALIGNMENT"
+    assert records[1]["side"] == "SHORT"
+    assert records[1]["status"] == "END_OF_DATA"

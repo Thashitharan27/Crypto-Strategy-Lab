@@ -74,6 +74,7 @@ class BacktestConfig:
     ema_320_candle_wick_rejection: bool = True
     ema_320_candle_star: bool = True
     ema_cross_cost_cycle_enabled: bool = False
+    ema_cross_initial_phantom_enabled: bool = False
     ema_cross_reentry_widening_enabled: bool = False
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
@@ -215,6 +216,8 @@ class BacktestConfig:
             )
         )
         if ema_cost_cycle_selected:
+            if self.ema_cross_initial_phantom_enabled and self.ema_cross_entry_confirmation_enabled:
+                raise ValueError("Initial phantom mode replaces EMA cross entry confirmation; disable confirmation distance")
             if self.enable_daily_entry_schedule or self.max_active_pairs != 1 or getattr(self, "di_ladder_enabled", False):
                 raise ValueError("EMA cost-cover cycles require one active trade, no daily schedule and no DI ladder")
         if self.strategy_profile_run_mode not in ("ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"):

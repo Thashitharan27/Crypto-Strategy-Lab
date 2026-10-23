@@ -480,6 +480,13 @@ class Ema920PullbackMixin(EmaCostCycleMixin):
 
     def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
         decision = getattr(self, "pending_next_open_entry", None)
+        if self._ema_initial_phantom_enabled() and decision and int(decision.get("execution_index", -1)) == i:
+            self.pending_next_open_entry = None
+            for pair in list(self.active_pairs):
+                self._close_on_ema_20_100_cross(pair.positions(), i)
+            self._collect_closed_pairs()
+            self._arm_ema_initial_phantom(i, decision)
+            return
         if (
             decision
             and decision.get("ema_cross_confirmation")
@@ -785,11 +792,13 @@ class Ema920PullbackMixin(EmaCostCycleMixin):
             ("ema_cycle_entry_ema_gap", np.nan),
             ("ema_cycle_reference_ema_gap", np.nan),
             ("ema_cycle_reentry_checkpoint", 0),
+            ("ema_cycle_initial_phantom_id", None),
         ):
             row[name] = getattr(pos, name, default)
         phantoms = getattr(pos, "ema_cycle_phantom_records", [])
         row["ema_cycle_phantom_count"] = len(phantoms)
         row["ema_cycle_phantom_records"] = json.dumps(phantoms, allow_nan=False)
+        row["ema_cycle_initial_phantom_records"] = json.dumps(getattr(pos, "ema_cycle_initial_phantom_records", []), allow_nan=False)
         if getattr(pos, "ema_cost_cycle_enabled", False):
             row.update(intrabar_partial_tp_ordering="STOP_FIRST", break_even_activation_r=1.0,
                        break_even_offset_r=0.0, tp2_close_pct=0.0)

@@ -63,6 +63,19 @@ def _catalog_entry(
     }
 
 
+def _publish_ema_initial_phantoms(run_dir, trades, manifest):
+    records = trades.attrs.get("ema_initial_phantom_setups", [])
+    if not records:
+        return
+    path = run_dir / "ema_initial_phantoms.json"
+    atomic_json(path, {"setups": records})
+    manifest.setdefault("artifacts", {})["ema_initial_phantoms"] = _catalog_entry(path, run_dir, "json", len(records))
+    manifest.setdefault("research", {})["ema_initial_phantoms"] = {
+        "artifact": path.name, "setups": len(records),
+        "entered": sum(r["status"] == "ENTERED" for r in records),
+    }
+
+
 def _validate_research_artifacts(
     trades_path: Path,
     context_path: Path,
@@ -1136,5 +1149,6 @@ class CsvManifestReporter:
         manifest["execution_result"]["stage_timings"].update(reporting_timings)
 
         # Completion marker is deliberately the final write and atomic rename.
+        _publish_ema_initial_phantoms(run_dir, result.trades, manifest)
         atomic_json(run_dir / "run_manifest.json", manifest)
         object.__setattr__(result, "output_dir", run_dir)
