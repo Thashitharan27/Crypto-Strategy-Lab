@@ -255,7 +255,7 @@ def append_research_sampling_artifacts(result, context) -> None:
         # Chain-dependent re-entry cannot be represented by overlapping,
         # independent-equity observations. Keep the actual portfolio report.
         reason = "EMA cost-cover re-entry cycles require sequential portfolio execution; independent strategy sampling is unavailable."
-        manifest_path = Path(result.output_dir) / "manifest.json"
+        manifest_path = Path(result.output_dir) / "run_manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest.setdefault("research", {})["strategy_research_sampling"] = {
             "enabled": False, "requested_mode": mode,

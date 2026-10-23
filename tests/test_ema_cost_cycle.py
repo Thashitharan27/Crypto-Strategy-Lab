@@ -221,7 +221,7 @@ def test_optional_strategy_sampling_retains_portfolio_artifacts_for_cycles(tmp_p
     def unexpected(*a, **kw):
         raise AssertionError("Chain execution must not enter independent observation sampling")
     monkeypatch.setattr(report, "generate_strategy_research_samples", unexpected)
-    manifest = tmp_path / "manifest.json"
+    manifest = tmp_path / "run_manifest.json"
     manifest.write_text(json.dumps({"artifacts": {"trades": "retained"}, "research": {"existing": True}}))
     events = []
     context = SimpleNamespace(config=c, progress_callback=events.append)
