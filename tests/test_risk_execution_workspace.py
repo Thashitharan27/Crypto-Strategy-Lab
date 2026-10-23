@@ -581,6 +581,34 @@ def test_ema_cross_confirmation_is_visible_in_effective_plan_summary():
         app.processEvents()
 
 
+def test_ema_cost_cycle_option_summary_and_roundtrip():
+    app, window = _window()
+    try:
+        selector = window.rule_builder.direction_mode
+        index = selector.findData("EMA_9_20_PULLBACK")
+        selector.setCurrentIndex(index)
+        selector.activated.emit(index)
+        plan = window.execution_form.widgets["ema_920_trade_plan"]
+        plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS"))
+        cycle = window.execution_form.widgets["ema_cross_cost_cycle_enabled"]
+        cycle.setChecked(True)
+        app.processEvents()
+        workspace = window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert not cycle.isHidden()
+        assert window.execution_form.value().ema_cross_cost_cycle_enabled
+        assert "at 1R cover costs" in workspace.summary_label.text()
+        assert "repeat re-entry" in workspace.summary_label.text()
+        assert not workspace.trade["partial_profit_enabled"].isEnabled()
+        cycle.setChecked(False)
+        app.processEvents()
+        assert workspace.trade["partial_profit_enabled"].isEnabled()
+        assert workspace.trade["timeout_enabled"].isEnabled()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_ema_920_hidden_generic_sr_policy_does_not_force_sr_dependency():
     app, window = _window()
     try:

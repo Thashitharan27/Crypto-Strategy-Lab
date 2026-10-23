@@ -194,6 +194,7 @@ class RiskExecutionWorkspace(QWidget):
         )
         self.entry_card.add_control("ema_320_flip_signals", self.account["ema_320_flip_signals"])
         self.entry_card.add_field("ema_320_exit_mode", "EMA 320 Exit Policy", self.account["ema_320_exit_mode"])
+        self.entry_card.add_control("ema_cross_cost_cycle_enabled", self.account["ema_cross_cost_cycle_enabled"])
         self.entry_card.add_control(
             "ema_cross_entry_confirmation_enabled",
             self.account["ema_cross_entry_confirmation_enabled"],
@@ -516,6 +517,7 @@ class RiskExecutionWorkspace(QWidget):
         self.account["sr_take_profit_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["entry_timing_mode"].currentIndexChanged.connect(self.refresh_summary_from_widgets)
         self.account["ema_920_trade_plan"].currentIndexChanged.connect(self.refresh_visibility)
+        self.account["ema_cross_cost_cycle_enabled"].toggled.connect(self.refresh_visibility)
         self.account["ema_cross_entry_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_minutes"].valueChanged.connect(self.refresh_summary_from_widgets)
@@ -561,6 +563,7 @@ class RiskExecutionWorkspace(QWidget):
             "di_ladder_enabled": "Enable DI ladder / reversal-filter execution",
             "fvg_confirmation_enabled": "Require directional FVG confirmation before entry",
             "fvg_context_enabled": "Require the execution-timeframe FVG to overlap an active higher-timeframe FVG",
+            "ema_cross_cost_cycle_enabled": "At 1R cover costs + break-even; repeat re-entry while EMA trend holds",
             "ema_cross_entry_confirmation_enabled": "Wait for confirmation distance before EMA-cross entry",
             "ema_320_flip_signals": "Flip EMA 320 Signals (Long ↔ Short)",
         }.items():
@@ -622,6 +625,7 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.set_row_visible("ema_920_trade_plan", ema_920)
         self.entry_card.set_row_visible("ema_320_flip_signals", self._signal_strategy_mode() == "EMA_320_CLOSE_CROSS")
         self.entry_card.set_row_visible("ema_320_exit_mode", self._signal_strategy_mode() == "EMA_320_CLOSE_CROSS")
+        self.entry_card.set_row_visible("ema_cross_cost_cycle_enabled", cross_plan)
         self.entry_card.set_row_visible("ema_cross_entry_confirmation_enabled", cross_plan)
         self.entry_card.set_row_visible(
             "ema_cross_entry_confirmation_r",
@@ -873,6 +877,13 @@ class RiskExecutionWorkspace(QWidget):
             enabled = self.trade[controller].isChecked()
             for name in fields:
                 self.advanced_card.set_row_visible(name, enabled)
+        cost_cycle = cross_plan and self.account["ema_cross_cost_cycle_enabled"].isChecked()
+        self.trade["timeout_enabled"].setEnabled(not cost_cycle)
+        for name in ("break_even_enabled", "trailing_enabled", "partial_profit_enabled", "timeout_enabled"):
+            if cost_cycle:
+                self.trade[name].setEnabled(False)
+                for field in toggles[name]:
+                    self.management_card.set_row_visible(field, False)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
         liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
@@ -1263,7 +1274,11 @@ class RiskExecutionWorkspace(QWidget):
                 if execution.di_ladder_enabled else
                 "DI ladder disabled. "
             )
-            + f"Management: {self._management_description(base)}."
+            + (
+                "Management: at 1R cover costs and move SL to entry; after a BE stop, repeat re-entry at the previous 1R level with the previous entry as SL while EMA alignment holds; runner exits on the opposite cross."
+                if cross_plan and getattr(execution, "ema_cross_cost_cycle_enabled", False)
+                else f"Management: {self._management_description(base)}."
+            )
         )
 
     def refresh_summary_from_widgets(self) -> None:

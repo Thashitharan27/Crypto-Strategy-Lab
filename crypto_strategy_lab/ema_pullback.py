@@ -7,6 +7,7 @@ import pandas as pd
 from crypto_strategy_core.ema_strategy import ema_20_100_cross, ema_20_100_entry_direction
 from crypto_strategy_lab.engine import _signal_ema
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
+from crypto_strategy_lab.ema_cost_cycle import EmaCostCycleMixin
 
 
 EMA_920_MODE = "EMA_9_20_PULLBACK"
@@ -21,7 +22,7 @@ EMA_920_RULE_INDICATORS = frozenset({
 })
 
 
-class Ema920PullbackMixin:
+class Ema920PullbackMixin(EmaCostCycleMixin):
     """Add a sparse 9/20 EMA continuation signal without forking the simulator.
 
     The completed strategy candle is the confirmation candle. The previous
@@ -225,6 +226,9 @@ class Ema920PullbackMixin:
         return direction
 
     def _selected_direction(self, i):
+        pending = getattr(self, "_ema_cycle_opening", None)
+        if pending:
+            return pending["direction"]
         if getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS":
             return self._ema_320_trade_direction(i)
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
@@ -350,11 +354,15 @@ class Ema920PullbackMixin:
         )
 
     def _scan_pair_exit(self, pair, i):
+        if self._ema_cost_cycle_enabled():
+            return self._scan_ema_cost_cycle(i)
         if self._close_on_ema_20_100_cross(pair.positions(), i):
             return
         return super()._scan_pair_exit(pair, i)
 
     def _scan_position_exit(self, pair, position, i):
+        if self._ema_cost_cycle_enabled():
+            return self._scan_ema_cost_cycle(i)
         # The production Data Lake path advances a Position directly; it does
         # not dispatch through _scan_pair_exit.
         if self._close_on_ema_20_100_cross((position,), i):
@@ -661,6 +669,14 @@ class Ema920PullbackMixin:
         configurable multiplier changes only the actual protective stop distance,
         so a 2x stop with a 1% sizing budget carries about 2% full-stop exposure.
         """
+        pending = getattr(self, "_ema_cycle_opening", None)
+        if pending:
+            sign = 1 if pending["direction"] == "LONG" else -1
+            entry = pending["raw"] * (1 + sign * self.config.slippage)
+            distance = sign * (entry - pending["stop"])
+            return {"passed": np.isfinite(distance) and distance > 0, "applied": True,
+                    "reason": "EMA_COST_CYCLE_PREVIOUS_ENTRY_STOP", "distance": distance,
+                    "base_distance": distance, "stop_price": pending["stop"]}
         direction = self._effective_trade_direction(i)
         if direction not in {"LONG", "SHORT"}:
             return {"passed": False, "applied": False, "reason": "EMA100_NO_DIRECTION", "distance": None}
@@ -734,6 +750,13 @@ class Ema920PullbackMixin:
             pos.micro_swing_stop_distance_atr = plan.get("distance_atr", np.nan)
 
     def _build_result_row(self, p, row_kind, positions):
+        cycle_pos = positions[0] if positions else None
+        if getattr(cycle_pos, "ema_cost_cycle_enabled", False):
+            p.applied_partial_tp_enabled = True
+            p.applied_partial_sl_enabled = False
+            p.applied_tp1_r = 1.0
+            p.applied_tp1_close_pct = 100 * getattr(cycle_pos, "ema_cycle_cost_cover_fraction", 0.0)
+            p.applied_tp2_r = np.nan
         row = super()._build_result_row(p, row_kind, positions)
         pos = positions[0] if positions else None
         row["micro_swing_stop_applied"] = bool(getattr(pos, "micro_swing_stop_applied", False)) if pos is not None else False
@@ -752,6 +775,16 @@ class Ema920PullbackMixin:
         row["ema_cross_confirmation_trigger_price"] = getattr(p, "ema_cross_confirmation_trigger_price", np.nan)
         row["ema_cross_confirmation_original_entry_price"] = getattr(p, "ema_cross_confirmation_original_entry_price", np.nan)
         row["ema_cross_confirmation_original_r"] = getattr(p, "ema_cross_confirmation_original_r", np.nan)
+        for name, default in (
+            ("ema_cost_cycle_enabled", False), ("ema_cycle_number", 0),
+            ("ema_cycle_parent_id", None), ("ema_cycle_root_id", None),
+            ("ema_cycle_trigger", np.nan), ("ema_cycle_cost_cover_fraction", 0.0),
+            ("ema_cycle_cost_cover_rejected", False),
+        ):
+            row[name] = getattr(pos, name, default)
+        if getattr(pos, "ema_cost_cycle_enabled", False):
+            row.update(intrabar_partial_tp_ordering="STOP_FIRST", break_even_activation_r=1.0,
+                       break_even_offset_r=0.0, tp2_close_pct=0.0)
         return row
 
     def _position_sizing_stop_distance(self, profile, risk_unit, actual_stop):
@@ -833,4 +866,6 @@ class Ema920PullbackMixin:
             if getattr(pos, "partial_tp_enabled", False):
                 pos.tp2_price = pos.tp
             pos.ema_920_fixed_target_r = 1.0
+        if self._ema_cost_cycle_enabled():
+            self._init_ema_cost_cycle(pair, schedule)
         return result
