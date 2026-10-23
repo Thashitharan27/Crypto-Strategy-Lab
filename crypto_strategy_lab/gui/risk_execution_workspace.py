@@ -1283,7 +1283,7 @@ class RiskExecutionWorkspace(QWidget):
                 if cross_plan and getattr(execution, "ema_cross_cost_cycle_enabled", False) and getattr(execution, "ema_cross_reentry_widening_enabled", False) else ""
             )
             + (
-                "Management: at 1R cover costs and move SL to entry; after a BE stop, repeat re-entry at the previous 1R level with the previous entry as SL while EMA alignment holds; runner exits on the opposite cross."
+                "Management: at 1R cover costs and move SL to entry; after a BE stop, repeat re-entry at the eligible R checkpoint with SL one checkpoint behind while EMA alignment holds; runner exits on the opposite cross."
                 if cross_plan and getattr(execution, "ema_cross_cost_cycle_enabled", False)
                 else f"Management: {self._management_description(base)}."
             )
