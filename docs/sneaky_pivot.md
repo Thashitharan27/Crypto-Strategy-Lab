@@ -79,3 +79,10 @@ older saved setups without a stop source as using the legacy defended-level rule
 ### Optional level-reclaim rejection confirmation
 
 In Risk / Execution, the Sneaky Pivot settings include **Require rejection: reversal closes back across tested level** (off by default). Long confirmations must be green and close strictly above the tested level; short confirmations must be red and close strictly below it. A close exactly on the level fails. A non-qualifying candle leaves the setup waiting within its original confirmation window, unless the older swing is breached. The existing next-candle breakout entry, stop, target and initial-body rules still apply. This option does not require a pin bar, wick ratio or engulfing pattern.
+
+
+### Optional cost-cover partial at 1R
+
+Enable **At 1R cover costs with a partial close, then move SL to entry** in the Sneaky Pivot settings. **Close at 1R** defaults to 10% and is configurable. For each actual entry (including entry slippage), stop distance is the larger of the existing older-swing-plus-buffer distance and the distance needed for the selected partial at +1R to cover estimated entry/exit fees and exit slippage if the remainder subsequently stops at entry. The stop never tightens inside the original swing stop. Position quantity is recalculated from this adjusted distance, preserving the configured sizing budget.
+
+The final TP stays at the opposite previous-day boundary. The adjusted trade must have room beyond +1R, and the optional minimum-R filter checks reward divided by the adjusted risk. Trades with insufficient room are rejected. After an actual partial fill, the remaining SL moves to entry; the new stop cannot apply earlier within the same processed candle. Timeout still applies. The preset replaces other partial/BE/trailing modes and separate sizing-stop overrides. Funding, exchange rounding and stop gaps are not included in the cost estimate. Saved trade rows include `sp_cost_cover_enabled`, `sp_cost_cover_close_pct`, `sp_original_swing_stop_distance` and `sp_minimum_cost_stop_distance`. Default is off.

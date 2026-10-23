@@ -240,6 +240,22 @@ class SneakyPivotMixin:
             return raw*(1+self.config.slippage if direction=="LONG" else 1-self.config.slippage)
         return super()._expected_entry_price(indicator_i,execution_i,direction)
 
+    def _apply_sr_take_profit(self, i, pair):
+        super()._apply_sr_take_profit(i, pair)
+        if getattr(self,"signal_strategy_mode",None)==MODE and self.config.sp_cost_cover_enabled:
+            from crypto_strategy_lab.di_partial_cost import minimum_cost_cover_distance
+            for pos in pair.positions():
+                pos.tp2_price=pos.tp
+                pos.sp_cost_cover_enabled=True
+                pos.sp_cost_cover_close_pct=self.config.sp_cost_cover_close_pct
+                pos.sp_original_swing_stop_distance=abs(pos.entry_price-self.sd_setups[i]["stop"])
+                pos.sp_minimum_cost_stop_distance=minimum_cost_cover_distance(
+                    pos.entry_price, 1 if pos.side.value=="LONG" else -1,
+                    self.config.sp_cost_cover_close_pct/100.,
+                    self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee,
+                    self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee,
+                    self.config.slippage)
+
     def _sr_stop_plan(self,i,execution_i=None):
         if getattr(self,"signal_strategy_mode",None)!=MODE:return super()._sr_stop_plan(i,execution_i)
         setup=self.sd_setups[i];side=self._effective_trade_direction(i)
@@ -248,9 +264,41 @@ class SneakyPivotMixin:
         entry=self._expected_entry_price(i,execution_i,side);stop=setup["stop"]
         sign=1 if side=="LONG" else -1;risk=sign*(entry-stop);reward=sign*(setup["target"]-entry)
         if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0:return reject
+        original_risk = risk
+        minimum_cost_risk = 0.0
+        if self.config.sp_cost_cover_enabled:
+            from crypto_strategy_lab.di_partial_cost import minimum_cost_cover_distance
+            minimum_cost_risk = minimum_cost_cover_distance(
+                entry, sign, self.config.sp_cost_cover_close_pct/100.,
+                self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee,
+                self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee,
+                self.config.slippage)
+            risk = max(risk, minimum_cost_risk)
+            stop = entry-sign*risk
+            if stop <= 0 or reward <= risk:
+                return {**reject,"reason":"SNEAKY_COST_COVER_INSUFFICIENT_ROOM"}
         # The breakout fill can differ from the signal or next-bar open.
         # Apply the threshold only once that executable fill is known.
         if self.config.sp_minimum_r_enabled and getattr(self,"_sneaky_fill",None) is not None and reward/risk<self.config.sd_minimum_r:
             return {**reject,"reason":"SNEAKY_MINIMUM_R_REJECTED"}
-        return {"passed":True,"applied":True,"reason":"SNEAKY_OLDER_SWING_STOP","distance":risk,"stop_price":stop,
-                "boundary_price":stop,"level_price":setup["target"],"distance_atr":risk/setup["setupAtr"],"timeframe_minutes":15}
+        return {"passed":True,"applied":True,"reason":"SNEAKY_COST_COVER_STOP" if risk>original_risk else "SNEAKY_OLDER_SWING_STOP","distance":risk,"stop_price":stop,
+                "original_swing_distance":original_risk,"minimum_cost_distance":minimum_cost_risk,
+                "boundary_price":setup["stop"],"level_price":setup["target"],"distance_atr":risk/setup["setupAtr"],"timeframe_minutes":15}
+
+
+def validate_cost_cover(enabled, percentage, profiles):
+    if not enabled:
+        return
+    if not np.isfinite(percentage) or not 0 < percentage < 100:
+        raise ValueError("Sneaky Pivot cost-cover percentage must be between 0 and 100")
+    for profile in profiles:
+        if not getattr(profile, "enabled", True):
+            continue
+        markers={r.get("_strategy_direction_mode") for r in getattr(profile,"entry_rules",()) if r.get("_strategy_direction_mode")}
+        if markers and MODE not in markers:
+            continue
+        if any(getattr(profile,name,False) for name in (
+                "partial_profit_enabled", "partial_stop_enabled", "break_even_enabled", "trailing_enabled",
+                "r_step_trailing_enabled", "atr_checkpoint_tp_extension_enabled", "di_partial_1r_enabled",
+                "position_sizing_stop_override_enabled")):
+            raise ValueError("Sneaky Pivot cost-cover owns partial/BE protection and sizes from the adjusted stop; disable other partial/BE/trailing and separate sizing-stop modes")

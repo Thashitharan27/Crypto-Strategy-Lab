@@ -248,7 +248,7 @@ def test_sneaky_minimum_r_uses_actual_slippage_adjusted_breakout(side,enabled,mi
         _sneaky_fill=100.
         def _effective_trade_direction(self,i):return side
     engine=Engine()
-    engine.config=SimpleNamespace(sp_minimum_r_enabled=enabled,sd_minimum_r=minimum,slippage=slippage)
+    engine.config=SimpleNamespace(sp_minimum_r_enabled=enabled,sd_minimum_r=minimum,slippage=slippage,sp_cost_cover_enabled=False)
     engine.sd_setups=[{'side':side,'stop':90 if side=='LONG' else 110,'target':105 if side=='LONG' else 95,'setupAtr':1}]
     plan=engine._sr_stop_plan(0,1)
     assert plan['passed']==passed
