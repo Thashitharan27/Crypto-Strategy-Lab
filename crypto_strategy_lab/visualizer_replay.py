@@ -15,7 +15,8 @@ function cslReviewComparison(trades, records) {
     result.rows.push({label,entryTime:trade?.entryTime || record?.entryTime,side:trade?.side || record?.side,before,after,
       change:matched?after-before:null,net:finite(trade?.netR),status,
       entry:finite(record?.manualEntry?.entry),stop:finite(record?.manualEntry?.stop),target:finite(record?.manualEntry?.target),exit:finite(exit?.price),
-      exitMethod:exit?(exit.reason || 'Manual close'):'',
+      exitMethod:exit?(exit.reason || 'Manual close'):'',estimatedNetR:finite(exit?.estimatedNetR),
+      partialFraction:(record?.partialExits || []).reduce((sum,p)=>sum+p.fraction,0),
       note:retrospective?'Confirmed after stop/target candle':!trade?'Manual day · no automatic comparison':''});
   };
   for(const trade of trades){
@@ -127,7 +128,10 @@ function cslManualWorkflowSummary(records) {
     skipped:records.filter(record=>!record.manualEntry && record.decision==='Skip').length,
     unsure:records.filter(record=>!record.manualEntry && record.decision==='Unsure').length,
     entered:entered.length,open:entered.length-closed.length,closed:closed.length,
-    grossR:closed.reduce((total,record)=>total+Number(record.manualExit.grossR || 0),0)};
+    grossR:closed.reduce((total,record)=>total+Number(record.manualExit.grossR || 0),0),
+    estimatedNetClosed:closed.filter(r=>r.manualExit.estimatedNetR!=null).length,
+    estimatedNetR:closed.reduce((total,r)=>total+Number(r.manualExit.estimatedNetR || 0),0),
+    partialExitCount:entered.reduce((total,r)=>total+(r.partialExits || []).length,0)};
 }
 function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
   if(record.manualEntry) return {error:'Manual entry is already confirmed.'};
@@ -142,6 +146,56 @@ function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
     futureSeen:Boolean(record.revealedAt) || Boolean(record.planHistory?.some(revision=>revision.futureSeen)),automaticOutcomeShown:record.netR!=null,
     outcomePreviouslyShown:Boolean(record.outcomePreviouslyShown)}};
 }
+function cslManualSettlement(record, price, cutoff=Infinity) {
+  const entry=record.manualEntry,sign=record.side==='SHORT'?-1:1,risk=Math.abs(entry.entry-entry.stop);
+  const partials=(record.partialExits || []).filter(p=>p.effectiveAt<=cutoff);
+  const remainingFraction=1-partials.reduce((sum,p)=>sum+p.fraction,0);
+  const realized=partials.reduce((sum,p)=>sum+p.fraction*sign*(p.price-entry.entry),0);
+  const gross=realized+remainingFraction*sign*(price-entry.entry);
+  const model=record.manualCostModel;
+  const exitNotional=partials.reduce((sum,p)=>sum+p.fraction*p.price,0)+remainingFraction*price;
+  const estimatedFees=model?entry.entry*model.entryFee+exitNotional*model.exitFee:null;
+  const estimatedSlippage=model?(entry.entry+exitNotional)*model.slippage:null;
+  const netR=model?(gross-estimatedFees-estimatedSlippage)/risk:null;
+  return {grossR:gross/risk,returnPercent:100*gross/entry.entry,remainingFraction,
+    partialGrossR:realized/risk,estimatedFeesR:model?estimatedFees/risk:null,
+    estimatedSlippageR:model?estimatedSlippage/risk:null,
+    estimatedNetR:netR!=null && Math.abs(netR)<1e-10?0:netR};
+}
+function cslCoverCostsQuote(record, price, costs) {
+  const entry=record?.manualEntry;
+  if(!entry || record.manualExit)return {error:'An open confirmed position is required.'};
+  if((record.partialExits || []).length)return {error:'Costs have already been covered for this position.'};
+  if(!costs || ![costs.entryFee,costs.exitFee,costs.slippage].every(v=>Number.isFinite(v) && v>=0 && v<1) || costs.exitFee+costs.slippage>=1)
+    return {error:'Valid run fee and slippage settings are required.'};
+  const sign=record.side==='SHORT'?-1:1,risk=sign*(entry.entry-entry.stop),move=sign*(price-entry.entry);
+  if(!['LONG','SHORT'].includes(record.side) || !Number.isFinite(price) || price<=0 || risk<=0 || move<=0)
+    return {error:'Advance until the position is in profit.'};
+  const budget=entry.entry*(costs.entryFee+costs.exitFee+2*costs.slippage);
+  if(budget<=0)return {error:'No estimated costs to cover. Use SL to break-even.'};
+  // Solve for the fraction whose profit covers entry costs, its own exit
+  // costs, and the remaining position's estimated exit at the entry price.
+  const denominator=move-(price-entry.entry)*(costs.exitFee+costs.slippage);
+  const fraction=budget/denominator;
+  if(!Number.isFinite(fraction) || fraction<=0 || fraction>=1)
+    return {error:'Current profit is too small to cover costs while leaving a position open.'};
+  return {fraction,remainingFraction:1-fraction,grossR:fraction*move/risk,price};
+}
+function cslCoverCostsAndBreakEven(record,bars,cutoff,interval,recordedAt,costs) {
+  const entry=record?.manualEntry;
+  if(!entry || record.manualExit)return {error:'An open confirmed position is required.'};
+  const bar=bars.filter(b=>b.time>entry.candleTime && b.time+interval<=cutoff).at(-1);
+  if(!bar)return {error:'Advance to a closed candle after entry.'};
+  const quote=cslCoverCostsQuote(record,Number(bar.close),costs);if(quote.error)return quote;
+  const levels=cslManualLevels(record,cutoff);
+  const amended=cslAmendManualPosition(record,entry.entry,levels.target,cutoff,recordedAt,Number(bar.close));
+  if(amended.error)return amended;
+  const history=amended.positionHistory || [];
+  const positionHistory=history.length>(record.positionHistory || []).length?history.map((p,i)=>i===history.length-1?{...p,method:'COVER_COSTS_AND_BE'}:p):history;
+  return {...amended,positionHistory,manualCostModel:{...costs,basis:'Estimated fees plus adverse slippage on entry and all exits; funding and exchange rounding excluded; a gap through the stop can change net results.'},
+    partialExits:[{...quote,candleTime:bar.time,availableAt:cutoff,effectiveAt:cutoff,recordedAt,
+      method:'COVER_COSTS_AND_BE',stop:entry.entry,target:levels.target}]};
+}
 function cslCloseManualPosition(record, bars, cutoff, interval, recordedAt, requested=null) {
   const entry=record?.manualEntry;
   if(!entry)return {error:'Confirm your manual entry before closing the position.'};
@@ -149,16 +203,19 @@ function cslCloseManualPosition(record, bars, cutoff, interval, recordedAt, requ
   const available=bars.filter(bar=>bar.time>=entry.candleTime && bar.time+interval<=cutoff);
   const bar=requested?available.find(item=>item.time===requested.time):available.at(-1);
   if(!bar)return {error:'Choose a closed candle at or after your manual entry.'};
+  const horizon=requested?Math.min(cutoff,bar.time+interval):cutoff;
+  if((record.partialExits || []).some(p=>p.effectiveAt>horizon || p.candleTime>bar.time))return {error:'Cannot close before a saved partial exit. Advance to the latest position change.'};
   const price=requested?Number(requested.price):Number(bar.close);
   if(!Number.isFinite(price) || price<=0 || price<bar.low || price>bar.high)return {error:'The exit price must be within the selected closed candle’s range.'};
   const risk=Math.abs(entry.entry-entry.stop),side=String(record.side).toUpperCase();
   if(!risk || !['LONG','SHORT'].includes(side))return {error:'The saved entry has no valid direction or stop distance.'};
-  const change=(side==='LONG'?1:-1)*(price-entry.entry);
-  return {...record,manualExit:{price,candleTime:bar.time,exitTime:requested?null:bar.time+interval,availableAt:bar.time+interval,recordedAt,replayTime:cutoff,candle:{...bar},
-    method:requested?'USER_PICKED_PRICE':'LATEST_CLOSED_CANDLE_CLOSE',grossR:change/risk,returnPercent:100*change/entry.entry,
+  const settlement=cslManualSettlement(record,price,horizon);
+  const availableAt=Math.max(bar.time+interval,...(record.partialExits || []).map(p=>p.effectiveAt));
+  return {...record,manualExit:{price,candleTime:bar.time,exitTime:requested?null:availableAt,availableAt,recordedAt,replayTime:cutoff,candle:{...bar},
+    method:requested?'USER_PICKED_PRICE':'LATEST_CLOSED_CANDLE_CLOSE',...settlement,closedFraction:settlement.remainingFraction,remainingFraction:0,
     sameCandle:bar.time===entry.candleTime,futureSeen:cutoff>entry.replayTime || Boolean(record.revealedAt) || Boolean(entry.futureSeen),
     automaticOutcomeShown:record.netR!=null,
-    interpretation:'Manual review gross result before fees/slippage. Exact intrabar fill sequence is unknown.'}};
+    interpretation:'Weighted manual gross result; estimated net is separate when a cost model was recorded. Exact intrabar fill sequence is unknown.'}};
 }
 function cslManualLevels(record, cutoff) {
   let levels=record.manualEntry;

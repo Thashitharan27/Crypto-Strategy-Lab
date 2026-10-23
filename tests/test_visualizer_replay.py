@@ -499,3 +499,99 @@ console.log(JSON.stringify(cslPreviousDayZones(bars,day,interval,1)));
 def test_target_r_uses_draft_risk_before_entry_and_original_risk_after_entry(side,plan,original,expected):
     result=evaluate_manual('console.log(JSON.stringify(cslTargetR('+json.dumps(plan)+','+json.dumps(side)+','+json.dumps(original)+')));')
     assert result==expected
+
+@pytest.mark.parametrize('side',['LONG','SHORT'])
+@pytest.mark.parametrize('exit_kind',['be','tp','gap','manual'])
+def test_cost_cover_partial_and_remaining_exit_are_weighted_and_costed(side,exit_kind):
+    result=evaluate_manual('''
+const side=SIDE,long=side==='LONG',entry={entry:100,stop:long?90:110,target:long?130:70,candleTime:0,replayTime:60,interval:60};
+const record={side,manualEntry:entry};
+const bars=[{time:0,open:100,high:101,low:99,close:100},{time:60,open:100,high:long?111:101,low:long?99:89,close:long?110:90}];
+const costs={entryFee:.001,exitFee:.001,slippage:.001};
+const covered=cslCoverCostsAndBreakEven(record,bars,120,60,'partial',costs);
+const again=cslCoverCostsAndBreakEven(covered,bars,120,60,'repeat',costs);
+let bar;
+if(KIND==='be')bar={time:120,open:long?109:91,high:long?112:100,low:long?100:88,close:100};
+if(KIND==='tp')bar={time:120,open:long?110:90,high:long?131:91,low:long?109:69,close:long?130:70};
+if(KIND==='gap')bar={time:120,open:long?95:105,high:long?97:107,low:long?93:103,close:long?96:104};
+if(KIND==='manual')bar={time:120,open:100,high:110,low:90,close:long?105:95};
+const ended=KIND==='manual'?cslCloseManualPosition(covered,[...bars,bar],180,60,'close'):cslAdvanceManualPosition(covered,[...bars,bar],180,60,'exit');
+console.log(JSON.stringify({record,covered,again,ended,summary:cslManualWorkflowSummary([ended]),comparison:cslReviewComparison([], [{...ended,reviewType:'manual-day',day:0}])}));
+'''.replace('SIDE',json.dumps(side)).replace('KIND',json.dumps(exit_kind)))
+    covered=result['covered']; partial=covered['partialExits'][0]; x=partial['fraction']
+    sign=1 if side=='LONG' else -1
+    assert 0<x<1
+    assert x==pytest.approx(.4/(10-sign*10*.002))
+    assert covered['positionHistory'][-1]['stop']==100
+    assert covered['manualEntry']['stop']==(90 if side=='LONG' else 110)
+    assert 'partialExits' not in result['record']
+    assert 'already' in result['again']['error']
+    end=result['ended']['manualExit']; final=end['price']
+    expected_gross=x*10+(1-x)*sign*(final-100)
+    expected_cost=.2+.002*(x*(110 if side=='LONG' else 90)+(1-x)*final)
+    assert end['grossR']==pytest.approx(expected_gross/10)
+    assert end['estimatedNetR']==pytest.approx((expected_gross-expected_cost)/10,abs=1e-10)
+    assert end['closedFraction']==pytest.approx(1-x) and end['remainingFraction']==0
+    assert result['summary']['partialExitCount']==1 and result['summary']['estimatedNetClosed']==1
+    assert result['comparison']['rows'][0]['estimatedNetR']==end['estimatedNetR']
+    if exit_kind=='be':assert end['estimatedNetR']==0 and end['grossR']>0
+    if exit_kind=='gap':assert end['estimatedNetR']<0
+
+
+def test_cost_cover_fraction_scales_with_stop_distance_at_same_one_r_profit():
+    result=evaluate_manual('''
+const costs={entryFee:.001,exitFee:.001,slippage:0};
+const quote=risk=>cslCoverCostsQuote({side:'LONG',manualEntry:{entry:100,stop:100-risk}},100+risk,costs);
+console.log(JSON.stringify({wide:quote(10),tight:quote(1)}));
+''')
+    assert result['tight']['fraction']==pytest.approx(result['wide']['fraction']*10)
+
+
+@pytest.mark.parametrize('case',['losing','tiny_profit','no_costs','invalid_cost','future','rewind','closed'])
+def test_cost_cover_rejects_invalid_actions_without_mutating_position(case):
+    result=evaluate_manual('''
+const record={side:'LONG',manualEntry:{entry:100,stop:90,target:130,candleTime:0,replayTime:60}};
+const costs={entryFee:.001,exitFee:.001,slippage:.001};
+let cutoff=120,price=110;
+if(CASE==='losing')price=99;if(CASE==='tiny_profit')price=100.01;
+if(CASE==='no_costs')Object.assign(costs,{entryFee:0,exitFee:0,slippage:0});
+if(CASE==='invalid_cost')costs.entryFee=-1;
+if(CASE==='future')cutoff=90;
+if(CASE==='rewind')record.positionHistory=[{stop:95,target:130,effectiveAt:180}];
+if(CASE==='closed')record.manualExit={grossR:0};
+const bars=[{time:0,close:100},{time:60,close:price},{time:180,close:999}];
+console.log(JSON.stringify({result:cslCoverCostsAndBreakEven(record,bars,cutoff,60,'now',costs),record}));
+'''.replace('CASE',json.dumps(case)))
+    assert 'error' in result['result']
+    assert 'partialExits' not in result['record']
+
+
+def test_partial_exit_cannot_be_closed_retroactively_and_prefix_is_unchanged():
+    result=evaluate_manual('''
+const record={side:'LONG',manualEntry:{entry:100,stop:90,target:130,candleTime:0,replayTime:60}};
+const bars=[{time:0,open:100,high:101,low:99,close:100},{time:60,open:100,high:111,low:99,close:110}];
+const costs={entryFee:.001,exitFee:.001,slippage:0};
+const now=cslCoverCostsAndBreakEven(record,bars,120,60,'now',costs);
+const future=cslCoverCostsAndBreakEven(record,[...bars,{time:120,close:999}],120,60,'now',costs);
+const retro=cslCloseManualPosition(now,bars,120,60,'retro',{time:0,price:100});
+console.log(JSON.stringify({now,future,retro,before:cslManualSettlement(now,110,60),after:cslManualSettlement(now,110,120)}));
+''')
+    assert result['now']==result['future']
+    assert 'partial exit' in result['retro']['error']
+    assert result['before']['remainingFraction']==1
+    assert result['after']['remainingFraction']<1
+
+
+def test_cost_cover_then_close_on_unaligned_chart_cutoff_keeps_journal_order():
+    result=evaluate_manual('''
+const record={side:'LONG',manualEntry:{entry:100,stop:90,target:130,candleTime:0,replayTime:60}};
+const bars=[{time:0,open:100,high:101,low:99,close:100},{time:60,open:100,high:111,low:99,close:110}];
+const covered=cslCoverCostsAndBreakEven(record,bars,125,60,'partial',{entryFee:.001,exitFee:.001,slippage:0});
+const closed=cslCloseManualPosition(covered,bars,125,60,'close');
+console.log(JSON.stringify({covered,closed}));
+''')
+    assert 'error' not in result['closed']
+    assert result['closed']['manualExit']['availableAt']==125
+    assert result['closed']['manualExit']['exitTime']==125
+    assert result['covered']['positionHistory'][-1]['method']=='COVER_COSTS_AND_BE'
+    assert result['closed']['manualExit']['grossR']==pytest.approx(1.)
