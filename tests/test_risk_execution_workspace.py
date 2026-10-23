@@ -48,14 +48,17 @@ def test_sneaky_pivot_selection_and_settings_round_trip():
         workspace.refresh_visibility()
         assert window.strategy_tf.currentData()=='15m'
         assert window.intrabar_tf.currentData()=='1m'
-        for name in ('sp_recent_swings_enabled','sp_level_tolerance_atr','sp_body_atr','sp_min_body_percent','sp_confirmation_bars','sp_hold_minutes'):
+        for name in ('sp_require_level_reclaim','sp_recent_swings_enabled','sp_level_tolerance_atr','sp_body_atr','sp_min_body_percent','sp_confirmation_bars','sp_hold_minutes'):
             assert not window.execution_form.widgets[name].isHidden()
         assert not window.execution_form.widgets['sd_stop_buffer_atr'].isHidden()
         window.execution_form.widgets['sd_stop_buffer_atr'].setValue(.15)
         window.execution_form.widgets['sp_level_tolerance_atr'].setValue(.2)
         window.execution_form.widgets['sp_min_body_percent'].setValue(35.)
         window.execution_form.widgets['sp_recent_swings_enabled'].setChecked(True)
+        window.execution_form.widgets['sp_require_level_reclaim'].setChecked(True)
         config=window.build_config()
+        assert config.execution.sp_require_level_reclaim is True
+        assert 'closing back across the tested level' in workspace.summary_label.text()
         assert config.execution.sp_level_tolerance_atr==.2
         assert config.execution.sp_min_body_percent==35.
         assert '≥35% of range' in workspace.summary_label.text()

@@ -296,3 +296,36 @@ def test_body_percentage_round_trips_into_native_config():
     cfg.validate()
     assert native_simulator_config(cfg.data,cfg.features,cfg.strategy,cfg.execution).sp_min_body_percent==35.
     assert build_backtest_config({'sp_min_body_percent':35.},require_paths=False).sp_min_body_percent==35.
+
+
+@pytest.mark.parametrize("short", [False, True])
+def test_optional_reclaim_waits_for_close_across_level(short):
+    ts,o,h,l,c,atr=candles(short)
+    # First opposite-colour candle remains on the wrong side of the tested 10/20 level.
+    if short:
+        o[193],c[193],h[193],l[193]=20.5,20.2,20.6,19.8
+        o[194],c[194],h[194],l[194]=20.2,19.5,20.3,19.4
+    else:
+        o[193],c[193],h[193],l[193]=9.5,9.8,10.2,9.4
+        o[194],c[194],h[194],l[194]=9.8,10.5,10.6,9.7
+    args=(ts,o,h,l,c,atr)
+    assert sneaky_setups(*args)[193] is not None
+    strict=sneaky_setups(*args,require_level_reclaim=True)
+    assert strict[193] is None
+    assert strict[194] is not None
+    assert strict[194]['requireLevelReclaim'] is True
+    for end in (193,194,195):
+        assert sneaky_setups(*(a[:end] for a in args),require_level_reclaim=True)==strict[:end]
+    # An exact close on the level is not a reclaim; the wait window still expires.
+    c[193]=20 if short else 10
+    assert sneaky_setups(*args,require_level_reclaim=True)[193] is None
+    assert sneaky_setups(*args,require_level_reclaim=True,wait=1)[194] is None
+
+
+def test_reclaim_config_roundtrip():
+    from crypto_strategy_lab.gui.config_logic import build_backtest_config
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig, ExecutionConfig
+    from crypto_strategy_lab.research_adapters import native_simulator_config
+    cfg=ResearchRunConfig(execution=ExecutionConfig(sp_require_level_reclaim=True))
+    assert native_simulator_config(cfg.data,cfg.features,cfg.strategy,cfg.execution).sp_require_level_reclaim
+    assert build_backtest_config({'sp_require_level_reclaim':True},require_paths=False).sp_require_level_reclaim
