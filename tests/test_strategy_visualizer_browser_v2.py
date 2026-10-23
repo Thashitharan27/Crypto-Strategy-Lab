@@ -512,3 +512,36 @@ console.log(JSON.stringify({draws,text:handle.textContent,draft:manualPlanDraft,
     assert result['draws']==1 and result['text']=='130 · 3.00R'
     assert result['draft']['target']==120 and result['preview']==130
     assert 'formatPrice(trade.Target ?? trade.target)+targetRText' in html
+
+def test_cover_costs_button_uses_saved_run_rates_and_records_atomic_action():
+    import json
+    import shutil
+    import subprocess
+    import pytest
+    from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for manual cost-cover UI verification')
+    model=_Model()
+    model.seed=SimpleNamespace(request=model.seed.request,config=SimpleNamespace(execution=SimpleNamespace(maker_fee=.0002,taker_fee=.0005,use_maker_entry=True,slippage=.0005)))
+    html=build_browser_visualizer_v2_html(model,'costs')
+    assert '"manualCosts":{"entryFee":0.0002,"exitFee":0.0005,"slippage":0.0005}' in html
+    assert 'Cover costs + BE' in html
+    start=html.index("  $('manual-cover-costs').addEventListener('click',()=>{")
+    end=html.index('  function closeManualPosition(',start)
+    code=html[start:end]
+    script=REPLAY_HELPERS+'''
+let handler,saves=0,refreshed=0,draws=0,manualEntryMessage='';
+let reviewRecords=[{side:'LONG',manualEntry:{entry:100,stop:90,target:130,candleTime:0,replayTime:60}}];
+const $=()=>({addEventListener:(name,fn)=>handler=fn});
+const manualCloseLocked=()=>false,stopReplay=()=>{},advanceManualPosition=()=>{},currentReview=()=>reviewRecords[0];
+const manualMarket=()=>({candles:[{time:0,close:100},{time:60,close:110}]}),manualInterval=()=>60,replayCutoff=120;
+const boot={run:{manualCosts:{entryFee:.001,exitFee:.001,slippage:0}}};
+const saveReviews=()=>saves++,refreshManualPlan=()=>refreshed++,redrawOverlays=()=>draws++;
+'''+code+'''
+handler();console.log(JSON.stringify({record:reviewRecords[0],saves,refreshed,draws,manualEntryMessage}));
+'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['saves']==result['refreshed']==result['draws']==1
+    assert result['record']['positionHistory'][-1]['stop']==100
+    assert len(result['record']['partialExits'])==1
+    assert 'Closed ' in result['manualEntryMessage'] and '% remains' in result['manualEntryMessage']

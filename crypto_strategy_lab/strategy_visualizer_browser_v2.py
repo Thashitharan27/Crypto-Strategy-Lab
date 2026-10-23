@@ -35,6 +35,14 @@ def build_browser_visualizer_v2_html(
     swing_strength = getattr(getattr(getattr(model.seed,"config",None),"execution",None),"sd_swing_strength",2)
     if not isinstance(swing_strength,int) or isinstance(swing_strength,bool) or swing_strength<1:
         swing_strength=2
+    execution=getattr(getattr(model.seed,"config",None),"execution",None)
+    try:
+        manual_costs={
+            "entryFee":float(execution.maker_fee if execution.use_maker_entry else execution.taker_fee),
+            "exitFee":float(execution.taker_fee), "slippage":float(execution.slippage),
+        }
+    except (AttributeError,TypeError,ValueError):
+        manual_costs=None
     bootstrap = {
         "sessionBase": f"/session/{session_token}",
         "trades": [
@@ -47,6 +55,7 @@ def build_browser_visualizer_v2_html(
             "timeframe": request.strategy_timeframe,
             "tradeCount": model.trade_count,
             "swingStrength": swing_strength,
+            "manualCosts": manual_costs,
             "emaReversal": getattr(model, "_ema_source", lambda period: "close")(300) == "high",
         },
     }
@@ -234,6 +243,7 @@ button:disabled{opacity:.45;cursor:default}
         <button id="manual-current">Enter at current candle</button><span id="manual-time"></span>
         <button id="manual-confirm">Confirm manual entry</button>
         <button id="manual-be">SL to break-even</button>
+        <button id="manual-cover-costs">Cover costs + BE</button>
         <button id="manual-close">Close manual position</button><button id="manual-pick-exit">Pick exit</button>
         <span id="manual-exit-status" role="status"></span>
         <button id="manual-save">Save plan</button><button id="manual-reset">Use auto levels</button>
@@ -566,6 +576,14 @@ button:disabled{opacity:.45;cursor:default}
     refreshManualPlan();redrawOverlays();
   }
   $('manual-be').addEventListener('click',()=>amendPosition(currentReview()?.manualEntry?.entry,manualPlanDraft.target));
+  $('manual-cover-costs').addEventListener('click',()=>{
+    if(manualCloseLocked())return;stopReplay();advanceManualPosition();if(manualCloseLocked())return;
+    const record=currentReview(),result=cslCoverCostsAndBreakEven(record,manualMarket()?.candles || [],replayCutoff,manualInterval(),new Date().toISOString(),boot.run.manualCosts);
+    if(result.error)manualEntryMessage=result.error;
+    else{reviewRecords=reviewRecords.map(item=>item===record?result:item);saveReviews();
+      const partial=result.partialExits.at(-1);manualEntryMessage='Closed '+(100*partial.fraction).toFixed(2)+'% to cover estimated costs; '+(100*partial.remainingFraction).toFixed(2)+'% remains with SL at entry.';}
+    refreshManualPlan();redrawOverlays();
+  });
   function closeManualPosition(requested=null) {
     if(manualCloseLocked())return;
     stopReplay();advanceManualPosition();if(manualCloseLocked())return;const record=currentReview();
@@ -615,6 +633,10 @@ button:disabled{opacity:.45;cursor:default}
     $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error);
     $('manual-confirm').title=confirmed?'Entry is already confirmed.':'Only this button opens your manual position. Confirm the selected closed candle and entry price.';
     $('manual-be').disabled=manualCloseLocked();
+    const costBar=(manualMarket()?.candles || []).filter(bar=>bar.time>(confirmed?.candleTime ?? Infinity) && bar.time+manualInterval()<=replayCutoff).at(-1);
+    const costQuote=cslCoverCostsQuote(currentReview(),Number(costBar?.close),boot.run.manualCosts);
+    $('manual-cover-costs').disabled=manualCloseLocked() || Boolean(costQuote.error);
+    $('manual-cover-costs').title=costQuote.error || 'Close '+(100*costQuote.fraction).toFixed(2)+'% at the latest closed entry-timeframe candle close, then move SL to entry. Estimated entry/exit fees and slippage; gaps and funding excluded.';
     $('manual-close').disabled=manualCloseLocked();$('manual-pick-exit').disabled=manualCloseLocked() || currentTimeframe!==(confirmed?.timeframe || boot.run.timeframe);
     $('manual-pick-exit').title=currentTimeframe!==(confirmed?.timeframe || boot.run.timeframe)?'Select the entry timeframe to pick an exit candle.':'';
     const managementHint=!confirmed?'Confirm manual entry to enable break-even and closing.':closedPositionHint();
@@ -622,6 +644,9 @@ button:disabled{opacity:.45;cursor:default}
     const closed=currentReview()?.manualExit;
     const closedKnown=closed && (closed.availableAt ?? closed.candleTime+manualInterval())<=replayCutoff;
     $('manual-exit-status').textContent=closed && !closedKnown?'Previously reviewed manual position; advance to its exit candle to reveal the result.':closed?'Manual position closed ('+(closed.reason || 'Manual')+') · '+(closed.exitTime!=null?'Exit time '+fmtTime(closed.exitTime):'Exit candle '+fmtTime(closed.candleTime))+' UTC · '+formatPrice(closed.price)+' · Gross '+closed.grossR.toFixed(2)+' R ('+closed.returnPercent.toFixed(2)+'%) · before fees/slippage.'+(closed.ambiguous?' Both levels touched: conservative SL used.':''):confirmed?'Manual position open. Close at the latest closed candle, pick an exit, or advance until TP/SL is reached.':'';
+    if(closedKnown && closed.estimatedNetR!=null)$('manual-exit-status').textContent+=' Estimated net '+closed.estimatedNetR.toFixed(2)+'R after modeled fees/slippage; funding/rounding excluded.';
+    const knownPartials=(currentReview()?.partialExits || []).filter(p=>p.effectiveAt<=replayCutoff);
+    if(knownPartials.length && !closedKnown){const fraction=knownPartials.reduce((sum,p)=>sum+p.fraction,0);$('manual-exit-status').textContent+=' '+(100*fraction).toFixed(2)+'% closed; '+(100*(1-fraction)).toFixed(2)+'% remaining. Estimated costs covered if the remainder exits at entry.';}
     const record=currentReview();
     $('manual-history').hidden=!record?.planHistory?.length;
     const history=$('manual-history-content');history.replaceChildren();
@@ -899,8 +924,8 @@ button:disabled{opacity:.45;cursor:default}
       summary:{reviewed:records.length,revealed:scored.length,automaticNetR:sum(scored),manualTakeNetR:sum(scored.filter(r=>r.decision==='Take')),skippedNetR:sum(scored.filter(r=>r.decision==='Skip')),unsureNetR:sum(scored.filter(r=>r.decision==='Unsure'))},
       manualPlans:records.filter(record=>record.manualPlan).length,
       confirmedManualEntries:records.filter(record=>record.manualEntry).length,
-      manualResults:{closed:workflowSummary.closed,grossR:workflowSummary.grossR},
-      interpretation:'Automatic R totals (including legacy manualTakeNetR) are reference backtest comparisons, not manual P&L. Waiting and skipped setups have no manual position or loss; only confirmed manual entries count. Decision history retains changes made after advancing. manualResults contains gross R from confirmed manual entries and user exits or replay TP/SL hits. Level checks start after the entry candle; both levels touched uses SL unless a gap opening establishes order. Fees, slippage, portfolio sizing and overlapping positions are not simulated.',reviews:records};
+      manualResults:{closed:workflowSummary.closed,grossR:workflowSummary.grossR,estimatedNetClosed:workflowSummary.estimatedNetClosed,estimatedNetR:workflowSummary.estimatedNetR,partialExitCount:workflowSummary.partialExitCount},
+      interpretation:'Automatic R totals (including legacy manualTakeNetR) are reference backtest comparisons, not manual P&L. Waiting and skipped setups have no manual position or loss; only confirmed manual entries count. Decision history retains changes made after advancing. manualResults contains gross R from confirmed manual entries and user exits or replay TP/SL hits. Level checks start after the entry candle; both levels touched uses SL unless a gap opening establishes order. Cover costs + BE records weighted partial exits plus estimated fees/slippage in a separate estimatedNetR; funding and exchange rounding are excluded; stop gaps can change net results. Other manual positions remain gross only. Portfolio sizing and overlapping positions are not simulated.',reviews:records};
     const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
     const link=document.createElement('a'); link.href=url; link.download='csl-manual-replay-reviews.json'; document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
@@ -1580,17 +1605,23 @@ button:disabled{opacity:.45;cursor:default}
     rect(entryY,targetY,'reward'+(manual && signedMove>0?' current-profit':''));
     const manualLabels=[];
     manualLabels.push([addTradeLabel(left+4,entryY,'entry',(manual && !currentReview()?.manualEntry?'Preview entry ':'Entry ')+formatPrice(trade.Entry ?? trade.entry)),entryY,'#60a5fa']);
-    if(visibleManualExit)addTradeLabel(right+6,candles.priceToCoordinate(manualExit.price),'exit',(manualExit.reason || 'Manual close')+' '+formatPrice(manualExit.price)+' · '+manualExit.grossR.toFixed(2)+' R gross');
+    if(visibleManualExit)addTradeLabel(right+6,candles.priceToCoordinate(manualExit.price),'exit',(manualExit.reason || 'Manual close')+' '+formatPrice(manualExit.price)+' · '+manualExit.grossR.toFixed(2)+' R gross'+(manualExit.estimatedNetR!=null?' · '+manualExit.estimatedNetR.toFixed(2)+'R net est.':''));
     if (!manual && !visibleManualExit && exit && Number.isFinite(exitPrice))
       addTradeLabel(Math.max(left+4,right-90),exitY,'exit',(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
 
     const boundaryX=right+6;
-    const targetR=cslTargetR({entry,stop,target},trade.Side,manual?currentReview()?.manualEntry:null);
+    const hasPartial=manual && (currentReview()?.partialExits || []).some(p=>p.effectiveAt<=replayCutoff);
+    const targetR=hasPartial?cslManualSettlement(currentReview(),target,replayCutoff).grossR:cslTargetR({entry,stop,target},trade.Side,manual?currentReview()?.manualEntry:null);
     const targetRText=targetR==null?'':' · '+targetR.toFixed(2)+'R';
     if (Number.isFinite(target))
       manualLabels.push([addTradeLabel(boundaryX,targetY,'tp',(manual && !currentReview()?.manualEntry?'Preview TP ':'Target ')+formatPrice(trade.Target ?? trade.target)+targetRText),targetY,'#34d399']);
     if (Number.isFinite(stop))
       manualLabels.push([addTradeLabel(boundaryX,stopY,'sl',(manual && !currentReview()?.manualEntry?'Preview SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)),stopY,'#fb7185']);
+    if(manual)for(const partial of currentReview()?.partialExits || []){
+      if(partial.effectiveAt>replayCutoff)continue;
+      const px=chart.timeScale().timeToCoordinate(displayCandleTime(partial.candleTime));
+      addTradeLabel(px ?? left,candles.priceToCoordinate(partial.price),'exit','Partial '+(100*partial.fraction).toFixed(2)+'% · '+partial.grossR.toFixed(2)+'R gross');
+    }
     if(manual) {
       // Preserve price ordering, with leaders to the exact price when labels
       // need more room than the entry/stop separation provides.
@@ -1843,7 +1874,7 @@ button:disabled{opacity:.45;cursor:default}
     positionResize.price=price;
     drawTradeBox();
     const handle=tradeBoxLayer.querySelector('[data-position-level="'+positionResize.key+'"]');
-    if(handle){handle.style.top=(y-6)+'px';const preview={...manualPlanDraft,[positionResize.key]:price};const r=cslTargetR(preview,sourcePayload?.selectedTrade?.Side,currentReview()?.manualEntry);handle.textContent=formatPrice(price)+(positionResize.key==='target' && r!=null?' · '+r.toFixed(2)+'R':'');}
+    if(handle){handle.style.top=(y-6)+'px';const preview={...manualPlanDraft,[positionResize.key]:price};const record=currentReview();const r=(record?.partialExits || []).some(p=>p.effectiveAt<=replayCutoff)?cslManualSettlement(record,preview.target,replayCutoff).grossR:cslTargetR(preview,sourcePayload?.selectedTrade?.Side,record?.manualEntry);handle.textContent=formatPrice(price)+(positionResize.key==='target' && r!=null?' · '+r.toFixed(2)+'R':'');}
   },{capture:true});
   const finishPositionResize=event=>{
     if(!positionResize)return;event.preventDefault();event.stopImmediatePropagation();
