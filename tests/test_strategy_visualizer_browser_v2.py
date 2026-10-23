@@ -545,3 +545,49 @@ handler();console.log(JSON.stringify({record:reviewRecords[0],saves,refreshed,dr
     assert result['record']['positionHistory'][-1]['stop']==100
     assert len(result['record']['partialExits'])==1
     assert 'Closed ' in result['manualEntryMessage'] and '% remains' in result['manualEntryMessage']
+
+
+def test_confluence_overlay_uses_saved_zones_without_equal_pool_or_target_zone():
+    import json,shutil,subprocess,pytest
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for overlay verification')
+    html=build_browser_visualizer_v2_html(_Model(),'confluence')
+    code=html[html.index('  function drawSupplyDemandOverlay('):html.index('  function drawFvgOverlay(')]
+    script="""
+const chartWrap={clientWidth:1000},candles={priceToCoordinate:x=>300-x};
+const chart={panes:()=>[{getHeight:()=>500}],timeScale:()=>({timeToCoordinate:x=>x})};
+const payload={candles:[{time:100},{time:200},{time:300}]};
+let drawn=[];const fvgLayer={style:{},appendChild:x=>drawn.push(x)};
+const document={createElement:()=>({style:{}})};const formatPrice=String;
+"""+code+"""
+const sd={strategy:'TJR_CONFLUENCE',side:'LONG',signalTime:300,liquidityTime:100,sweepTime:200,
+ liquidityLevel:90,structureLevel:110,equilibrium:100,
+ zone:{top:99,bottom:97,pivotTime:200},inverseFvg:{top:108,bottom:105,pivotTime:100}};
+drawSupplyDemandOverlay(sd);
+const titles=drawn.map(x=>x.title);
+drawn=[];sd.inverseFvg=null;drawSupplyDemandOverlay(sd);
+console.log(JSON.stringify({titles,optional:drawn.length}));
+"""
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert len(result['titles'])==5 and result['optional']==4
+    assert any('Entry FVG' in x for x in result['titles'])
+    assert any('50% midpoint' in x for x in result['titles'])
+
+
+def test_confluence_review_and_replay_bounds_accept_no_opposing_swing_zone():
+    import json,shutil,subprocess,pytest
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for review bounds verification')
+    html=build_browser_visualizer_v2_html(_Model(),'confluence-bounds')
+    code=html[html.index('  function replayBounds('):html.index('  function centerSelected(')]
+    script="""
+const dayMode=false,replayCutoff=300,replayInterval=15,replayActive=false,replayRevealed=false;
+const payload={selectedTradeChartCandleTime:300,supplyDemandDerivation:{status:'AVAILABLE',strategy:'TJR_CONFLUENCE',zone:{pivotTime:200},opposingZone:null,inverseFvg:{pivotTime:100},sweepTime:150,signalTime:290}};
+"""+code+"""
+const withInverse=setupBounds();payload.supplyDemandDerivation.inverseFvg=null;
+console.log(JSON.stringify({withInverse,withoutInverse:setupBounds(),replay:replayBounds()}));
+"""
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['withInverse']['from']==100-6*3600
+    assert result['withoutInverse']['from']==150-6*3600
+    assert result['replay']['from']==150-8*15

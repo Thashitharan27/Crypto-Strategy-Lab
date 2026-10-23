@@ -661,6 +661,7 @@ DIRECTION_LABELS = {
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
     "EMA_320_CLOSE_CROSS": "EMA 320 Price Close Cross — ATR SL/TP",
     "LIQUIDITY_SWEEP_RETEST": "Liquidity Sweep — Trend + Zone Retest",
+    "TJR_CONFLUENCE": "Confluence - Sweep + Structure + IFVG + FVG",
     "SNEAKY_PIVOT": "Sneaky Pivot — All Day (15m)",
     "SUPPLY_DEMAND_RETEST": "Supply & Demand — 1h Swing Retest",
     "EMA_100_300_REVERSAL": "EMA 100/300 — Three-Candle Reversal (Custom R)",

@@ -38,7 +38,7 @@ from crypto_strategy_lab.volume_profile import VOLUME_PROFILE_RULE_INDICATORS
 # selection but adds a deliberately simple, non-optimized trend confirmation
 # baseline at compile time. LONG/SHORT eligibility still belongs to the market
 # permission grid below.
-SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "EMA_100_300_REVERSAL", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", FIB_RETRACEMENT_MODE, MTF_SR_REACTION_MODE)
+SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "EMA_100_300_REVERSAL", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", FIB_RETRACEMENT_MODE, MTF_SR_REACTION_MODE)
 # Backward-compatible internal name retained while the UI moves to "Signal Strategy".
 DIRECTION_MODES = SIGNAL_STRATEGIES
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
@@ -1099,7 +1099,7 @@ def compile_profiles(
             native_rules = list(_ema_9_20_pullback_native_rules())
         elif mode == "EMA_320_CLOSE_CROSS":
             native_rules = list(_ema_320_close_cross_native_rules())
-        elif mode in {"SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT"}:
+        elif mode in {"SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE"}:
             native_rules = [{**_ema_320_close_cross_native_rules()[0],
                              _DMI_TREND_MODE_MARKER: mode,
                              _DMI_TREND_RULE_MARKER: mode+"_SIGNAL"}]

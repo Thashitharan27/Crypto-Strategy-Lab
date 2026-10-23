@@ -85,6 +85,14 @@ class BacktestConfig:
     ls_equal_tolerance_atr: float = 0.15
     ls_displacement_atr: float = 1.0
     ls_base_bars: int = 3
+    tc_require_structure: bool = True
+    tc_require_ifvg: bool = True
+    tc_require_equilibrium: bool = True
+    tc_displacement_atr: float = 0.5
+    tc_max_wait_bars: int = 30
+    tc_fvg_lookback: int = 64
+    tc_min_reversal_body_percent: float = 50.0
+    tc_target_r: float = 3.0
     sp_minimum_r_enabled: bool = False
     sp_recent_swings_enabled: bool = False
     sp_require_level_reclaim: bool = False
@@ -200,6 +208,8 @@ class BacktestConfig:
         validate_settings(self.sd_swing_strength,self.sd_stop_buffer_atr,self.sd_minimum_r)
         from crypto_strategy_lab.sneaky_pivot import validate_settings as validate_sneaky
         validate_sneaky(self.sp_level_tolerance_atr,self.sp_body_atr,self.sp_confirmation_bars,self.sp_hold_minutes,self.sp_min_body_percent)
+        from crypto_strategy_lab.tjr_confluence import validate_settings as validate_confluence
+        validate_confluence(self.tc_displacement_atr,self.tc_max_wait_bars,self.tc_fvg_lookback,self.tc_min_reversal_body_percent,self.tc_target_r)
         from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
         validate_liquidity(self.ls_equal_tolerance_atr,self.ls_displacement_atr,self.ls_base_bars,self.ls_max_wait_bars)
         if not math.isfinite(self.ema_reversal_min_gap_atr) or self.ema_reversal_min_gap_atr < 0:

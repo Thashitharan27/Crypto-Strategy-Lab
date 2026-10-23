@@ -1009,6 +1009,22 @@ class CompletedRunVisualizer:
                             level.update(time=match["time"],confirmedAt=match["confirmedAt"])
                 except (ValueError,KeyError,AttributeError,OSError):
                     pass
+            if value.get("strategy")=="TJR_CONFLUENCE":
+                for key in ("signalTime","sweepTime","liquidityTime","structureTime","inverseTime","armedTime"):
+                    if value.get(key) is not None:
+                        value[key]=_unix_seconds(_utc(value[key]))
+                for key in ("equilibrium","rangeLow","rangeHigh","sweepExtreme","liquidityLevel"):
+                    if _finite(value.get(key)) is None:
+                        return {"status":"NOT_AVAILABLE"}
+                for key in ("zone","inverseFvg"):
+                    zone=value.get(key)
+                    if zone is None and key=="inverseFvg":continue
+                    if not isinstance(zone,dict) or not all(_finite(zone.get(k)) is not None for k in ("bottom","top")) or zone["top"]<=zone["bottom"]:
+                        return {"status":"NOT_AVAILABLE"}
+                    for time in ("pivotTime","confirmedTime","touchTime","bounceTime"):
+                        if zone.get(time) is not None:
+                            zone[time]=_unix_seconds(_utc(zone[time]))
+                return {**value,"status":"AVAILABLE"}
             value["signalTime"]=_unix_seconds(_utc(value["signalTime"]))
             if value.get("sweepTime") is not None:
                 value["sweepTime"]=_unix_seconds(_utc(value["sweepTime"]))

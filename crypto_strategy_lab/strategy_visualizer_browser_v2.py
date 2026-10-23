@@ -1174,6 +1174,23 @@ button:disabled{opacity:.45;cursor:default}
       return found==null ? fallback : (chart.timeScale().timeToCoordinate(found) ?? fallback);
     }
     const end=xAt(sd.signalTime,chartWrap.clientWidth-76);
+    if(sd.strategy==='TJR_CONFLUENCE') {
+      for(const [zone,name,color] of [[sd.zone,'Entry FVG','#22c55e30'],[sd.inverseFvg,'Inverted FVG','#a78bfa30']]) {
+        if(!zone)continue;
+        const a=candles.priceToCoordinate(zone.top),b=candles.priceToCoordinate(zone.bottom);
+        if(a==null || b==null || b<0 || a>height)continue;
+        const start=Math.max(0,xAt(zone.pivotTime,0));
+        const band=document.createElement('div');band.className='fvg-zone';
+        band.title=name+' '+formatPrice(zone.bottom)+' - '+formatPrice(zone.top);
+        Object.assign(band.style,{left:start+'px',top:Math.max(0,a)+'px',width:Math.max(3,end-start)+'px',height:Math.max(2,Math.min(height,b)-Math.max(0,a))+'px',background:color});fvgLayer.appendChild(band);
+      }
+      for(const [price,time,name,color] of [[sd.liquidityLevel,sd.liquidityTime,'Swept liquidity','#fbbf24'],[sd.structureLevel,sd.sweepTime,'Structure','#60a5fa'],[sd.equilibrium,sd.sweepTime,'50% midpoint','#c4b5fd']]) {
+        if(price==null)continue;const y=candles.priceToCoordinate(price);if(y==null || y<0 || y>height)continue;
+        const start=Math.max(0,xAt(time,0)),line=document.createElement('div');line.className='fvg-level';line.title=name+' '+formatPrice(price);
+        Object.assign(line.style,{left:start+'px',top:y+'px',width:Math.max(3,end-start)+'px',borderColor:color});fvgLayer.appendChild(line);
+      }
+      return;
+    }
     if(sd.strategy==='SNEAKY_PIVOT') {drawSneakyLevels(sd,xAt,height);return;}
     if(sd.liquidity) {
       const price=(Number(sd.liquidity.bottom)+Number(sd.liquidity.top))/2;
@@ -1338,9 +1355,9 @@ button:disabled{opacity:.45;cursor:default}
       fvgReview.hidden=false; $('setup-panel').hidden=false; $('review-setup').hidden=false;
       $('review-setup').setAttribute('aria-pressed',String(reviewMode));
       $('setup-panel').setAttribute('aria-label','Supply and demand setup explanation');
-      fvgReview.textContent=(sd.strategy==='SNEAKY_PIVOT'?'Sneaky Pivot':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
+      fvgReview.textContent=(sd.strategy==='TJR_CONFLUENCE'?'Confluence':sd.strategy==='SNEAKY_PIVOT'?'Sneaky Pivot':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
       const panel=$('setup-panel'); panel.replaceChildren();
-      const title=document.createElement('h3'); title.textContent=sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
+      const title=document.createElement('h3'); title.textContent=sd.strategy==='TJR_CONFLUENCE'?'Sweep + structure + IFVG + FVG pullback':sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
       const facts=document.createElement('p'); facts.style.whiteSpace='pre-line';
       facts.textContent='Zone confirmed: '+fmtTime(sd.zone.confirmedTime)+'\\nFirst touch: '+fmtTime(sd.zone.touchTime)+'\\nBounce: '+fmtTime(sd.zone.bounceTime)+'\\nRetest: '+fmtTime(sd.signalTime)+'\\nTarget swing: '+formatPrice(sd.target)+'\\nEntry is the next candle open. Zones are saved decision-time evidence.';
       if(sd.strategy==='SNEAKY_PIVOT') facts.textContent='Initial test: '+fmtTime(sd.zone.touchTime)+'; reversal: '+fmtTime(sd.signalTime)+'; '+String(sd.levelName)+' '+formatPrice(sd.level)+'; breakout trigger '+formatPrice(sd.trigger)+'; stop '+formatPrice(sd.stop)+(sd.stopSource?' ('+String(sd.stopSource)+')':' (legacy defended-level rule)')+'; fixed target '+formatPrice(sd.target)+'. Enter only on a breakout during the next 15m candle using 1m data. Previous-day levels are fixed at setup; no session restriction.';
@@ -1348,9 +1365,10 @@ button:disabled{opacity:.45;cursor:default}
         const levels=document.createElement('p'); levels.style.whiteSpace='pre-line';
         levels.textContent=(sd.levelsSource || 'Saved at setup')+'\\n'+(sd.levels || []).map(level=>level.label+': '+(level.price==null?'Unavailable in the pre-setup history':formatPrice(level.price))).join('\\n');panel.appendChild(levels);
       }
-      if(sd.sweepTime!=null) {
+      if(sd.sweepTime!=null && sd.liquidity) {
         const sweep=document.createElement('p'); sweep.textContent='Equal-level pool: '+formatPrice(sd.liquidity.bottom)+' – '+formatPrice(sd.liquidity.top)+'; swept '+fmtTime(sd.sweepTime)+'. A later displacement confirms the entry zone.'; panel.appendChild(sweep);
       }
+      if(sd.strategy==='TJR_CONFLUENCE') facts.textContent='Sweep: '+fmtTime(sd.sweepTime)+'; structure close: '+fmtTime(sd.structureTime)+'; FVG inversion: '+fmtTime(sd.inverseTime)+'; pullback confirmation: '+fmtTime(sd.signalTime)+'. Midpoint '+formatPrice(sd.equilibrium)+'. SL beyond sweep; target '+String(sd.targetR)+'R. Entry at next candle open. Lines and zones show saved setup evidence; prices on hover.';
       panel.appendChild(facts); return;
     }
     const fvg = payload.fvgDerivation;
@@ -1807,7 +1825,7 @@ button:disabled{opacity:.45;cursor:default}
   function replayBounds() {
     if(dayMode)return {from:replayDay-86400,to:replayCutoff+12*replayInterval};
     const sd=payload?.supplyDemandDerivation;
-    if(sd?.status==='AVAILABLE') return {from:Math.min(sd.zone.pivotTime,sd.opposingZone.pivotTime)-8*replayInterval,to:replayCutoff+12*replayInterval};
+    if(sd?.status==='AVAILABLE') return {from:Math.min(sd.zone.pivotTime,sd.opposingZone?.pivotTime ?? sd.inverseFvg?.pivotTime ?? sd.sweepTime ?? sd.zone.pivotTime)-8*replayInterval,to:replayCutoff+12*replayInterval};
     const known=payload?.fvgDerivation;
     const from=known?.status==='AVAILABLE' ? known.impulseStartTime-8*replayInterval : replayCutoff-80*replayInterval;
     return {from,to:replayCutoff+12*replayInterval};
@@ -1818,7 +1836,7 @@ button:disabled{opacity:.45;cursor:default}
     const sd=payload?.supplyDemandDerivation;
     if(sd?.status==='AVAILABLE') {
       const entry=Number(payload.selectedTradeChartCandleTime || sd.signalTime);
-      return {from:Math.min(sd.zone.pivotTime,sd.opposingZone.pivotTime)-6*3600,to:entry+12*3600};
+      return {from:Math.min(sd.zone.pivotTime,sd.opposingZone?.pivotTime ?? sd.inverseFvg?.pivotTime ?? sd.sweepTime ?? sd.zone.pivotTime)-6*3600,to:entry+12*3600};
     }
     const fvg=payload?.fvgDerivation;
     if (fvg?.status!=='AVAILABLE') return null;
