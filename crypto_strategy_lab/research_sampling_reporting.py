@@ -21,6 +21,7 @@ from crypto_strategy_lab.research_sampling import (
     generate_strategy_research_samples,
 )
 from crypto_strategy_lab.run_manifest import atomic_json
+from crypto_strategy_lab.progress import emit_progress
 from crypto_strategy_lab.walk_forward_direction_tracker import (
     build_walk_forward_direction_tracker,
 )
@@ -241,6 +242,29 @@ def append_research_sampling_artifacts(result, context) -> None:
         trading_start=result.request.start,
         trading_end=result.request.end,
     )
+    cycle_selected = (
+        getattr(native_config, "ema_cross_cost_cycle_enabled", False)
+        and native_config.ema_920_trade_plan.startswith("EMA_20_100_CROSS")
+        and any(
+            rule.get("_strategy_direction_mode") == "EMA_9_20_PULLBACK"
+            for profile in native_config.strategy_profiles.values()
+            for rule in profile.entry_rules
+        )
+    )
+    if cycle_selected:
+        # Chain-dependent re-entry cannot be represented by overlapping,
+        # independent-equity observations. Keep the actual portfolio report.
+        reason = "EMA cost-cover re-entry cycles require sequential portfolio execution; independent strategy sampling is unavailable."
+        manifest_path = Path(result.output_dir) / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.setdefault("research", {})["strategy_research_sampling"] = {
+            "enabled": False, "requested_mode": mode,
+            "status": "UNAVAILABLE_FOR_EMA_COST_CYCLES", "reason": reason,
+        }
+        atomic_json(manifest_path, manifest)
+        emit_progress(getattr(context, "progress_callback", None), kind="stage",
+                      phase="reporting", label="Portfolio reports retained", detail=reason)
+        return
     intrabar = intrabar_from_data_lake_bundle(context.bundle)
     setup_seconds = time.perf_counter() - stage_started
 
