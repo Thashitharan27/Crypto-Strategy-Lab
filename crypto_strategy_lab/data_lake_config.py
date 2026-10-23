@@ -286,6 +286,9 @@ class ExecutionProfileConfig:
     sl1_r: float = 0.5
     sl1_close_pct: float = 50.0
     sl2_r: float = 2.0
+    di_partial_1r_enabled: bool = False
+    di_partial_1r_close_pct: float = 10.0
+    di_partial_cost_atr_enabled: bool = False
     partial_profit_enabled: bool = False
     tp1_r: float = 1.0
     tp1_close_pct: float = 50.0
@@ -598,6 +601,11 @@ class ResearchRunConfig:
             raise ValueError("at least one DI pressure state must be allowed")
         for key, profile in strategy.profiles.items():
             execution_profile = execution.profiles[key]
+            from crypto_strategy_lab.di_partial_cost import validate_di_partial
+            validate_di_partial(execution_profile)
+            from crypto_strategy_lab.di_partial_cost import validate_di_partial_risk_mode
+            if profile.enabled:
+                validate_di_partial_risk_mode(execution_profile, execution.risk_mode, profile.entry_rules, execution.sr_take_profit_mode)
             if execution_profile.stop_loss_multiple <= 0:
                 raise ValueError(f"{key}: stop-loss multiple must be positive")
             if execution_profile.position_sizing_stop_multiple <= 0:

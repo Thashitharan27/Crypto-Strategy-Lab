@@ -465,6 +465,11 @@ class RiskExecutionWorkspace(QWidget):
         self.management_card.add_field("trailing_activation_r", "Trailing Activation", self.trade["trailing_activation_r"])
         self.management_card.add_field("trailing_distance_r", "Trailing Distance", self.trade["trailing_distance_r"])
 
+        self.management_card.add_control("di_partial_1r_enabled", self.trade["di_partial_1r_enabled"])
+        self.management_card.add_field("di_partial_1r_close_pct", "Close at 1R", self.trade["di_partial_1r_close_pct"])
+        self.management_card.add_control("di_partial_cost_atr_enabled", self.trade["di_partial_cost_atr_enabled"])
+        self.trade["di_partial_1r_close_pct"].setRange(.01,99.99)
+        self.trade["di_partial_1r_close_pct"].setSuffix("%")
         self.management_card.add_control("partial_profit_enabled", self.trade["partial_profit_enabled"])
         self.management_card.add_field("tp1_r", "First Profit Level", self.trade["tp1_r"])
         self.management_card.add_field("tp1_close_pct", "First Profit Close", self.trade["tp1_close_pct"])
@@ -516,6 +521,7 @@ class RiskExecutionWorkspace(QWidget):
         layout.addStretch()
 
         self.account["risk_mode"].currentIndexChanged.connect(self.refresh_visibility)
+        self.trade["di_partial_1r_close_pct"].valueChanged.connect(self.refresh_summary_from_widgets)
         self.account["sr_take_profit_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["entry_timing_mode"].currentIndexChanged.connect(self.refresh_summary_from_widgets)
         self.account["ema_920_trade_plan"].currentIndexChanged.connect(self.refresh_visibility)
@@ -533,7 +539,7 @@ class RiskExecutionWorkspace(QWidget):
         if builder is not None:
             builder.direction_mode.currentIndexChanged.connect(self.refresh_visibility)
         for name in (
-            "position_sizing_stop_override_enabled",
+            "position_sizing_stop_override_enabled", "di_partial_1r_enabled", "di_partial_cost_atr_enabled",
             "break_even_enabled", "trailing_enabled", "partial_profit_enabled",
             "partial_stop_enabled", "timeout_enabled", "r_step_trailing_enabled",
             "atr_checkpoint_tp_extension_enabled",
@@ -556,6 +562,8 @@ class RiskExecutionWorkspace(QWidget):
             "position_sizing_stop_override_enabled": "Use separate position-sizing stop",
             "break_even_enabled": "Enable break-even",
             "trailing_enabled": "Enable trailing stop",
+            "di_partial_1r_enabled": "DI: close partial at 1R and move SL to entry",
+            "di_partial_cost_atr_enabled": "Increase ATR distance so the 1R partial covers estimated costs",
             "partial_profit_enabled": "Enable partial profit-taking",
             "partial_stop_enabled": "Enable staged stop-loss",
             "timeout_enabled": "Enable maximum holding time",
@@ -896,6 +904,29 @@ class RiskExecutionWorkspace(QWidget):
                 self.trade[name].setEnabled(False)
                 for field in toggles[name]:
                     self.management_card.set_row_visible(field, False)
+        di_mode = self._signal_strategy_mode() == "DI"
+        self.trade["position_sizing_stop_override_enabled"].setEnabled(True)
+        di_partial = di_mode and self.trade["di_partial_1r_enabled"].isChecked()
+        self.management_card.set_row_visible("di_partial_1r_enabled", di_mode)
+        self.management_card.set_row_visible("di_partial_1r_close_pct", di_partial)
+        self.management_card.set_row_visible("di_partial_cost_atr_enabled", di_partial)
+        atr_risk = str(self.account["risk_mode"].currentData()) == "ATR"
+        self.trade["di_partial_cost_atr_enabled"].setEnabled(atr_risk)
+        if di_partial and not atr_risk and self.trade["di_partial_cost_atr_enabled"].isChecked():
+            self.trade["di_partial_cost_atr_enabled"].setChecked(False)
+        if di_partial:
+            self.account["sr_take_profit_mode"].setCurrentIndex(self.account["sr_take_profit_mode"].findData("FIXED_R"))
+            self.account["sr_take_profit_mode"].setEnabled(False)
+            for name in incompatible_toggles:
+                if self.trade[name].isChecked():
+                    self.trade[name].setChecked(False)
+                self.trade[name].setEnabled(False)
+                for field in toggles.get(name, advanced.get(name, ())):
+                    (self.advanced_card if name in advanced else self.management_card).set_row_visible(field, False)
+            if self.trade["di_partial_cost_atr_enabled"].isChecked():
+                if self.trade["position_sizing_stop_override_enabled"].isChecked():
+                    self.trade["position_sizing_stop_override_enabled"].setChecked(False)
+                self.trade["position_sizing_stop_override_enabled"].setEnabled(False)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
         liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
@@ -946,6 +977,8 @@ class RiskExecutionWorkspace(QWidget):
 
     @staticmethod
     def _management_description(base) -> str:
+        if getattr(base, "di_partial_1r_enabled", False):
+            return f"DI: close {base.di_partial_1r_close_pct:g}% at 1R, then SL to entry" + ("; increase ATR only as needed to cover estimated costs" if base.di_partial_cost_atr_enabled else "")
         enabled = []
         if base.break_even_enabled:
             enabled.append("break-even")

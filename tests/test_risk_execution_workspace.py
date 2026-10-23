@@ -581,6 +581,41 @@ def test_ema_cross_confirmation_is_visible_in_effective_plan_summary():
         app.processEvents()
 
 
+def test_di_partial_cost_controls_roundtrip_and_restore():
+    app, window = _window()
+    try:
+        workspace = window.risk_execution_workspace
+        selector = window.rule_builder.direction_mode
+        index = selector.findData("DI")
+        assert index >= 0
+        selector.setCurrentIndex(index)
+        selector.activated.emit(index)
+        risk=window.execution_form.widgets["risk_mode"]
+        risk.setCurrentIndex(risk.findData("ATR"))
+        workspace.trade["reward_risk_ratio"].setValue(3.)
+        preset=workspace.trade["di_partial_1r_enabled"]
+        preset.setChecked(True)
+        app.processEvents()
+        workspace.trade["di_partial_1r_close_pct"].setValue(12.5)
+        workspace.trade["di_partial_cost_atr_enabled"].setChecked(True)
+        app.processEvents()
+        value=window.base_execution_form.value()
+        assert value.di_partial_1r_enabled and value.di_partial_cost_atr_enabled
+        assert value.di_partial_1r_close_pct==12.5
+        config=window.build_config()
+        assert any(p.di_partial_1r_enabled and p.di_partial_cost_atr_enabled for p in config.execution.profiles.values())
+        assert "12.5% at 1R" in workspace.summary_label.text()
+        assert not workspace.trade["partial_profit_enabled"].isEnabled()
+        assert not workspace.trade["position_sizing_stop_override_enabled"].isEnabled()
+        preset.setChecked(False)
+        app.processEvents()
+        assert workspace.trade["partial_profit_enabled"].isEnabled()
+        assert workspace.trade["position_sizing_stop_override_enabled"].isEnabled()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_ema_cost_cycle_option_summary_and_roundtrip():
     app, window = _window()
     try:

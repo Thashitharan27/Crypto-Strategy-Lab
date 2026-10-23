@@ -167,6 +167,7 @@ EXECUTION_PROFILE_GROUPS = (
         "trailing_enabled", "trailing_activation_r", "trailing_distance_r",
     ), None),
     ("Partials", (
+        "di_partial_1r_enabled", "di_partial_1r_close_pct", "di_partial_cost_atr_enabled",
         "partial_stop_enabled", "sl1_r", "sl1_close_pct", "sl2_r",
         "partial_profit_enabled", "tp1_r", "tp1_close_pct", "tp2_r",
     ), None),

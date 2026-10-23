@@ -41,6 +41,9 @@ class StrategyProfile:
     sl1_r: float = 0.5
     sl1_close_pct: float = 50.0
     sl2_r: float = 2.0
+    di_partial_1r_enabled: bool = False
+    di_partial_1r_close_pct: float = 10.0
+    di_partial_cost_atr_enabled: bool = False
     partial_profit_enabled: bool = False
     tp1_r: float = 1.0
     tp1_close_pct: float = 50.0
@@ -124,6 +127,8 @@ class StrategyProfile:
                 raise ValueError(f"{key}: SL2 must be greater than SL1")
             if not 0 < self.sl1_close_pct < 100:
                 raise ValueError(f"{key}: partial stop close percentage must be between 0 and 100")
+        from crypto_strategy_lab.di_partial_cost import validate_di_partial
+        validate_di_partial(self)
         if self.partial_profit_enabled:
             if self.tp1_r <= 0 or self.tp2_r <= self.tp1_r:
                 raise ValueError(f"{key}: TP2 must be greater than TP1")
