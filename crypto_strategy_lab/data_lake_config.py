@@ -413,6 +413,8 @@ class ExecutionConfig:
     sp_minimum_r_enabled: bool = False
     sp_recent_swings_enabled: bool = False
     sp_require_level_reclaim: bool = False
+    sp_cost_cover_enabled: bool = False
+    sp_cost_cover_close_pct: float = 10.0
     sp_level_tolerance_atr: float = 0.3
     sp_body_atr: float = 0.5
     sp_min_body_percent: float = 50.0
@@ -510,6 +512,11 @@ class ResearchRunConfig:
         validate_settings(self.execution.sd_swing_strength,self.execution.sd_stop_buffer_atr,self.execution.sd_minimum_r)
         from crypto_strategy_lab.sneaky_pivot import validate_settings as validate_sneaky
         validate_sneaky(self.execution.sp_level_tolerance_atr,self.execution.sp_body_atr,self.execution.sp_confirmation_bars,self.execution.sp_hold_minutes,self.execution.sp_min_body_percent)
+        from crypto_strategy_lab.sneaky_pivot import validate_cost_cover
+        validate_cost_cover(self.execution.sp_cost_cover_enabled,self.execution.sp_cost_cover_close_pct,())
+        for key, profile in self.strategy.profiles.items():
+            if profile.enabled and any(r.get("_strategy_direction_mode")=="SNEAKY_PIVOT" for r in profile.entry_rules):
+                validate_cost_cover(self.execution.sp_cost_cover_enabled,self.execution.sp_cost_cover_close_pct,(self.execution.profiles[key],))
         from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
         validate_liquidity(self.execution.ls_equal_tolerance_atr,self.execution.ls_displacement_atr,self.execution.ls_base_bars,self.execution.ls_max_wait_bars)
         if any(r.get("_strategy_direction_mode")=="SUPPLY_DEMAND_RETEST" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())) and self.data.strategy_timeframe_minutes!=60:

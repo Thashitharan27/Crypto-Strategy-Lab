@@ -171,6 +171,13 @@ class RiskExecutionWorkspace(QWidget):
         self.account["sp_require_level_reclaim"].setText("Require rejection: reversal closes back across tested level")
         self.account["sp_require_level_reclaim"].setToolTip("Long: green reversal closes strictly above the tested level. Short: red reversal closes strictly below it. Non-qualifying candles can wait within the existing confirmation window. No pin-bar or engulfing shape is required.")
         self.sd_card.add_control("sp_require_level_reclaim", self.account["sp_require_level_reclaim"])
+        self.account["sp_cost_cover_enabled"].setText("At 1R cover costs with a partial close, then move SL to entry")
+        self.account["sp_cost_cover_enabled"].setToolTip("Widen the swing-based stop only when necessary to cover estimated fees and slippage. Keep the previous-day TP and recheck minimum R. Funding and stop gaps are excluded.")
+        self.sd_card.add_control("sp_cost_cover_enabled", self.account["sp_cost_cover_enabled"])
+        self.sd_card.add_field("sp_cost_cover_close_pct", "Close at 1R", self.account["sp_cost_cover_close_pct"])
+        self.account["sp_cost_cover_close_pct"].setRange(.01,99.99)
+        self.account["sp_cost_cover_close_pct"].setSuffix("%")
+        self.account["sp_cost_cover_enabled"].toggled.connect(self.refresh_visibility)
         for name,label in (("sp_level_tolerance_atr","Distance to level (ATR)"),("sp_body_atr","Minimum initial body (ATR)"),("sp_min_body_percent","Minimum body (% of candle range)"),("sp_confirmation_bars","Wait for reversal (candles)"),("sp_hold_minutes","Maximum hold from setup (minutes)")):
             self.sd_card.add_field(name,label,self.account[name])
         self.account["sp_level_tolerance_atr"].setRange(0.,10.)
@@ -930,6 +937,16 @@ class RiskExecutionWorkspace(QWidget):
                 if self.trade["position_sizing_stop_override_enabled"].isChecked():
                     self.trade["position_sizing_stop_override_enabled"].setChecked(False)
                 self.trade["position_sizing_stop_override_enabled"].setEnabled(False)
+        sp_cost = self._signal_strategy_mode() == "SNEAKY_PIVOT" and self.account["sp_cost_cover_enabled"].isChecked()
+        if sp_cost:
+            for name in incompatible_toggles:
+                if self.trade[name].isChecked():
+                    self.trade[name].setChecked(False)
+                self.trade[name].setEnabled(False)
+                for field in toggles.get(name, advanced.get(name, ())):
+                    (self.advanced_card if name in advanced else self.management_card).set_row_visible(field, False)
+            self.trade["position_sizing_stop_override_enabled"].setChecked(False)
+            self.trade["position_sizing_stop_override_enabled"].setEnabled(False)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
         liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
@@ -937,11 +954,12 @@ class RiskExecutionWorkspace(QWidget):
         self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
             self.sd_card.set_row_visible(name,liquidity)
+        self.sd_card.set_row_visible("sp_cost_cover_close_pct", sp_cost)
         if sneaky:self.sd_card.setTitle("Sneaky Pivot — all day")
         self.sd_card.set_row_visible("sd_minimum_r",not sneaky or self.account["sp_minimum_r_enabled"].isChecked())
         self.sd_card.set_row_visible("sd_stop_buffer_atr",True)
         self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond swing (ATR)" if sneaky else "Stop buffer beyond zone (ATR)")
-        for name in ("sp_minimum_r_enabled","sp_recent_swings_enabled","sp_require_level_reclaim","sp_level_tolerance_atr","sp_body_atr","sp_min_body_percent","sp_confirmation_bars","sp_hold_minutes"):
+        for name in ("sp_minimum_r_enabled","sp_recent_swings_enabled","sp_require_level_reclaim","sp_cost_cover_enabled","sp_level_tolerance_atr","sp_body_atr","sp_min_body_percent","sp_confirmation_bars","sp_hold_minutes"):
             self.sd_card.set_row_visible(name,sneaky)
         self.sd_card.setVisible(supply_demand)
         self.ema_gap_card.setVisible(automatic_reversal)
@@ -1001,7 +1019,7 @@ class RiskExecutionWorkspace(QWidget):
 
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "SNEAKY_PIVOT":
-            self.summary_label.setText(f"All-day 15m Sneaky Pivot; test the previous complete UTC-day low/high{' plus the latest recent confirmed swings' if execution.sp_recent_swings_enabled else ''}. Initial body ≥{execution.sp_min_body_percent:g}% of range and {execution.sp_body_atr:g} ATR; wick must touch the selected level within {execution.sp_level_tolerance_atr:g} ATR. First reversal within {execution.sp_confirmation_bars} candles{' closing back across the tested level' if execution.sp_require_level_reclaim else ''}; break its high/low during the next candle using 1m data. SL {execution.sd_stop_buffer_atr:g} ATR beyond the older confirmed swing low/high; skip if unavailable or breached. TP opposite prior-day boundary. Hold cap {execution.sp_hold_minutes} minutes from setup. One open trade; no session restriction. Minimum-R filter {str(execution.sd_minimum_r) + 'R' if execution.sp_minimum_r_enabled else 'off'}.")
+            self.summary_label.setText(f"All-day 15m Sneaky Pivot; test the previous complete UTC-day low/high{' plus the latest recent confirmed swings' if execution.sp_recent_swings_enabled else ''}. Initial body ≥{execution.sp_min_body_percent:g}% of range and {execution.sp_body_atr:g} ATR; wick must touch the selected level within {execution.sp_level_tolerance_atr:g} ATR. First reversal within {execution.sp_confirmation_bars} candles{' closing back across the tested level' if execution.sp_require_level_reclaim else ''}; break its high/low during the next candle using 1m data. SL {execution.sd_stop_buffer_atr:g} ATR beyond the older confirmed swing low/high; skip if unavailable or breached. TP opposite prior-day boundary. Hold cap {execution.sp_hold_minutes} minutes from setup. One open trade; no session restriction. Cost-cover partial {str(execution.sp_cost_cover_close_pct) + '% at 1R, then SL to entry; widen swing stop only as needed' if execution.sp_cost_cover_enabled else 'off'}. Minimum-R filter {str(execution.sd_minimum_r) + 'R' if execution.sp_minimum_r_enabled else 'off'}.")
             return
         if self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST":
             self.summary_label.setText(

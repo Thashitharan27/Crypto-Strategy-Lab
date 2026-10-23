@@ -88,6 +88,8 @@ class BacktestConfig:
     sp_minimum_r_enabled: bool = False
     sp_recent_swings_enabled: bool = False
     sp_require_level_reclaim: bool = False
+    sp_cost_cover_enabled: bool = False
+    sp_cost_cover_close_pct: float = 10.0
     sp_level_tolerance_atr: float = 0.3
     sp_body_atr: float = 0.5
     sp_min_body_percent: float = 50.0
@@ -207,6 +209,9 @@ class BacktestConfig:
         if not math.isfinite(self.ema_reversal_min_entry_ema300_atr) or self.ema_reversal_min_entry_ema300_atr < 0:
             raise ValueError("EMA 300 entry distance must be finite and non-negative")
         object.__setattr__(self, "strategy_profiles", normalize_profiles(self.strategy_profiles))
+        from crypto_strategy_lab.sneaky_pivot import validate_cost_cover
+        validate_cost_cover(self.sp_cost_cover_enabled,self.sp_cost_cover_close_pct,
+            (p for p in self.strategy_profiles.values() if any(r.get("_strategy_direction_mode")=="SNEAKY_PIVOT" for r in p.entry_rules)))
         from crypto_strategy_lab.di_partial_cost import validate_di_partial_risk_mode
         for di_profile in self.strategy_profiles.values():
             validate_di_partial_risk_mode(di_profile, self.risk_mode, di_profile.entry_rules, getattr(self, "sr_take_profit_mode", "FIXED_R"))

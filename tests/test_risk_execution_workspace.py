@@ -56,8 +56,17 @@ def test_sneaky_pivot_selection_and_settings_round_trip():
         window.execution_form.widgets['sp_min_body_percent'].setValue(35.)
         window.execution_form.widgets['sp_recent_swings_enabled'].setChecked(True)
         window.execution_form.widgets['sp_require_level_reclaim'].setChecked(True)
+        assert not window.execution_form.widgets['sp_cost_cover_enabled'].isHidden()
+        assert window.execution_form.widgets['sp_cost_cover_close_pct'].isHidden()
+        window.execution_form.widgets['sp_cost_cover_enabled'].setChecked(True)
+        app.processEvents()
+        assert not window.execution_form.widgets['sp_cost_cover_close_pct'].isHidden()
+        window.execution_form.widgets['sp_cost_cover_close_pct'].setValue(15.)
         config=window.build_config()
         assert config.execution.sp_require_level_reclaim is True
+        assert config.execution.sp_cost_cover_enabled is True
+        assert config.execution.sp_cost_cover_close_pct==15.
+        assert "15.0% at 1R" in workspace.summary_label.text()
         assert 'closing back across the tested level' in workspace.summary_label.text()
         assert config.execution.sp_level_tolerance_atr==.2
         assert config.execution.sp_min_body_percent==35.

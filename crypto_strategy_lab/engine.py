@@ -1112,16 +1112,18 @@ class BacktestEngine(DILadderExecutionMixin):
         partial_sl_enabled = active_profile.partial_stop_enabled
         partial_tp_enabled = active_profile.partial_profit_enabled
         di_partial = bool(getattr(active_profile, "di_partial_1r_enabled", False) and self.signal_strategy_mode == "DI")
+        sp_partial = bool(self.signal_strategy_mode == "SNEAKY_PIVOT" and self.config.sp_cost_cover_enabled)
+        cost_partial = di_partial or sp_partial
         sl1_r = active_profile.sl1_r
         sl1_close_pct = active_profile.sl1_close_pct
         sl2_r = active_profile.sl2_r
         tp1_r = active_profile.tp1_r
         tp1_close_pct = active_profile.tp1_close_pct
         tp2_r = active_profile.tp2_r
-        if di_partial:
+        if cost_partial:
             partial_tp_enabled = True
             tp1_r = 1.0
-            tp1_close_pct = active_profile.di_partial_1r_close_pct
+            tp1_close_pct = self.config.sp_cost_cover_close_pct if sp_partial else active_profile.di_partial_1r_close_pct
             tp2_r = active_profile.reward_risk_ratio
         r = float(self.risk[ind_i])
         stop_mult = sl2_r if partial_sl_enabled else active_profile.stop_loss_multiple
@@ -1221,6 +1223,7 @@ class BacktestEngine(DILadderExecutionMixin):
             pos.final_active_stop = pos.sl2_price
 
         pos.be_enabled = bool(active_profile.break_even_enabled)
+        pos.cost_cover_partial_enabled = cost_partial
         pos.di_partial_1r_enabled = di_partial
         pos.di_partial_cost_atr_enabled = bool(di_partial and active_profile.di_partial_cost_atr_enabled)
         pos.di_partial_original_stop_distance = original_di_stop if di_partial else None
@@ -1231,7 +1234,7 @@ class BacktestEngine(DILadderExecutionMixin):
             active_profile.break_even_activation_r if active_profile.break_even_enabled else None
         )
         pos.trailing_enabled = bool(active_profile.trailing_enabled)
-        if di_partial:
+        if cost_partial:
             pos.be_enabled = True
             pos.be_mode = "ENTRY_PRICE"
             pos.be_offset_r = 0.0
@@ -1863,7 +1866,7 @@ class BacktestEngine(DILadderExecutionMixin):
         changed=False
         if tp1_hit:
             price = pos.tp1_price
-            if getattr(pos, "di_partial_1r_enabled", False):
+            if getattr(pos, "cost_cover_partial_enabled", getattr(pos, "di_partial_1r_enabled", False)):
                 price *= 1-self.config.slippage if pos.side == Side.LONG else 1+self.config.slippage
             changed=self._partial_fill(pos,pos.tp1_quantity,price,"tp1",i,timestamp,source)
         if pos.is_open and pos.tp1_hit and tp2_hit:
@@ -1872,7 +1875,7 @@ class BacktestEngine(DILadderExecutionMixin):
             return self._finish_partial_stop(pos,i,timestamp,source)
         if pos.is_open and pos.trailing_enabled and not pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
-        if pos.is_open and changed and pos.tp1_hit and getattr(pos, "di_partial_1r_enabled", False):
+        if pos.is_open and changed and pos.tp1_hit and getattr(pos, "cost_cover_partial_enabled", getattr(pos, "di_partial_1r_enabled", False)):
             pos.sl = pos.be_stop_price = pos.entry_price
             pos.be_triggered = True
             pos.be_trigger_time = pd.Timestamp(timestamp)
@@ -2275,7 +2278,10 @@ class BacktestEngine(DILadderExecutionMixin):
                               ("di_partial_original_stop_distance", None), ("di_partial_minimum_cost_stop_distance", None),
                               ("di_partial_effective_atr_multiplier", None)):
             row[name] = getattr(primary, name, default)
-        if getattr(primary, "di_partial_1r_enabled", False):
+        for name, default in (("sp_cost_cover_enabled", False), ("sp_cost_cover_close_pct", None),
+                              ("sp_original_swing_stop_distance", None), ("sp_minimum_cost_stop_distance", None)):
+            row[name] = getattr(primary, name, default)
+        if getattr(primary, "cost_cover_partial_enabled", False):
             row["break_even_activation_r"] = 1.0
         return self._decorate_ladder_result_row(p, row)
 
