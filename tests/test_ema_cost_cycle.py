@@ -193,3 +193,46 @@ def test_zero_costs_move_stop_without_partial_quantity():
     assert p.be_triggered and p.tp1_hit
     assert p.tp1_quantity == 0.
     assert p.net_pnl == 0.
+
+
+def test_direction_neutral_report_config_does_not_activate_ema_cycles():
+    from crypto_strategy_lab.bayesian_sampling import _research_native_config
+    e = engine()
+    # Reproduce Deep Research's report-time transformation: selection markers
+    # are removed and independent observations may overlap.
+    report_config = _research_native_config(e.config, 100)
+    assert report_config.max_active_pairs == 202
+    assert report_config.ema_cross_cost_cycle_enabled
+    assert all(not p.entry_rules for p in report_config.strategy_profiles.values())
+    # The real EMA portfolio still retains the single-active-trade constraint.
+    with pytest.raises(ValueError, match="one active trade"):
+        replace(e.config, max_active_pairs=202)
+
+
+def test_optional_strategy_sampling_retains_portfolio_artifacts_for_cycles(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from crypto_strategy_lab import research_sampling_reporting as report
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    c = ResearchRunConfig()
+    c = replace(c, reporting=replace(c.reporting, research_sampling_mode="EVERY_VIABLE_ENTRY"))
+    native = engine().config
+    monkeypatch.setattr(report, "native_simulator_config", lambda *a, **kw: native)
+    def unexpected(*a, **kw):
+        raise AssertionError("Chain execution must not enter independent observation sampling")
+    monkeypatch.setattr(report, "generate_strategy_research_samples", unexpected)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"artifacts": {"trades": "retained"}, "research": {"existing": True}}))
+    events = []
+    context = SimpleNamespace(config=c, progress_callback=events.append)
+    result = SimpleNamespace(output_dir=tmp_path, request=SimpleNamespace(start=None, end=None))
+    report.append_research_sampling_artifacts(result, context)
+    saved = json.loads(manifest.read_text())
+    assert saved["artifacts"]["trades"] == "retained"
+    assert saved["research"]["existing"]
+    status = saved["research"]["strategy_research_sampling"]
+    assert status["enabled"] is False
+    assert status["requested_mode"] == "EVERY_VIABLE_ENTRY"
+    assert status["status"] == "UNAVAILABLE_FOR_EMA_COST_CYCLES"
+    assert "sequential portfolio" in status["reason"]
+    assert "Portfolio reports retained" == events[0]["label"]

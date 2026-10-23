@@ -204,7 +204,16 @@ class BacktestConfig:
         if not math.isfinite(self.ema_reversal_min_entry_ema300_atr) or self.ema_reversal_min_entry_ema300_atr < 0:
             raise ValueError("EMA 300 entry distance must be finite and non-negative")
         object.__setattr__(self, "strategy_profiles", normalize_profiles(self.strategy_profiles))
-        if self.ema_cross_cost_cycle_enabled and self.ema_920_trade_plan.startswith("EMA_20_100_CROSS"):
+        ema_cost_cycle_selected = (
+            self.ema_cross_cost_cycle_enabled
+            and self.ema_920_trade_plan.startswith("EMA_20_100_CROSS")
+            and any(
+                rule.get("_strategy_direction_mode") == "EMA_9_20_PULLBACK"
+                for profile in self.strategy_profiles.values()
+                for rule in profile.entry_rules
+            )
+        )
+        if ema_cost_cycle_selected:
             if self.enable_daily_entry_schedule or self.max_active_pairs != 1 or getattr(self, "di_ladder_enabled", False):
                 raise ValueError("EMA cost-cover cycles require one active trade, no daily schedule and no DI ladder")
         if self.strategy_profile_run_mode not in ("ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"):

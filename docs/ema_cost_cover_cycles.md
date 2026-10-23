@@ -45,3 +45,10 @@ Result rows include `ema_cost_cycle_enabled`, `ema_cycle_number` (initial=0),
 `ema_cycle_parent_id`, `ema_cycle_root_id`, `ema_cycle_trigger`,
 `ema_cycle_cost_cover_fraction`, and `ema_cycle_cost_cover_rejected`, alongside
 the existing TP1, remaining-quantity, fees, exit-reason and net-P&L fields.
+
+Deep Research's direction-neutral market-grid report removes strategy selection
+rules, so the EMA cycle option is inactive there and must not impose portfolio
+limits on those independent observations. Strategy-specific independent sampling
+(including paired walk-forward samples) cannot represent sequential re-entry
+chains: that optional report is marked unavailable in the manifest with an
+explanation. The normal portfolio trade and performance artifacts remain intact.
