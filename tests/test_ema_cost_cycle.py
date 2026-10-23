@@ -157,11 +157,15 @@ def test_cost_cycle_gui_and_native_config_roundtrip():
     from crypto_strategy_lab.research_adapters import native_simulator_config
     values = default_gui_config()
     assert not values["ema_cross_cost_cycle_enabled"]
+    assert not values["ema_cross_reentry_widening_enabled"]
     values["ema_cross_cost_cycle_enabled"] = True
+    values["ema_cross_reentry_widening_enabled"] = True
     assert build_backtest_config(values, require_paths=False).ema_cross_cost_cycle_enabled
+    assert build_backtest_config(values, require_paths=False).ema_cross_reentry_widening_enabled
     c = ResearchRunConfig()
-    c = replace(c, execution=replace(c.execution, ema_cross_cost_cycle_enabled=True))
+    c = replace(c, execution=replace(c.execution, ema_cross_cost_cycle_enabled=True, ema_cross_reentry_widening_enabled=True))
     assert native_simulator_config(c.data,c.features,c.strategy,c.execution).ema_cross_cost_cycle_enabled
+    assert native_simulator_config(c.data,c.features,c.strategy,c.execution).ema_cross_reentry_widening_enabled
 
 
 def test_array_backed_intrabar_path_preserves_same_interval_cycles():
@@ -236,3 +240,105 @@ def test_optional_strategy_sampling_retains_portfolio_artifacts_for_cycles(tmp_p
     assert status["status"] == "UNAVAILABLE_FOR_EMA_COST_CYCLES"
     assert "sequential portfolio" in status["reason"]
     assert "Portfolio reports retained" == events[0]["label"]
+
+
+@pytest.mark.parametrize("short", [False, True])
+def test_narrow_checkpoint_is_phantom_then_wider_2r_enters_with_1r_stop(short):
+    import json
+    e = engine(short)
+    e.config = replace(e.config, ema_cross_reentry_widening_enabled=True)
+    sign = -1 if short else 1
+    slow = e.ema_100_values[112]
+    e.ema_20_values[112] = slow + sign*.5
+    e.ema_20_values[113:117] = slow + sign*2
+    rows = e.run()
+    assert len(rows) == 2
+    first, second = (p.position for p in e.completed_pairs)
+    assert second.entry_price == 100 + sign*20
+    assert second.original_sl == 100 + sign*10
+    assert second.ema_cycle_trigger == 100 + sign*30
+    assert second.ema_cycle_reentry_checkpoint == 2
+    assert second.ema_cycle_reference_ema_gap == 1.
+    assert second.ema_cycle_entry_ema_gap == 2.
+    assert first.net_pnl == pytest.approx(0, abs=1e-9)
+    phantom = json.loads(rows.iloc[0].ema_cycle_phantom_records)
+    assert len(phantom) == rows.iloc[0].ema_cycle_phantom_count == 1
+    assert phantom[0]["entry"] == 100 + sign*10
+    assert phantom[0]["stop"] == 100.
+    assert phantom[0]["ema_gap"] == .5
+    assert phantom[0]["reference_ema_gap"] == 1.
+    assert "quantity" not in phantom[0]
+    assert e.current_equity == pytest.approx(e.config.initial_equity + first.net_pnl + second.net_pnl)
+
+
+def test_reference_stays_at_last_actual_entry_across_multiple_phantoms():
+    e = engine()
+    e.config = replace(e.config, ema_cross_reentry_widening_enabled=True)
+    e.ema_20_values[112] = 90.9
+    e.ema_20_values[113] = 90.2
+    e.ema_20_values[115] = 90.8  # Wider than the last phantom, but not the actual entry.
+    e.ema_20_values[116] = 92.
+    for i, values in {116:(125,131,124),117:(135,141,134),118:(145,146,144)}.items():
+        e.open[i],e.high[i],e.low[i] = values
+    rows = e.run()
+    assert len(rows) == 2
+    phantoms = e.completed_pairs[0].position.ema_cycle_phantom_records
+    assert [p["entry"] for p in phantoms] == [110.,120.,130.]
+    assert all(p["reference_ema_gap"] == 1 for p in phantoms)
+    pos = e.completed_pairs[1].position
+    assert pos.entry_price == 140.
+    assert pos.original_sl == 130.
+    assert pos.ema_cycle_reentry_checkpoint == 4
+
+
+def test_narrow_ema_checks_all_crossed_checkpoints_without_orders():
+    e = engine()
+    e.config = replace(e.config, ema_cross_reentry_widening_enabled=True)
+    e.high[113] = 131.
+    e.ema_20_values[112:117] = 90.5
+    rows = e.run()
+    assert len(rows) == 1
+    phantoms = e.completed_pairs[0].position.ema_cycle_phantom_records
+    assert [p["entry"] for p in phantoms] == [110.,120.,130.]
+    assert e._ema_cycle_pending is None  # Cancelled by bearish alignment.
+    assert e.current_equity == pytest.approx(e.config.initial_equity)
+
+
+def test_equal_gap_is_not_wider_and_execution_candle_ema_is_unknown():
+    e = engine()
+    e.config = replace(e.config, ema_cross_reentry_widening_enabled=True)
+    e.ema_20_values[112] = 91.  # Equal to the previous actual entry gap.
+    e.ema_20_values[113] = 95.  # Not known when candle 113 touches 110.
+    rows = e.run()
+    assert rows.iloc[0].ema_cycle_phantom_count == 1
+    assert e.completed_pairs[0].position.ema_cycle_phantom_records[0]["ema_gap"] == 1.
+    assert e.completed_pairs[1].position.entry_price == 120.
+
+
+def test_wider_gap_allows_first_reentry_and_saves_new_baseline():
+    e = engine()
+    e.config = replace(e.config, ema_cross_reentry_widening_enabled=True)
+    e.ema_20_values[112] = 92.
+    e.ema_20_values[115] = 91.5  # Below the new baseline (2), above the initial one (1).
+    rows = e.run()
+    assert len(rows) == 2
+    second = e.completed_pairs[1].position
+    assert second.entry_price == 110.
+    assert second.ema_cycle_entry_ema_gap == 2.
+    assert second.ema_cycle_phantom_records[0]["reference_ema_gap"] == 2.
+    assert second.ema_cycle_phantom_records[0]["entry"] == 120.
+
+
+@pytest.mark.parametrize("short", [False, True])
+def test_intrabar_phantoms_use_closed_strategy_ema_without_extra_trades(short):
+    e = engine(short, intrabar=True)
+    e.config = replace(e.config, ema_cross_reentry_widening_enabled=True)
+    sign = -1 if short else 1
+    # Candle 111's widened gap is not yet known in its constituent 1m bars.
+    e.ema_20_values[111] = e.ema_100_values[111] + sign*5
+    rows = e.run()
+    assert len(rows) == 1
+    phantoms = e.completed_pairs[0].position.ema_cycle_phantom_records
+    assert [p["entry"] for p in phantoms] == [100+sign*10,100+sign*20]
+    assert all(p["ema_gap"] == 1. for p in phantoms)
+    assert [pd.Timestamp(p["time"]) for p in phantoms] == [pd.Timestamp(e.times[111])+pd.Timedelta(minutes=m) for m in (2,3)]

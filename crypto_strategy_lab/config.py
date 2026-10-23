@@ -74,6 +74,7 @@ class BacktestConfig:
     ema_320_candle_wick_rejection: bool = True
     ema_320_candle_star: bool = True
     ema_cross_cost_cycle_enabled: bool = False
+    ema_cross_reentry_widening_enabled: bool = False
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False

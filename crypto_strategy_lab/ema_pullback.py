@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import json
 
 from crypto_strategy_core.ema_strategy import ema_20_100_cross, ema_20_100_entry_direction
 from crypto_strategy_lab.engine import _signal_ema
@@ -780,8 +781,15 @@ class Ema920PullbackMixin(EmaCostCycleMixin):
             ("ema_cycle_parent_id", None), ("ema_cycle_root_id", None),
             ("ema_cycle_trigger", np.nan), ("ema_cycle_cost_cover_fraction", 0.0),
             ("ema_cycle_cost_cover_rejected", False),
+            ("ema_cycle_widening_enabled", False),
+            ("ema_cycle_entry_ema_gap", np.nan),
+            ("ema_cycle_reference_ema_gap", np.nan),
+            ("ema_cycle_reentry_checkpoint", 0),
         ):
             row[name] = getattr(pos, name, default)
+        phantoms = getattr(pos, "ema_cycle_phantom_records", [])
+        row["ema_cycle_phantom_count"] = len(phantoms)
+        row["ema_cycle_phantom_records"] = json.dumps(phantoms, allow_nan=False)
         if getattr(pos, "ema_cost_cycle_enabled", False):
             row.update(intrabar_partial_tp_ordering="STOP_FIRST", break_even_activation_r=1.0,
                        break_even_offset_r=0.0, tp2_close_pct=0.0)

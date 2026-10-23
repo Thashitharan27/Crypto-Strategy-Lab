@@ -52,3 +52,30 @@ limits on those independent observations. Strategy-specific independent sampling
 (including paired walk-forward samples) cannot represent sequential re-entry
 chains: that optional report is marked unavailable in the manifest with an
 explanation. The normal portfolio trade and performance artifacts remain intact.
+
+## Optional wider-EMA re-entry filter
+
+Enable **Re-enter only with a wider EMA gap; track phantom checkpoints otherwise**
+under the cost-cover cycle option. It defaults off and affects re-entries only.
+The EMA gap is `abs(EMA20 - EMA100)` in price units, using the latest completed
+strategy candle. Save that gap at every actual entry. A re-entry requires a
+strictly larger gap than the previous actual entry; equality also fails.
+
+After entry 100 / SL 90 is cost-covered and stopped at 100, check 110. If the gap
+is not wider, record a phantom checkpoint without placing an order. Check again
+at 120, then 130, etc., in the same original 10-price-unit steps. If 120 qualifies,
+enter with SL 110. That position's own 1R is then 130. Actual fills still use the
+configured slippage and gap policy.
+
+Rejected checkpoints never replace the reference EMA gap, affect equity, charge
+fees, or count as trades. Only an actual new entry resets the baseline. The
+opposite EMA cross cancels monitoring. Several rejected levels crossed in one
+execution candle are recorded separately using the same already-known EMA gap.
+There is no intrabar recalculation from an unfinished strategy candle.
+
+Trade rows save `ema_cycle_entry_ema_gap`, `ema_cycle_reference_ema_gap`,
+`ema_cycle_reentry_checkpoint`, `ema_cycle_widening_enabled`,
+`ema_cycle_phantom_count`, and `ema_cycle_phantom_records` (JSON). Phantom records
+belong to the stopped parent trade, including when no later real entry occurs;
+they contain the checkpoint time, hypothetical entry / stop, EMA comparison and
+rejection status, without hypothetical P&L being mixed into portfolio results.

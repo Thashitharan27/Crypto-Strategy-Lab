@@ -40,6 +40,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "ema_320_candle_wick_rejection": True,
     "ema_320_candle_star": True,
     "ema_cross_cost_cycle_enabled": False,
+    "ema_cross_reentry_widening_enabled": False,
     "ema_cross_entry_confirmation_enabled": False,
     "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
@@ -423,6 +424,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         ema_320_candle_wick_rejection=bool(merged["ema_320_candle_wick_rejection"]),
         ema_320_candle_star=bool(merged["ema_320_candle_star"]),
         ema_cross_cost_cycle_enabled=bool(merged["ema_cross_cost_cycle_enabled"]),
+        ema_cross_reentry_widening_enabled=bool(merged["ema_cross_reentry_widening_enabled"]),
         ema_cross_entry_confirmation_enabled=bool(
             merged["ema_cross_entry_confirmation_enabled"]
         ),

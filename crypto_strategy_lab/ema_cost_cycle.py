@@ -25,6 +25,11 @@ class EmaCostCycleMixin:
             pos.ema_cycle_number = pending["cycle"] if pending else 0
             pos.ema_cycle_parent_id = pending["parent"] if pending else None
             pos.ema_cycle_root_id = pending["root"] if pending else pair.pair_id
+            pos.ema_cycle_entry_ema_gap = self._ema_cycle_gap(pos.entry_index - 1)
+            pos.ema_cycle_reference_ema_gap = pending["reference_gap"] if pending else np.nan
+            pos.ema_cycle_reentry_checkpoint = pending.get("checkpoint", 1) if pending else 0
+            pos.ema_cycle_phantom_records = []
+            pos.ema_cycle_widening_enabled = bool(getattr(self.config, "ema_cross_reentry_widening_enabled", False))
             pos.ema_cycle_trigger = pos.entry_price + (1 if pos.side == Side.LONG else -1) * abs(pos.entry_price - pos.original_sl)
             pos.partial_tp_enabled = True
             pos.partial_sl_enabled = False
@@ -44,6 +49,37 @@ class EmaCostCycleMixin:
             return False
         fast, slow = float(self.ema_20_values[i]), float(self.ema_100_values[i])
         return np.isfinite(fast) and np.isfinite(slow) and (fast > slow if direction == "LONG" else fast < slow)
+
+    def _ema_cycle_gap(self, i):
+        """EMA distance in price units, using completed strategy candles only."""
+        if i < 0:
+            return np.nan
+        fast, slow = float(self.ema_20_values[i]), float(self.ema_100_values[i])
+        return abs(fast - slow) if np.isfinite(fast) and np.isfinite(slow) else np.nan
+
+    def _ema_cycle_phantom_checkpoints(self, pending, i, timestamp, high, low):
+        """Advance rejected levels without placing orders or changing capital."""
+        if not getattr(self.config, "ema_cross_reentry_widening_enabled", False):
+            return
+        gap = self._ema_cycle_gap(i - 1)
+        reference = pending["reference_gap"]
+        if np.isfinite(gap) and np.isfinite(reference) and gap > reference:
+            return
+        sign = 1 if pending["direction"] == "LONG" else -1
+        while (high >= pending["trigger"] if sign > 0 else low <= pending["trigger"]):
+            pending["owner"].ema_cycle_phantom_records.append({
+                "time": pd.Timestamp(timestamp).isoformat(),
+                "checkpoint": pending["checkpoint"], "side": pending["direction"],
+                "entry": pending["trigger"], "stop": pending["stop"],
+                "ema_gap": gap if np.isfinite(gap) else None,
+                "reference_ema_gap": reference if np.isfinite(reference) else None,
+                "status": "PHANTOM_EMA_NOT_WIDER",
+            })
+            pending["stop"] = pending["trigger"]
+            pending["trigger"] += sign * pending["distance"]
+            if not np.isfinite(pending["trigger"]) or pending["trigger"] == pending["stop"]:
+                raise ValueError("EMA phantom checkpoint distance cannot advance the price")
+            pending["checkpoint"] += 1
 
     def _ema_cycle_rows(self, i):
         """Use execution bars; honor the ordinary missing-data policy."""
@@ -95,6 +131,7 @@ class EmaCostCycleMixin:
             newly_triggered = False
             if pending and not self.active_pairs and timestamp >= pending["available"]:
                 long = pending["direction"] == "LONG"
+                self._ema_cycle_phantom_checkpoints(pending, i, timestamp, high, low)
                 reached = high >= pending["trigger"] if long else low <= pending["trigger"]
                 if reached and self._in_trading_window(i) and self.current_equity > 0:
                     raw = max(opening, pending["trigger"]) if long else min(opening, pending["trigger"])
@@ -139,6 +176,9 @@ class EmaCostCycleMixin:
                     "stop": pos.entry_price, "available": timestamp + step,
                     "cycle": pos.ema_cycle_number + 1, "parent": pair.pair_id,
                     "root": pos.ema_cycle_root_id,
+                    "reference_gap": pos.ema_cycle_entry_ema_gap,
+                    "distance": abs(pos.ema_cycle_trigger - pos.entry_price),
+                    "checkpoint": 1, "owner": pos,
                 }
             return
         reached = high >= pos.ema_cycle_trigger if long else low <= pos.ema_cycle_trigger

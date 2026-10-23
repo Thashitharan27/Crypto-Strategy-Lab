@@ -597,11 +597,18 @@ def test_ema_cost_cycle_option_summary_and_roundtrip():
         workspace.refresh_visibility()
         assert not cycle.isHidden()
         assert window.execution_form.value().ema_cross_cost_cycle_enabled
+        widening = window.execution_form.widgets["ema_cross_reentry_widening_enabled"]
+        assert not widening.isHidden()
+        widening.setChecked(True)
+        app.processEvents()
+        assert window.execution_form.value().ema_cross_reentry_widening_enabled
+        assert "previous actual entry gap" in workspace.summary_label.text()
         assert "at 1R cover costs" in workspace.summary_label.text()
         assert "repeat re-entry" in workspace.summary_label.text()
         assert not workspace.trade["partial_profit_enabled"].isEnabled()
         cycle.setChecked(False)
         app.processEvents()
+        assert widening.isHidden()
         assert workspace.trade["partial_profit_enabled"].isEnabled()
         assert workspace.trade["timeout_enabled"].isEnabled()
     finally:

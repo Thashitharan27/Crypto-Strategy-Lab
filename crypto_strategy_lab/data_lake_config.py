@@ -396,6 +396,7 @@ class ExecutionConfig:
     ema_320_flip_signals: bool = False
     ema_320_exit_mode: str = "BOTH"
     ema_cross_cost_cycle_enabled: bool = False
+    ema_cross_reentry_widening_enabled: bool = False
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
