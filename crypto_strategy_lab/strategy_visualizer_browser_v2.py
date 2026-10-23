@@ -20,6 +20,7 @@ from crypto_strategy_lab.strategy_visualizer import (
 )
 from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
 from crypto_strategy_lab.visualizer_drawings import DRAWING_HELPERS
+from crypto_strategy_lab.visualizer_structure import STRUCTURE_HELPERS
 from crypto_strategy_lab.visualizer_review_report import build_review_report_html
 
 
@@ -80,6 +81,8 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #chart-wrap{position:relative;min-height:0}
 #chart{position:absolute;inset:0;z-index:1}
 #fib-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
+#structure-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+#chart-wrap[style*="crosshair"] #structure-layer *{pointer-events:none!important}
 #fvg-layer{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
 #sr-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
 .sr-zone{position:absolute;border-top:1px solid;border-bottom:1px solid;box-sizing:border-box}
@@ -203,6 +206,7 @@ button:disabled{opacity:.45;cursor:default}
     <select id="chart-timeframe" aria-label="Chart timeframe"></select>
     <button id="indicators-btn" aria-haspopup="dialog">ƒx Indicators <span id="indicator-count"></span></button>
     <span class="toolbar-spacer"></span>
+    <label title="Confirmed chart-timeframe swings, sweeps, structure breaks, FVGs and midpoint; visual references, not entries"><input id="structure-guide" type="checkbox"> Structure guide</label>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
     <label title="Previous UTC day confirmed swing zones; visual reference only"><input id="sr-zones" type="checkbox" checked> Previous-day S/R</label>
@@ -216,6 +220,7 @@ button:disabled{opacity:.45;cursor:default}
     <button id="review-setup" aria-pressed="false" hidden>Review setup</button>
     <button id="replay-toggle" aria-pressed="false" disabled>Trade replay</button>
     <button id="day-replay" aria-pressed="false" disabled>Day replay</button>
+    <button id="structure-review" disabled title="Review any day with market structure; enter trades only when you confirm manually">Structure review</button>
     <span id="day-navigation" hidden>
       <button id="previous-day">Previous day</button>
       <input id="replay-day" type="date" aria-label="Replay UTC day">
@@ -275,6 +280,7 @@ button:disabled{opacity:.45;cursor:default}
     <div id="day-layer"></div>
     <div id="sr-layer"></div>
     <div id="fib-layer"></div>
+    <div id="structure-layer" aria-label="Market structure references"></div>
     <div id="fvg-layer"></div>
     <div id="trade-box-layer"></div>
     <svg id="drawing-layer" width="100%" height="100%" aria-label="Chart drawings"></svg>
@@ -324,6 +330,7 @@ button:disabled{opacity:.45;cursor:default}
 (() => {
   __REPLAY_HELPERS__
   __DRAWING_HELPERS__
+  __STRUCTURE_HELPERS__
   const boot = __BOOTSTRAP__;
   const $ = id => document.getElementById(id);
   $('chart-symbol').textContent = boot.run.symbol;
@@ -783,6 +790,13 @@ button:disabled{opacity:.45;cursor:default}
     $('day-replay').setAttribute('aria-pressed','true');$('replay-toggle').setAttribute('aria-pressed','false');
     tradeSelect.disabled=true;timeframeSelect.disabled=false;updateTradeLabels();initializeReplay();refreshReplay();
   }
+  $('structure-review').addEventListener('click',()=>{
+    if(replayBusy || !marketPayload)return;
+    $('structure-guide').checked=true;
+    if(!dayMode)$('day-replay').click();
+    else redrawOverlays();
+  });
+  $('structure-guide').addEventListener('change',redrawOverlays);
   $('day-replay').addEventListener('click',()=>{
     if(replayBusy || !marketPayload)return;
     if(dayMode){
@@ -1039,6 +1053,7 @@ button:disabled{opacity:.45;cursor:default}
     drawDaySeparators();
     drawPreviousDayZones();
     drawFibOverlay();
+    drawStructureGuide();
     drawFvgOverlay();
     drawTradeBox();
     layoutOverlayLabels();
@@ -1164,6 +1179,48 @@ button:disabled{opacity:.45;cursor:default}
     }
   }
 
+  const structureCache=new WeakMap();
+  function drawStructureGuide() {
+    const layer=$('structure-layer');layer.replaceChildren();
+    if(!$('structure-guide').checked || !chart || !candles)return;
+    const market=replayChartSource || marketPayload || sourcePayload,bars=market?.candles || [];
+    if(!bars.length)return;
+    const interval=chartInterval(),strength=boot.run.swingStrength || 2;
+    let cached=structureCache.get(bars);
+    if(!cached || cached.interval!==interval || cached.strength!==strength) {
+      cached=cslBuildStructureGuide(bars,interval,strength,64);structureCache.set(bars,cached);
+    }
+    const end=bars.at(-1).time+interval,range=chart.timeScale().getVisibleRange();
+    const cutoff=replayActive?Math.min(replayCutoff,end):Math.min(end,Number.isFinite(range?.to)?range.to+interval:end);
+    const view=cslStructureGuideView(cached,cutoff),height=chart.panes()[0].getHeight(),width=chartWrap.clientWidth-76;
+    layer.style.height=height+'px';
+    const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
+    svg.setAttribute('width','100%');svg.setAttribute('height',String(height));svg.style.overflow='hidden';layer.appendChild(svg);
+    const make=(kind,attrs,title)=>{const node=document.createElementNS(ns,kind);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,String(v));node.style.pointerEvents='stroke';const tip=document.createElementNS(ns,'title');tip.textContent=title;node.appendChild(tip);svg.appendChild(node);return node;};
+    const x=time=>{const snapped=Math.floor(time/interval)*interval;const direct=chart.timeScale().timeToCoordinate(snapped);if(direct!=null)return Math.max(0,Math.min(width,direct));return time<bars[0].time?0:width;};
+    const pivots=view.events.filter(e=>e.kind==='swing').sort((a,b)=>a.time-b.time);
+    for(let i=1;i<pivots.length;i++) {
+      const a=pivots[i-1],b=pivots[i];if(a.swing===b.swing || a.time===b.time)continue;
+      const y1=candles.priceToCoordinate(a.price),y2=candles.priceToCoordinate(b.price);if(y1==null||y2==null)continue;
+      make('line',{x1:x(a.time),x2:x(b.time),y1,y2,stroke:'#94a3b8','stroke-width':1,'stroke-opacity':.45},'Confirmed swing structure');
+    }
+    for(const e of view.events) {
+      const right=x(Math.min(cutoff,(e.kind==='sweep'||e.kind==='break')?e.availableAt:(e.endAt ?? cutoff))),left=x(Math.max(view.left,e.from ?? e.time));
+      if(e.kind==='fvg'||e.kind==='ifvg') {
+        const top=candles.priceToCoordinate(e.top),bottom=candles.priceToCoordinate(e.bottom);if(top==null||bottom==null||bottom<0||top>height)continue;
+        const color=e.side==='LONG'?'#34d399':'#fb7185';
+        make('rect',{x:left,y:Math.max(0,top),width:Math.max(1,right-left),height:Math.max(1,Math.min(height,bottom)-Math.max(0,top)),fill:color,'fill-opacity':.08,stroke:color,'stroke-opacity':.7,'stroke-dasharray':e.kind==='ifvg'?'4 3':'none'},(e.side==='LONG'?'Bullish ':'Bearish ')+(e.kind==='ifvg'?'IFVG':'FVG')+' '+formatPrice(e.bottom)+' - '+formatPrice(e.top)+'; known '+fmtTime(e.availableAt));
+        continue;
+      }
+      const y=candles.priceToCoordinate(e.price);if(y==null||y<0||y>height)continue;
+      const color=e.kind==='equilibrium'?'#c4b5fd':e.kind==='swing'?(e.swing==='high'?'#fb7185':'#60a5fa'):e.kind==='sweep'?'#fbbf24':'#34d399';
+      const name=e.kind==='equilibrium'?'50% equilibrium':e.kind==='swing'?e.label+' swing':e.kind==='sweep'?'Liquidity sweep':'Structure break';
+      const title=name+' '+formatPrice(e.price)+'; known '+fmtTime(e.availableAt);
+      make('line',{x1:left,x2:right,y1:y,y2:y,stroke:color,'stroke-width':1,'stroke-opacity':e.endAt?.5:.85,'stroke-dasharray':e.kind==='equilibrium'?'5 4':e.kind==='swing'?'2 3':'none'},title);
+      if(e.kind!=='equilibrium')make('circle',{cx:x(e.time),cy:y,r:e.kind==='swing'?2:3,fill:color,stroke:color},title);
+    }
+  }
+
   function drawSupplyDemandOverlay(sd) {
     if (!chart || !candles) return;
     const height=chart.panes()[0].getHeight();
@@ -1223,6 +1280,7 @@ button:disabled{opacity:.45;cursor:default}
 
   function drawFvgOverlay() {
     fvgLayer.replaceChildren();
+    if($('structure-guide').checked)return;
     if(dayMode && payload?.dayContext && chart && candles) {
       const height=chart.panes()[0].getHeight(),right=chartWrap.clientWidth-76;
       fvgLayer.style.height=height+'px';
@@ -2023,6 +2081,7 @@ button:disabled{opacity:.45;cursor:default}
         : 'CSL indicators · chart timeframe ' + requestedTimeframe + ' · trades from ' + boot.run.timeframe;
       replayBusy=false;
       $('day-replay').disabled=!(nextPayload.candles || []).length;
+      $('structure-review').disabled=!(nextPayload.candles || []).length;
       $('replay-toggle').disabled=!sourcePayload.selectedTrade?.['Entry Time'];
       if(preserveReplay && replayActive){refreshReplay();return;}
       if(dayMode){
@@ -2082,7 +2141,7 @@ button:disabled{opacity:.45;cursor:default}
 </script>
 </body>
 </html>"""
-    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS)
+    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS).replace("__STRUCTURE_HELPERS__", STRUCTURE_HELPERS)
 
 
 class _LoopbackHTTPServer(ThreadingHTTPServer):

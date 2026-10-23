@@ -591,3 +591,46 @@ console.log(JSON.stringify({withInverse,withoutInverse:setupBounds(),replay:repl
     assert result['withInverse']['from']==100-6*3600
     assert result['withoutInverse']['from']==150-6*3600
     assert result['replay']['from']==150-8*15
+
+
+def test_structure_review_opens_manual_day_without_selecting_a_trade():
+    import json,shutil,subprocess,pytest
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for manual structure review')
+    html=build_browser_visualizer_v2_html(_Model(),'structure-review')
+    code=html[html.index("  $('structure-review').addEventListener"):html.index("  $('day-replay').addEventListener")]
+    script="""
+let replayBusy=false,dayMode=false,clicks=0,redraws=0;const marketPayload={candles:[{time:0}]};
+const elements={'structure-review':{addEventListener:(event,fn)=>elements.handler=fn},'structure-guide':{checked:false,addEventListener:()=>{}},'day-replay':{click:()=>{clicks++;dayMode=true;}}};
+const $=id=>elements[id];const redrawOverlays=()=>redraws++;
+"""+code+"""
+elements.handler();elements.handler();console.log(JSON.stringify({clicks,redraws,enabled:elements['structure-guide'].checked}));
+"""
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result=={'clicks':1,'redraws':1,'enabled':True}
+
+
+def test_structure_overlay_draws_only_known_features_and_can_be_hidden():
+    import json,shutil,subprocess,pytest
+    from crypto_strategy_lab.visualizer_structure import STRUCTURE_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for structure overlay')
+    html=build_browser_visualizer_v2_html(_Model(),'structure-overlay')
+    code=html[html.index('  const structureCache='):html.index('  function drawSupplyDemandOverlay(')]
+    script=STRUCTURE_HELPERS+"""
+let replayActive=true,replayCutoff=0;
+const bars=[{time:0,open:1,high:2,low:1,close:2},{time:900,open:2,high:4,low:2,close:4},{time:1800,open:5,high:6,low:5,close:6}];
+const marketPayload={candles:bars},replayChartSource=null,sourcePayload=null,boot={run:{swingStrength:1}};
+const chartInterval=()=>900,chartWrap={clientWidth:1000};
+const chart={panes:()=>[{getHeight:()=>500}],timeScale:()=>({getVisibleRange:()=>({to:2700}),timeToCoordinate:t=>t/10})};
+const candles={priceToCoordinate:p=>300-p};
+const node=()=>({style:{},children:[],setAttribute(){},appendChild(x){this.children.push(x);},replaceChildren(){this.children=[];}});
+const layer=node(),checkbox={checked:true},$=id=>id==='structure-layer'?layer:checkbox;
+const document={createElementNS:node},formatPrice=String,fmtTime=String;
+"""+code+"""
+drawStructureGuide();const before=layer.children[0].children.length;
+replayCutoff=2700;drawStructureGuide();const after=layer.children[0].children.length;
+checkbox.checked=false;drawStructureGuide();console.log(JSON.stringify({before,after,hidden:layer.children.length}));
+"""
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['before']==0 and result['after']>0 and result['hidden']==0
