@@ -67,3 +67,38 @@ const bars=[{time:0,open:1,high:2,low:1,close:2},{time:900,open:2,high:4,low:2,c
 console.log(JSON.stringify(cslBuildStructureGuide(bars,900,1).events));
 """)
     assert result==[]
+
+
+@pytest.mark.parametrize('mirror', [False,True])
+def test_fvg_wick_fill_stops_extension_and_later_close_creates_separate_ifvg(mirror):
+    result=js('''
+let bars=[
+ [9,10,8,9],[9,14,9,13],[13,15,12,14],
+ [13,14,11,13],[12,13,10,12],[12,13,11,12],
+ [11,12,9,9.5],[9,11,8,9],[10,12,9,10],[11,14,10,13]
+].map(([open,high,low,close],i)=>({time:i*60,open,high,low,close}));
+if(MIRROR)bars=bars.map(b=>({...b,open:30-b.open,high:30-b.low,low:30-b.high,close:30-b.close}));
+const guide=cslBuildStructureGuide(bars,60,1);
+const snapshots=[180,240,300,360,420,480,540,600].map(cutoff=>cslStructureGuideView(guide,cutoff).events.filter(e=>(e.kind==='fvg' && e.time===120)||(e.kind==='ifvg' && e.time===360)));
+const mismatches=[];
+for(let n=1;n<=bars.length;n++) {
+ const cutoff=n*60,a=cslStructureGuideView(guide,cutoff),b=cslStructureGuideView(cslBuildStructureGuide(bars.slice(0,n),60,1),cutoff);
+ if(JSON.stringify(a)!==JSON.stringify(b))mismatches.push(n);
+}
+console.log(JSON.stringify({snapshots,mismatches}));
+'''.replace('MIRROR',json.dumps(mirror)))
+    snapshots=result['snapshots']
+    assert result['mismatches']==[]
+    assert snapshots[0][0]['status']=='Fresh'
+    assert snapshots[1][0]['status']=='Tested'
+    assert snapshots[1][0]['filledAt'] is None and snapshots[1][0]['brokenAt'] is None
+    assert snapshots[1][0]['endAt'] is None
+    assert snapshots[2][0]['status']=='Filled' and snapshots[2][0]['endAt']==300
+    assert snapshots[3][0]['endAt']==300
+    original=next(e for e in snapshots[4] if e['kind']=='fvg')
+    inverse=next(e for e in snapshots[4] if e['kind']=='ifvg')
+    assert original['status']=='Inverted' and original['endAt']==300
+    assert inverse['from']==360 and inverse['availableAt']==420 and inverse['status']=='Fresh'
+    assert next(e for e in snapshots[5] if e['kind']=='ifvg')['status']=='Tested'
+    assert next(e for e in snapshots[6] if e['kind']=='ifvg')['endAt']==540
+    assert next(e for e in snapshots[7] if e['kind']=='ifvg')['status']=='Failed'

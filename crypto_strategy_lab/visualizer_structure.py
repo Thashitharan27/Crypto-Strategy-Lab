@@ -38,9 +38,17 @@ function cslBuildStructureGuide(bars,interval=900,strength=2,lookback=64) {
       if(i-g.index>lookback){end(g,at,'Expired');continue;}
       const broken=g.side==='LONG'?b.close<g.bottom:b.close>g.top;
       if(broken) {
+        g.brokenAt=at;
         end(g,at,g.kind==='fvg'?'Inverted':'IFVG failed');
-        if(g.kind==='fvg')surviving.push(emit({kind:'ifvg',side:g.side==='LONG'?'SHORT':'LONG',time:b.time,from:g.from,availableAt:at,index:i,bottom:g.bottom,top:g.top}));
-      } else surviving.push(g);
+        if(g.kind==='fvg')surviving.push(emit({kind:'ifvg',side:g.side==='LONG'?'SHORT':'LONG',time:b.time,from:b.time,availableAt:at,index:i,bottom:g.bottom,top:g.top}));
+      } else {
+        const overlaps=b.low<=g.top && b.high>=g.bottom;
+        if(overlaps && g.touchedAt==null)g.touchedAt=at;
+        const filled=overlaps && (g.side==='LONG'?b.low<=g.bottom:b.high>=g.top);
+        if(filled && g.filledAt==null){g.filledAt=at;end(g,at,'Filled');}
+        // Keep filled zones internally only to detect a later close-through.
+        surviving.push(g);
+      }
     }
     gaps=surviving;
     if(i-2>=segment) {
@@ -71,10 +79,20 @@ function cslBuildStructureGuide(bars,interval=900,strength=2,lookback=64) {
 function cslStructureGuideView(guide,cutoff) {
   const left=cutoff-guide.lookback*guide.interval;
   const known=guide.events.filter(e=>e.availableAt<=cutoff && (e.endAt==null || e.endAt>left) && (e.availableAt>=left || e.endAt==null || e.endAt>cutoff));
-  const clip=e=>{const {endAt,endReason,swept,...rest}=e;return {...rest,endAt:endAt!=null && endAt<=cutoff?endAt:null,endReason:endAt!=null && endAt<=cutoff?endReason:null};};
+  const clip=e=>{
+    const {endAt,endReason,swept,touchedAt,filledAt,brokenAt,...rest}=e;
+    const knownTime=t=>t!=null && t<=cutoff?t:null;
+    const result={...rest,endAt:knownTime(endAt),endReason:knownTime(endAt)!=null?endReason:null};
+    if(e.kind==='fvg'||e.kind==='ifvg') {
+      Object.assign(result,{touchedAt:knownTime(touchedAt),filledAt:knownTime(filledAt),brokenAt:knownTime(brokenAt)});
+      result.status=result.brokenAt!=null?(e.kind==='fvg'?'Inverted':'Failed'):result.filledAt!=null?'Filled':result.endAt!=null?result.endReason:result.touchedAt!=null?'Tested':'Fresh';
+    }
+    return result;
+  };
   return {cutoff,left,events:[
     ...known.filter(e=>e.kind==='swing').slice(-12),
     ...known.filter(e=>e.kind==='sweep'||e.kind==='break').slice(-12),
+    ...known.filter(e=>(e.kind==='fvg'||e.kind==='ifvg') && e.endAt!=null && e.endAt<=cutoff).slice(-4),
     ...known.filter(e=>(e.kind==='fvg'||e.kind==='ifvg') && (e.endAt==null || e.endAt>cutoff)).slice(-8),
     ...known.filter(e=>e.kind==='equilibrium' && (e.endAt==null || e.endAt>cutoff)).slice(-1)
   ].map(clip)};
