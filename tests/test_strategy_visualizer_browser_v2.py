@@ -598,7 +598,7 @@ def test_structure_review_opens_manual_day_without_selecting_a_trade():
     node=shutil.which('node')
     if not node:pytest.skip('Node required for manual structure review')
     html=build_browser_visualizer_v2_html(_Model(),'structure-review')
-    code=html[html.index("  $('structure-review').addEventListener"):html.index("  $('day-replay').addEventListener")]
+    code=html[html.index("  $('structure-review').addEventListener"):html.index("  function selectDayTrade(")]
     script="""
 let replayBusy=false,dayMode=false,clicks=0,redraws=0;const marketPayload={candles:[{time:0}]};
 const elements={'structure-review':{addEventListener:(event,fn)=>elements.handler=fn},'structure-guide':{checked:false,addEventListener:()=>{}},'day-replay':{click:()=>{clicks++;dayMode=true;}}};
@@ -634,6 +634,40 @@ checkbox.checked=false;drawStructureGuide();console.log(JSON.stringify({before,a
 """
     result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
     assert result['before']==0 and result['after']>0 and result['hidden']==0
+
+
+def test_new_day_trade_button_preserves_closed_trade_and_can_select_it_again():
+    import json,shutil,subprocess,pytest
+    from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for day trade workflow')
+    html=build_browser_visualizer_v2_html(_Model(),'multiple-day-trades')
+    code=html[html.index('  function selectDayTrade('):html.index("  $('structure-guide').addEventListener")]
+    script=REPLAY_HELPERS+'''
+let replayBusy=false,dayMode=true,replayRevealed=false,replayDay=0,replayCutoff=240,replayInterval=60,manualDayTradeKey='first',manualPlanDraft={},sourcePayload={},draws=0,saves=0;
+const boot={run:{runId:'r',symbol:'s',timeframe:'1m',swingStrength:1}};
+const first={key:'first',runId:'r',symbol:'s',reviewType:'manual-day',day:0,side:'LONG',manualPlan:{entry:100,stop:90,target:120,entryTime:60},manualEntry:{entry:100,stop:90,candleTime:60,interval:60},manualExit:{candleTime:120,availableAt:180,grossR:1}};
+const original=JSON.stringify(first),reviewRecords=[first];
+const marketPayload={candles:[{time:180,open:110,close:111,high:112,low:109}]},payload=marketPayload;
+const elements={},$=id=>elements[id] || (elements[id]={handlers:{},addEventListener(type,fn){this.handlers[type]=fn;}});
+const currentReview=()=>reviewRecords.find(r=>r.key===manualDayTradeKey),dayTradeReviews=()=>reviewRecords;
+const manualPlanLocked=()=>Boolean(currentReview()?.manualEntry),refreshManualPlan=()=>{},stopReplay=()=>{},refreshReplay=()=>draws++,saveReviews=()=>saves++;
+const automaticPlan=()=>({entry:100,stop:90,target:120,entryTime:0});
+const loadManualPlan=plan=>manualPlanDraft=plan;
+const storeManualPlan=()=>currentReview().manualPlan={...manualPlanDraft};
+const ensureReview=()=>{const record={key:manualDayTradeKey,runId:'r',symbol:'s',day:0,reviewType:'manual-day',side:'LONG'};reviewRecords.push(record);return record;};
+'''+code+'''
+$('manual-new-trade').handlers.click();
+const second=currentReview(),newPlan={...manualPlanDraft};
+$('manual-new-trade').handlers.click();
+selectDayTrade('first');
+console.log(JSON.stringify({count:reviewRecords.length,unchanged:original===JSON.stringify(first),second,newPlan,selected:currentReview().key,cutoff:replayCutoff,draws}));
+'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['count']==2 and result['unchanged']
+    assert result['second']['tradeNotBefore']==180 and result['newPlan']['entryTime']==180
+    assert result['newPlan']['entry']==111 and 'manualEntry' not in result['second']
+    assert result['selected']=='first' and result['cutoff']==240 and result['draws']==2
 
 
 def test_structure_renderer_fades_filled_fvgs_and_starts_ifvg_at_inversion():

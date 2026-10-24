@@ -235,6 +235,7 @@ button:disabled{opacity:.45;cursor:default}
       <button id="previous-day">Previous day</button>
       <input id="replay-day" type="date" aria-label="Replay UTC day">
       <button id="next-day">Next day</button>
+      <select id="day-trade" aria-label="Trades for this UTC day"></select><button id="manual-new-trade">New trade</button>
       <label>Direction <select id="day-side" aria-label="Manual day direction"><option>LONG</option><option>SHORT</option></select></label>
     </span>
     <div id="active-indicators" aria-label="Active indicators"></div>
@@ -432,6 +433,7 @@ button:disabled{opacity:.45;cursor:default}
   let replayChartSource = null;
   const manualMarkets=new Map(),manualMarketLoads=new Set();
   let dayMode = false;
+  let manualDayTradeKey=null;
   let replayDay = null;
   let replayActive = false;
   let replayCutoff = 0;
@@ -557,11 +559,12 @@ button:disabled{opacity:.45;cursor:default}
     replayTimer=null; $('replay-play').textContent='Play';
   }
   function replayKey() {
-    if(dayMode)return JSON.stringify([boot.run.runId,boot.run.symbol,'manual-day',replayDay]);
+    if(dayMode)return manualDayTradeKey || JSON.stringify([boot.run.runId,boot.run.symbol,'manual-day',replayDay]);
     const trade=sourcePayload?.selectedTrade || {};
     return JSON.stringify([boot.run.runId,boot.run.symbol,trade.Pair ?? currentTrade,trade['Entry Time']]);
   }
   function currentReview() { return reviewRecords.find(record=>record?.key===replayKey()); }
+  function dayTradeReviews() {return reviewRecords.filter(r=>r.runId===boot.run.runId && r.symbol===boot.run.symbol && r.reviewType==='manual-day' && r.day===replayDay);}
   function reportOutcomesSeen(){try{return Boolean(localStorage.getItem('csl-replay-report-seen:'+boot.run.runId));}catch{return false;}}
   function ensureReview() {
     let record=currentReview();if(record)return record;
@@ -629,7 +632,7 @@ button:disabled{opacity:.45;cursor:default}
   }
   function closedPositionHint() {
     const record=currentReview();
-    if(record?.manualExit)return 'This manual position is already closed.';
+    if(record?.manualExit)return dayMode?'This position is closed. Use New trade to add another trade on this day.':'This manual position is already closed.';
     if(replayRevealed)return 'Replay is fully revealed. Restart to review the position.';
     if(!manualMarket())return 'Loading the position entry-timeframe candles.';
     return 'Manage the confirmed manual position.';
@@ -726,6 +729,12 @@ button:disabled{opacity:.45;cursor:default}
     $('replay-notes').disabled=replayBusy || locked;
     for(const id of ['replay-step','replay-play','replay-reveal']) $(id).disabled=replayBusy || (!dayMode && !record) || replayRevealed;
     if(dayMode) {
+      const selector=$('day-trade');selector.replaceChildren();
+      dayTradeReviews().forEach((item,index)=>selector.add(new Option('Trade '+(index+1)+' · '+cslManualReviewState(item),item.key)));
+      selector.value=replayKey();selector.disabled=replayBusy;
+      const next=cslNextDayTrade(reviewRecords,boot.run.runId,boot.run.symbol,replayDay,replayCutoff,replayInterval);
+      $('manual-new-trade').disabled=replayBusy || replayRevealed || !record?.manualExit || Boolean(next.error);
+      $('manual-new-trade').title=next.error || (!record?.manualExit?'Confirm and close this position before starting another trade.':'Keep this trade saved and start another plan on the same day.');
       const days=[...new Set((marketPayload.candles || []).map(bar=>Math.floor(bar.time/86400)*86400))];
       $('previous-day').disabled=replayBusy || !days.some(day=>day<replayDay);
       $('next-day').disabled=replayBusy || !days.some(day=>day>replayDay);
@@ -804,6 +813,8 @@ button:disabled{opacity:.45;cursor:default}
     stopReplay();
     if(replayActive && !manualPlanLocked()){refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
     replayDay=day;dayMode=true;replayActive=true;
+    const savedTrades=dayTradeReviews();
+    if(!savedTrades.some(r=>r.key===manualDayTradeKey))manualDayTradeKey=savedTrades.at(-1)?.key || null;
     const match=String(boot.run.timeframe).match(/^([0-9]+)([mhdw])$/);
     replayInterval=match?Number(match[1])*({m:60,h:3600,d:86400,w:604800}[match[2]]):900;
     const saved=currentReview();
@@ -819,6 +830,30 @@ button:disabled{opacity:.45;cursor:default}
     $('structure-guide').checked=true;
     if(!dayMode)$('day-replay').click();
     else redrawOverlays();
+  });
+  function selectDayTrade(key) {
+    if(replayBusy || !dayMode)return;
+    if(!manualPlanLocked()){refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
+    const record=dayTradeReviews().find(r=>r.key===key);if(!record)return;
+    stopReplay();manualDayTradeKey=key;$('day-side').value=record.side;
+    sourcePayload=cslDaySource(marketPayload,replayDay,replayInterval,record.side,boot.run.swingStrength);
+    $('replay-notes').value=record.notes || '';
+    loadManualPlan(record.manualPlan || automaticPlan());refreshReplay(true);
+  }
+  $('day-trade').addEventListener('change',()=>selectDayTrade($('day-trade').value));
+  $('manual-new-trade').addEventListener('click',()=>{
+    if(replayBusy || !dayMode || replayRevealed || !currentReview()?.manualExit)return;
+    const next=cslNextDayTrade(reviewRecords,boot.run.runId,boot.run.symbol,replayDay,replayCutoff,replayInterval);
+    if(next.error){manualEntryMessage=next.error;refreshManualPlan();return;}
+    if(next.existingKey){selectDayTrade(next.existingKey);return;}
+    stopReplay();manualDayTradeKey=next.key;
+    const record=ensureReview();record.tradeNotBefore=next.notBefore;record.startedReplayTime=replayCutoff;
+    const bar=(marketPayload.candles || []).filter(b=>b.time>=next.notBefore && b.time>=replayDay && b.time<replayDay+86400 && b.time+replayInterval<=replayCutoff).at(-1);
+    const plan=automaticPlan(),entry=bar?.close ?? (payload.candles || []).at(-1)?.close ?? plan.entry;
+    const sign=record.side==='SHORT'?-1:1,risk=Math.abs(plan.entry-plan.stop);
+    $('replay-notes').value='';
+    loadManualPlan({entry,stop:entry-sign*risk,target:entry+sign*risk*2,entryTime:bar?.time ?? next.notBefore,interval:replayInterval,timeframe:boot.run.timeframe});
+    storeManualPlan();saveReviews();refreshReplay(true);
   });
   $('structure-guide').addEventListener('change',redrawOverlays);
   $('day-replay').addEventListener('click',()=>{
@@ -890,7 +925,7 @@ button:disabled{opacity:.45;cursor:default}
   $('manual-current').addEventListener('click',()=>{
     if(manualPlanLocked())return;stopReplay();
     const interval=chartInterval(),bar=((replayChartSource || sourcePayload)?.candles || []).filter(item=>item.time+interval<=replayCutoff).at(-1);
-    const first=dayMode?replayDay:automaticPlan().entryTime;
+    const first=dayMode?Math.max(replayDay,currentReview()?.tradeNotBefore ?? replayDay):automaticPlan().entryTime;
     if(!bar || bar.time<first){manualEntryMessage='Advance until a chart candle at or after entry has closed.';refreshManualPlan();return;}
     manualEntryTime=bar.time;manualEntryInterval=interval;manualEntryTimeframe=currentTimeframe;
     $('manual-entry').value=bar.close;manualEntryMessage='Current closed candle selected. Check SL/TP, then confirm entry.';refreshManualPlan();showManualBox();
@@ -1830,7 +1865,7 @@ button:disabled{opacity:.45;cursor:default}
       if(manualPick==='candle') {
         const time=Number(event.time);
         const closed=event.time!=null && time+chartInterval()<=replayCutoff;
-        const first=automaticPlan().entryTime;
+        const first=Math.max(automaticPlan().entryTime,currentReview()?.tradeNotBefore ?? -Infinity);
         if(!closed || !Number.isFinite(time) || time<first || !(payload.candles || []).some(bar=>bar.time===time)) {
           manualEntryMessage=dayMode?'Choose a closed candle in this UTC day.':'Choose a closed candle at or after the automatic entry.';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();return;
         }

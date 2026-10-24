@@ -12,7 +12,7 @@ function cslReviewComparison(trades, records) {
     const matched=Boolean(record && before!=null && after!=null);
     if(matched){result.before+=before;result.after+=after;result.matched++;}
     if(exit)result.closed++;
-    result.rows.push({label,entryTime:trade?.entryTime || record?.entryTime,side:trade?.side || record?.side,before,after,
+    result.rows.push({label,entryTime:trade?.entryTime || (record?.manualEntry?.candleTime!=null?new Date(record.manualEntry.candleTime*1000).toISOString():record?.entryTime),side:trade?.side || record?.side,before,after,
       change:matched?after-before:null,net:finite(trade?.netR),status,
       entry:finite(record?.manualEntry?.entry),stop:finite(record?.manualEntry?.stop),target:finite(record?.manualEntry?.target),exit:finite(exit?.price),
       exitMethod:exit?(exit.reason || 'Manual close'):'',estimatedNetR:finite(exit?.estimatedNetR),
@@ -23,7 +23,11 @@ function cslReviewComparison(trades, records) {
     const record=records.find(r=>r.reviewType!=='manual-day' && r.tradeIndex===trade.index && String(r.pair)===String(trade.pair));
     make(trade,record,'Trade '+(trade.index+1));
   }
-  for(const record of records.filter(r=>r.reviewType==='manual-day'))make(null,record,'Day '+(record.day==null?'':new Date(record.day*1000).toISOString().slice(0,10)));
+  const dayCounts=new Map();
+  for(const record of records.filter(r=>r.reviewType==='manual-day')) {
+    const count=(dayCounts.get(record.day) || 0)+1;dayCounts.set(record.day,count);
+    make(null,record,'Day '+(record.day==null?'':new Date(record.day*1000).toISOString().slice(0,10))+' · Trade '+count);
+  }
   return result;
 }
 function cslSeriesTail(previous, next) {
@@ -133,10 +137,22 @@ function cslManualWorkflowSummary(records) {
     estimatedNetR:closed.reduce((total,r)=>total+Number(r.manualExit.estimatedNetR || 0),0),
     partialExitCount:entered.reduce((total,r)=>total+(r.partialExits || []).length,0)};
 }
+function cslNextDayTrade(records,runId,symbol,day,cutoff,interval) {
+  const matches=records.filter(r=>r.runId===runId && r.symbol===symbol && r.reviewType==='manual-day' && r.day===day);
+  if(matches.some(r=>r.manualEntry && (!r.manualExit || (r.manualExit.availableAt ?? r.manualExit.candleTime+(r.manualEntry.interval || interval))>cutoff)))return {error:'Close the current position and advance to its exit before starting another trade.'};
+  const pending=matches.find(r=>!r.manualEntry);
+  if(pending)return {existingKey:pending.key};
+  const notBefore=Math.max(day,...matches.map(r=>r.manualExit?.availableAt ?? (r.manualExit?r.manualExit.candleTime+(r.manualEntry.interval || interval):day)));
+  if(notBefore>=day+86400)return {error:'No time remains for another entry in this UTC day.'};
+  let index=matches.length+1,key;
+  do {key=JSON.stringify([runId,symbol,'manual-day',day,'trade',index++]);}while(records.some(r=>r.key===key));
+  return {key,notBefore};
+}
 function cslConfirmManualEntry(record, bars, cutoff, interval, recordedAt) {
   if(record.manualEntry) return {error:'Manual entry is already confirmed.'};
   const plan=record.manualPlan;
   if(!plan || !Number.isFinite(plan.entryTime)) return {error:'Choose an entry candle first.'};
+  if(record.tradeNotBefore!=null && plan.entryTime<record.tradeNotBefore)return {error:'Choose an entry candle after the previous position closed.'};
   const bar=bars.find(item=>item.time===plan.entryTime && item.time+interval<=cutoff);
   if(!bar) return {error:'Advance until the selected entry candle has closed.'};
   if(!(bar.low<=plan.entry && plan.entry<=bar.high)) return {error:'Entry not confirmed: '+plan.entry+' is outside the selected candle range '+bar.low+'–'+bar.high+'. Use Move box or Enter at current candle.'};
