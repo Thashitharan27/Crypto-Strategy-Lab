@@ -170,15 +170,16 @@ class SupplyDemandRetestMixin:
             return reject
         entry=float(self._expected_entry_price(i,execution_i,side))
         if self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL":
-            sign=1 if side=="LONG" else -1;stop=setup['stop'];risk=sign*(entry-stop)
-            target=entry+sign*self.config.ny_range_target_r*risk
-            details={**reject,"entry_price":entry,"stop_price":stop,"target_price":target}
-            if not np.isfinite([entry,stop,risk,target]).all() or stop<=0 or risk<=0 or target<=0:
-                return {**details,"reason":"NY_RANGE_INVALID_ENTRY_GEOMETRY"}
-            if not setup['zone']['bottom']<entry<setup['zone']['top']:
-                return {**details,"reason":"NY_RANGE_ENTRY_OUTSIDE_RANGE"}
-            return {"passed":True,"applied":True,"reason":"NY_RANGE_EXCURSION_STOP","distance":risk,"stop_price":stop,
-                    "boundary_price":stop,"level_price":target,"distance_atr":None,"timeframe_minutes":5}
+            from .ny_opening_range import range_entry_plan
+            options=dict(policy=getattr(self.config,"ny_range_overshoot_policy","DEFAULT"),
+                         extension_pct=getattr(self.config,"ny_range_max_extension_pct",0.),
+                         sr_buffer_atr=getattr(self.config,"ny_range_sr_buffer_atr",.05))
+            plan=range_entry_plan(setup,entry,self.config.ny_range_target_r,**options)
+            if plan.get('reason')=='NY_RANGE_SR_CONTEXT_UNAVAILABLE':
+                context=self._analyze_support_resistance(i,side)
+                plan=range_entry_plan(setup,entry,self.config.ny_range_target_r,sr_context=context,
+                                      atr=float(self.atr_values[i]),**options)
+            return plan
         atr=float(self.atr_values[i])
         if not np.isfinite(atr) or atr<=0:
             return reject
@@ -243,7 +244,7 @@ class SupplyDemandRetestMixin:
             row=self.skipped_signals[-1]
             # Do not let report adapters infer this strategy's direction from DI.
             row["side"]=self.sd_setups[i]["side"]
-            if reason in {"IMBALANCE_INVALID_STOP_GEOMETRY","IMBALANCE_TARGET_NOT_AHEAD","IMBALANCE_MINIMUM_R_NOT_MET","NY_RANGE_INVALID_ENTRY_GEOMETRY","NY_RANGE_ENTRY_OUTSIDE_RANGE"}:
+            if reason.startswith("NY_RANGE_") or reason in {"IMBALANCE_INVALID_STOP_GEOMETRY","IMBALANCE_TARGET_NOT_AHEAD","IMBALANCE_MINIMUM_R_NOT_MET"}:
                 plan=self._sr_stop_plan(i,i+1 if i+1<len(self.times) else None)
                 row.update(proposed_entry=plan.get("entry_price"),proposed_stop=plan.get("stop_price"),
                            proposed_target=plan.get("target_price"),proposed_reward_risk=plan.get("reward_risk"))
@@ -261,6 +262,15 @@ class SupplyDemandRetestMixin:
                 saved.update(stop=float(pos.original_sl),target=float(pos.tp),targetR=float(self.config.ny_range_target_r if self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL" else self.config.tc_target_r))
                 if self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL":
                     saved['opposingZone'].update(bottom=float(pos.tp)*.999999,top=float(pos.tp)*1.000001)
+                    plan=self._sr_stop_plan(j,schedule['execution_index'] if schedule else i)
+                    saved.update(originalStop=plan.get('original_stop'),originalTarget=plan.get('original_target'),
+                                 targetLimit=plan.get('target_limit'),overshootPolicy=plan.get('overshoot_policy'),
+                                 allowedExtensionPct=plan.get('allowed_extension_pct'),stopSource=plan.get('stop_source'),
+                                 srLevel=plan.get('sr_level'),srBoundary=plan.get('sr_boundary'),srState=plan.get('sr_state'))
+                    if plan.get('stop_source')=='CONFIRMED_SR':
+                        saved['srTimeframeMinutes']=getattr(self.config,'sr_timeframe_minutes',0) or self.config.strategy_timeframe_minutes
+                        saved['srAvailableAt']=(pd.Timestamp(self.times[j])+pd.Timedelta(minutes=5)).isoformat()
+
         return result
 
     def _build_result_row(self,pair,row_kind,positions):

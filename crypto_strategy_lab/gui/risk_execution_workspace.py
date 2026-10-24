@@ -154,6 +154,18 @@ class RiskExecutionWorkspace(QWidget):
             self.sd_card.add_field(name,label,self.account[name])
         self.sd_card.add_field("ny_range_target_r", "New York range target (R)", self.account["ny_range_target_r"])
         self.account["ny_range_target_r"].setRange(2.,100.)
+        self.sd_card.add_field("ny_range_overshoot_policy", "When target extends too far", self.account["ny_range_overshoot_policy"])
+        policy=self.account["ny_range_overshoot_policy"]
+        for value,label in (("DEFAULT","1. Default - keep breakout stop"),("SKIP","2. Ignore oversized setup"),("SR_STOP","3. Use a confirmed S/R stop")):
+            policy.setItemText(policy.findData(value),label)
+        self.sd_card.add_field("ny_range_max_extension_pct", "Allowed target beyond range (% of 4h height)", self.account["ny_range_max_extension_pct"])
+        self.account["ny_range_max_extension_pct"].setRange(0.,1000.)
+        self.account["ny_range_max_extension_pct"].setSuffix(" %")
+        self.account["ny_range_max_extension_pct"].setToolTip("Long target ceiling = 4h high + this percentage of the 4h range height. Short floor = 4h low minus the same allowance. 0 keeps the target within the opening range.")
+        self.sd_card.add_field("ny_range_sr_buffer_atr", "Buffer beyond S/R (entry ATR)", self.account["ny_range_sr_buffer_atr"])
+        self.account["ny_range_sr_buffer_atr"].setRange(0.,100.)
+        policy.currentIndexChanged.connect(self.refresh_visibility)
+
         self.sd_card.add_field("io_entry_model", "Imbalance entry model", self.account["io_entry_model"])
         model=self.account["io_entry_model"]
         model.setItemText(model.findData("ORIGIN_REJECTION"), "Origin rejection (original)")
@@ -1005,6 +1017,10 @@ class RiskExecutionWorkspace(QWidget):
             self.sd_card.set_row_visible(name,sneaky)
         self.sd_card.set_row_visible("sd_swing_strength",not ny_range)
         self.sd_card.set_row_visible("ny_range_target_r",ny_range)
+        policy=self.account["ny_range_overshoot_policy"].currentData()
+        self.sd_card.set_row_visible("ny_range_overshoot_policy",ny_range)
+        self.sd_card.set_row_visible("ny_range_max_extension_pct",ny_range and policy!="DEFAULT")
+        self.sd_card.set_row_visible("ny_range_sr_buffer_atr",ny_range and policy=="SR_STOP")
         if ny_range:
             self.sd_card.setTitle("New York opening 4h range reversal")
             for name in ("sd_swing_strength","sd_minimum_r","sd_stop_buffer_atr"):
@@ -1074,7 +1090,11 @@ class RiskExecutionWorkspace(QWidget):
 
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "NY_OPENING_RANGE_REVERSAL":
-            self.summary_label.setText(f"New York range reversal: 5m candles; first four elapsed hours from America/New_York midnight. Wait for all 48 candles to close before using the range. Close above high then strictly inside = short; below low then inside = long. Wicks alone cannot arm. Enter next open on the same NY day and still inside range. Exact stop at the full breakout excursion extreme (including re-entry candle); TP {execution.ny_range_target_r:g}R from actual fill. Fresh excursions can trade again that day; existing portfolio limits apply. Missing opening candles invalidate that day's range; later gaps reset the excursion. No inherited supply/demand minimum-R filter or discretionary stop refinement. Open trades retain SL/TP overnight.")
+            policy=execution.ny_range_overshoot_policy
+            oversized=("Default: keep the breakout stop regardless of target extension." if policy=="DEFAULT" else
+                f"Target limit: {execution.ny_range_max_extension_pct:g}% of 4h height beyond the opposite boundary; " +
+                ("ignore oversized setups." if policy=="SKIP" else f"try a nearer confirmed S/R boundary with {execution.ny_range_sr_buffer_atr:g} entry ATR buffer; skip if absent/broken, not nearer, or target still exceeds the limit. Uses the configured S/R context."))
+            self.summary_label.setText(f"New York range reversal: 5m candles; first four elapsed hours from America/New_York midnight. Wait for all 48 candles to close before using the range. Close above high then strictly inside = short; below low then inside = long. Wicks alone cannot arm. Enter next open on the same NY day and still inside range. Exact stop at the full breakout excursion extreme (including re-entry candle); TP {execution.ny_range_target_r:g}R from actual fill. Fresh excursions can trade again that day; existing portfolio limits apply. Missing opening candles invalidate that day's range; later gaps reset the excursion. No inherited supply/demand minimum-R filter. Open trades retain SL/TP overnight. {oversized}")
             return
         if self._signal_strategy_mode() == "IMBALANCE_ORIGIN_RETEST" and execution.io_entry_model == "INDUCEMENT_CONFIRMATION":
             self.summary_label.setText(f"Inducement confirmation: completed {execution.io_context_minutes}m zones, entry candles on the strategy timeframe (must divide the zone timeframe). Confirmed HH/HL or LH/LL trend; displacement >= {execution.ls_displacement_atr:g} HTF ATR closes through an unbroken swing and leaves a gap. Skip shallow origins above/below an open deeper origin. Full fill into origin; a sweep must close back inside. Then confirmed lower-timeframe swing break, later retest of its opposing origin and directional rejection; enter next open. SL beyond reversal extreme +{execution.sd_stop_buffer_atr:g} entry ATR; TP known displacement/formation extreme, frozen before pullback; minimum {execution.sd_minimum_r:g}R. Expire {execution.ls_max_wait_bars} zone candles after formation. Research interpretation, not order-book evidence.")

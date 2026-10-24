@@ -6,6 +6,39 @@ target (R)** defaults to 2R and may be increased. Existing account risk sizing,
 fees, slippage and portfolio limits still apply. Supply/demand minimum-R,
 imbalance confirmations and discretionary stop refinements are not part of it.
 
+## Oversized target options
+
+Risk & Execution includes **When target extends too far**:
+
+1. **Default - keep breakout stop** preserves the original strategy. No target
+   distance filter applies, including when loading old saved configurations.
+2. **Ignore oversized setup** skips the entry if its R target exceeds the allowed
+   distance beyond the opposite boundary of the opening range.
+3. **Use a confirmed S/R stop** keeps the original stop when the target already
+   fits. Otherwise, it tries the existing detector's nearest valid support zone
+   for longs or resistance zone for shorts. It uses only the configured S/R
+   context available at the signal candle's close, not manually drawn lines.
+
+**Allowed target beyond range (% of 4h height)** defines the allowance. At 0%,
+long targets must be at/below the 4h high, and short targets at/above the 4h low.
+For a range from 100 to 120 and a 10% allowance, the long ceiling is 122 and the
+short floor is 98. The default allowance is 0%; it is used only by options 2/3.
+
+For option 3, S/R calculation is enabled automatically. Its timeframe and detector
+settings are the existing configured S/R analysis settings. The stop goes beyond
+the zone's outer edge by **Buffer beyond S/R (entry ATR)**, default 0.05 ATR; 0
+uses the exact boundary. If zone edges are unavailable, the confirmed level price
+is used. The stop must be nearer than the original stop and behind the executable
+entry. Broken/absent/wrong-side levels are rejected. If the new R target still
+exceeds the allowance, the trade is skipped; there is no oversized fallback.
+
+Every check uses the actual entry including slippage. The target remains the
+configured R multiple of the selected stop distance, rather than being clamped
+to the range boundary. Native risk sizing uses that new stop distance. Saved
+chart evidence records the original stop/target, selected stop source, S/R
+boundary/state and allowed target boundary. Completed runs remain unchanged;
+rerun to compare the three options on the same data.
+
 This is a mechanical interpretation of the core checklist in
 [The BEST 5 Minute Scalping Strategy Ever](https://www.youtube.com/watch?v=O5eC5lY7ZXY).
 The video alternates between breakout-extreme stops and discretionary nearby
