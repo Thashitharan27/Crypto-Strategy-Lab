@@ -513,6 +513,41 @@ console.log(JSON.stringify({draws,text:handle.textContent,draft:manualPlanDraft,
     assert result['draft']['target']==120 and result['preview']==130
     assert 'formatPrice(trade.Target ?? trade.target)+targetRText' in html
 
+def test_delete_selected_object_preserves_other_drawings_and_confirmed_trade_history():
+    import json,shutil,subprocess,pytest
+    from crypto_strategy_lab.visualizer_drawings import DRAWING_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for chart deletion')
+    html=build_browser_visualizer_v2_html(_Model(),'delete-object')
+    code=html[html.index('  function deleteSelectedChartObject()'):html.index("  $('drawing-clear').addEventListener")]
+    script=DRAWING_HELPERS+'''
+let drawings=[{id:'one'},{id:'two'}],selectedChartObject={type:'drawing',id:'one'},manualPick=null,saves=0,prevented=false;
+const replayActive=true,replayKey=()=>'current',record={manualEntry:{entry:100,stop:90},manualExit:{grossR:2},planHistory:[{entry:100}]};
+const currentReview=()=>record,chartWrap={style:{}},saveReviews=()=>saves++,refreshManualPlan=()=>{},resetPriceScale=()=>{},redrawOverlays=()=>{};
+const saveDrawings=next=>drawings=next;
+const nodes={},$=id=>nodes[id] || (nodes[id]={value:'one',addEventListener(type,fn){this[type]=fn;}});
+const document={activeElement:null,addEventListener(type,fn){this[type]=fn;}};
+'''+code+'''
+const removed=deleteSelectedChartObject(),remaining=drawings.map(d=>d.id);
+selectedChartObject={type:'position',key:'current'};const hidden=deleteSelectedChartObject(),snapshot=JSON.stringify(record);
+$('manual-show-box').click();
+selectedChartObject={type:'position',key:'other'};const stale=deleteSelectedChartObject();
+selectedChartObject={type:'drawing',id:'two'};
+document.keydown({key:'Delete',target:{closest:()=>({})},preventDefault(){},stopPropagation(){}});
+const typingPreserved=drawings.length===1;
+document.keydown({key:'Delete',target:{closest:()=>null},preventDefault(){prevented=true;},stopPropagation(){}});
+console.log(JSON.stringify({removed,remaining,hidden,snapshot:JSON.parse(snapshot),restored:record,stale,typingPreserved,empty:drawings.length===0,prevented}));
+'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['removed'] and result['remaining']==['two']
+    assert result['hidden'] and result['snapshot']['positionBoxHidden']
+    assert result['snapshot']['manualEntry']=={'entry':100,'stop':90}
+    assert result['snapshot']['manualExit']=={'grossR':2}
+    assert result['snapshot']['planHistory']==[{'entry':100}]
+    assert not result['restored']['positionBoxHidden']
+    assert not result['stale'] and result['typingPreserved'] and result['empty'] and result['prevented']
+
+
 def test_position_width_drag_only_saves_display_width_and_cancel_keeps_it():
     import json,shutil,subprocess,pytest
     node=shutil.which('node')

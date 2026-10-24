@@ -257,6 +257,7 @@ __WORKSPACE_STYLES__
       <button id="replay-report">Review report</button>
       <div class="manual-plan" role="group" aria-label="Manual trade plan">
         <strong>My plan</strong>
+        <button id="manual-show-box" hidden>Restore trade box</button>
         <label>Entry <input id="manual-entry" type="number" step="any" min="0" aria-label="Manual entry price"></label><button data-pick-level="entry">Pick entry</button>
         <label>SL <input id="manual-stop" type="number" step="any" min="0" aria-label="Manual stop-loss price"></label><button data-pick-level="stop">Pick SL</button>
         <label>TP <input id="manual-target" type="number" step="any" min="0" aria-label="Manual take-profit price"></label><button data-pick-level="target">Pick TP</button>
@@ -296,7 +297,7 @@ __WORKSPACE_STYLES__
       <small>Click entry, then drag SL / TP. Confirm entry to open the replay position.</small>
     </aside>
     <aside id="drawing-settings" aria-label="Drawing settings" hidden><button id="drawing-settings-close" aria-label="Close drawing settings">Close ✕</button></aside>
-    <div id="chart-wrap">
+    <div id="chart-wrap" tabindex="0" aria-label="Chart workspace">
     <div id="drawing-hint" role="status" hidden></div>
     <div id="position-placement-hint" role="status" hidden></div>
     <div id="chart"></div>
@@ -504,6 +505,7 @@ __WORKSPACE_STYLES__
   let defaultPriceRange = null;
   const drawingKey='csl-drawings-v1:'+boot.run.runId+':'+boot.run.symbol;
   let drawings=[],drawingUndo=[],drawingPoints=[],drawingHover=null,drawingEditId=null;
+  let selectedChartObject=null;
   let drawingStorageOk=true;
   $('drawing-settings').appendChild($('drawing-tools'));
   const drawingIcons={cursor:'M5 3l14 8-7 2-3 7z',trend:'M3 20L21 4',ray:'M4 20L21 3M4 17v3h3',hline:'M2 12h20',vline:'M12 2v20',rect:'M4 5h16v14H4z',fib:'M3 4h18M3 9h18M3 14h18M3 20h18',measure:'M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4',text:'M4 5h16M12 5v15M8 20h8'};
@@ -520,6 +522,7 @@ __WORKSPACE_STYLES__
   positionToolsButton.addEventListener('click',()=>{const menu=$('position-tools-menu');menu.style.top=Math.max(8,Math.min(positionToolsButton.offsetTop,$('workspace').clientHeight-190))+'px';menu.hidden=!menu.hidden;positionToolsButton.setAttribute('aria-expanded',String(!menu.hidden));});
   document.addEventListener('pointerdown',event=>{if(!$('position-tools-menu').contains(event.target) && !positionToolsButton.contains(event.target)){$('position-tools-menu').hidden=true;positionToolsButton.setAttribute('aria-expanded','false');}});
   function beginPositionTool(side) {
+    selectedChartObject=null;$('drawing-selected').value='';
     $('position-tools-menu').hidden=true;positionToolsButton.setAttribute('aria-expanded','false');
     if(!replayActive || !dayMode)$('day-replay').click();
     if(currentReview()?.manualExit && !replayRevealed)$('manual-new-trade').click();
@@ -528,7 +531,7 @@ __WORKSPACE_STYLES__
     }
     stopReplay();$('drawing-tool').value='cursor';drawingPoints=[];drawingHover=null;drawingControls();
     if($('day-side').value!==side){$('day-side').value=side;$('day-side').dispatchEvent(new Event('change'));}
-    ensureReview().positionBoxPlaced=false;drawTradeBox();
+    ensureReview().positionBoxPlaced=false;ensureReview().positionBoxHidden=false;drawTradeBox();
     manualPick='position';chartWrap.style.cursor='crosshair';positionToolsButton.setAttribute('aria-pressed','true');
     $('position-placement-hint').hidden=false;$('position-placement-hint').textContent=side+' position · Click entry on a closed candle · Drag SL / TP after placing · Esc to cancel';
   }
@@ -539,7 +542,7 @@ __WORKSPACE_STYLES__
   $('drawing-settings-close').addEventListener('click',()=>{$('drawing-settings').hidden=true;});
   try {const saved=JSON.parse(localStorage.getItem(drawingKey)||'[]');if(Array.isArray(saved))drawings=saved.filter(item=>item && Array.isArray(item.points) && item.points.length && item.points.every(p=>Number.isFinite(p.time) && Number.isFinite(p.price) && p.price>0));}catch{drawingStorageOk=false;}
   function drawingControls() {
-    const selected=$('drawing-selected').value;
+    const selected=selectedChartObject?.type==='drawing'?selectedChartObject.id:$('drawing-selected').value;
     $('drawing-selected').replaceChildren(new Option('Saved drawings ('+drawings.length+')',''));
     drawings.forEach((item,index)=>$('drawing-selected').add(new Option((index+1)+'. '+item.tool+(item.text?' · '+item.text:''),item.id)));
     $('drawing-selected').value=selected;
@@ -572,6 +575,7 @@ __WORKSPACE_STYLES__
     drawingPoints.push(point);
     if(drawingPoints.length<(['hline','vline','text'].includes(tool)?1:2)){drawingControls();return true;}
     const item={id:drawingEditId || String(Date.now())+'-'+Math.random().toString(36).slice(2),tool,points:drawingPoints,color:$('drawing-color').value,text:$('drawing-text').value.slice(0,200),recordedAt:new Date().toISOString(),replayTime:replayActive?replayCutoff:null};
+    selectedChartObject={type:'drawing',id:item.id};
     saveDrawings(drawingEditId?drawings.map(old=>old.id===drawingEditId?item:old):[...drawings,item]);
     drawingPoints=[];drawingHover=null;drawingEditId=null;$('drawing-tool').value='cursor';chartWrap.style.cursor='';drawingControls();drawUserDrawings();return true;
   }
@@ -589,15 +593,39 @@ __WORKSPACE_STYLES__
     };
     const visible=drawings.filter(item=>!replayActive || item.replayTime==null || item.replayTime<=replayCutoff);
     if(drawingPoints.length && drawingHover)visible.push({tool:$('drawing-tool').value,points:[drawingPoints[0],drawingHover],color:$('drawing-color').value});
-    for(const item of visible)for(const shape of cslDrawingShapes(item,project,width,height)){
-      const node=document.createElementNS('http://www.w3.org/2000/svg',shape.tag);
-      for(const [key,value]of Object.entries(shape.attrs))node.setAttribute(key,String(value));
-      if(shape.text!=null)node.textContent=shape.text;layer.appendChild(node);
+    for(const item of visible){
+      const group=document.createElementNS('http://www.w3.org/2000/svg','g');
+      if(item.id){group.dataset.drawingId=item.id;group.setAttribute('class',selectedChartObject?.type==='drawing' && selectedChartObject.id===item.id?'user-drawing selected':'user-drawing');}
+      const selectable=item.id && $('drawing-tool').value==='cursor' && !manualPick;
+      group.style.cursor=selectable?'pointer':'';
+      group.addEventListener('click',event=>{if(!selectable)return;event.stopPropagation();chartWrap.focus({preventScroll:true});selectedChartObject={type:'drawing',id:item.id};$('drawing-selected').value=item.id;drawingControls();drawUserDrawings();drawTradeBox();});
+      for(const shape of cslDrawingShapes(item,project,width,height)){
+        if(selectable && shape.tag==='line'){
+          const hit=document.createElementNS(group.namespaceURI,'line');for(const [key,value]of Object.entries(shape.attrs))hit.setAttribute(key,String(value));hit.setAttribute('stroke','transparent');hit.setAttribute('stroke-width','12');hit.style.pointerEvents='stroke';group.appendChild(hit);
+        }
+        const node=document.createElementNS('http://www.w3.org/2000/svg',shape.tag);
+        for(const [key,value]of Object.entries(shape.attrs))node.setAttribute(key,String(value));
+        node.style.pointerEvents=selectable?'visiblePainted':'none';
+        if(shape.text!=null)node.textContent=shape.text;group.appendChild(node);
+      }
+      layer.appendChild(group);
     }
   }
-  $('drawing-tool').addEventListener('change',()=>{stopReplay();manualPick=null;drawingPoints=[];drawingHover=null;drawingEditId=null;chartWrap.style.cursor=$('drawing-tool').value==='cursor'?'':'crosshair';drawingControls();drawUserDrawings();});
-  $('drawing-selected').addEventListener('change',drawingControls);
-  $('drawing-delete').addEventListener('click',()=>saveDrawings(drawings.filter(item=>item.id!==$('drawing-selected').value)));
+  $('drawing-tool').addEventListener('change',()=>{stopReplay();selectedChartObject=null;$('drawing-selected').value='';manualPick=null;drawingPoints=[];drawingHover=null;drawingEditId=null;chartWrap.style.cursor=$('drawing-tool').value==='cursor'?'':'crosshair';drawingControls();drawUserDrawings();});
+  $('drawing-selected').addEventListener('change',()=>{selectedChartObject=$('drawing-selected').value?{type:'drawing',id:$('drawing-selected').value}:null;drawingControls();drawUserDrawings();drawTradeBox();});
+  function deleteSelectedChartObject() {
+    if(selectedChartObject?.type==='drawing'){
+      const id=selectedChartObject.id;if(!drawings.some(item=>item.id===id))return false;
+      selectedChartObject=null;$('drawing-selected').value='';saveDrawings(drawings.filter(item=>item.id!==id));return true;
+    }
+    if(selectedChartObject?.type==='position' && replayActive && selectedChartObject.key===replayKey() && currentReview()){
+      currentReview().positionBoxHidden=true;selectedChartObject=null;manualPick=null;chartWrap.style.cursor='';saveReviews();refreshManualPlan();resetPriceScale();redrawOverlays();return true;
+    }
+    return false;
+  }
+  document.addEventListener('keydown',event=>{if(cslChartDeleteAllowed(event,document.activeElement) && deleteSelectedChartObject()){event.preventDefault();event.stopPropagation();}});
+  $('drawing-delete').addEventListener('click',()=>{selectedChartObject={type:'drawing',id:$('drawing-selected').value};deleteSelectedChartObject();});
+  $('manual-show-box').addEventListener('click',()=>{const record=currentReview();if(!record)return;record.positionBoxHidden=false;record.positionBoxPlaced=true;selectedChartObject={type:'position',key:replayKey()};saveReviews();refreshManualPlan();redrawOverlays();});
   $('drawing-clear').addEventListener('click',()=>saveDrawings([]));
   $('drawing-undo').addEventListener('click',()=>{if(!drawingUndo.length)return;drawings=drawingUndo.pop();try{localStorage.setItem(drawingKey,JSON.stringify(drawings));}catch{drawingStorageOk=false;}drawingControls();drawUserDrawings();});
   $('drawing-edit').addEventListener('click',()=>{const item=drawings.find(item=>item.id===$('drawing-selected').value);if(!item)return;stopReplay();drawingEditId=item.id;$('drawing-tool').value=item.tool;$('drawing-color').value=item.color;$('drawing-text').value=item.text || '';manualPick=null;drawingPoints=[];drawingHover=null;chartWrap.style.cursor='crosshair';drawingControls();});
@@ -708,6 +736,7 @@ __WORKSPACE_STYLES__
     $('manual-plan-status').textContent=manualPick?'Click the chart to place '+manualPick+'.':status;
     if(manualPick!=='position'){$('position-placement-hint').hidden=true;positionToolsButton.setAttribute('aria-pressed','false');}
     $('manual-plan-status').style.color=manualPlanDraft.error || manualEntryMessage.startsWith('Entry not confirmed:')?'#fda4af':'#b9d7f5';
+    $('manual-show-box').hidden=!currentReview()?.positionBoxHidden;
     const locked=manualPlanLocked();
     for(const key of ['entry','stop','target']) $('manual-'+key).disabled=locked;
     for(const button of document.querySelectorAll('[data-pick-level]')) button.disabled=locked;
@@ -716,7 +745,7 @@ __WORKSPACE_STYLES__
     $('manual-move').disabled=locked;$('manual-move').title='Choose a closed candle on this chart.';
     $('manual-current').disabled=locked;
     $('manual-current').title='Set entry to the latest closed chart candle close, then confirm.';
-    $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error);
+    $('manual-confirm').disabled=locked || Boolean(manualPlanDraft.error) || Boolean(currentReview()?.positionBoxHidden);
     $('manual-confirm').title=confirmed?'Entry is already confirmed.':'Only this button opens your manual position. Confirm the selected closed candle and entry price.';
     $('manual-be').disabled=manualCloseLocked();
     const costBar=(manualMarket()?.candles || []).filter(bar=>bar.time>(confirmed?.candleTime ?? Infinity) && bar.time+manualInterval()<=replayCutoff).at(-1);
@@ -967,7 +996,7 @@ __WORKSPACE_STYLES__
   for(const key of ['entry','stop','target']) $('manual-'+key).addEventListener('input',()=>{
     if(manualPlanLocked()) return;
     stopReplay();
-    if(dayMode)ensureReview().positionBoxPlaced=true;
+    if(dayMode){ensureReview().positionBoxPlaced=true;ensureReview().positionBoxHidden=false;}
     manualEntryMessage='';
     refreshManualPlan(); resetPriceScale();
   });
@@ -982,7 +1011,7 @@ __WORKSPACE_STYLES__
     const interval=chartInterval(),bar=((replayChartSource || sourcePayload)?.candles || []).filter(item=>item.time+interval<=replayCutoff).at(-1);
     const first=dayMode?Math.max(replayDay,currentReview()?.tradeNotBefore ?? replayDay):automaticPlan().entryTime;
     if(!bar || bar.time<first){manualEntryMessage='Advance until a chart candle at or after entry has closed.';refreshManualPlan();return;}
-    ensureReview().positionBoxPlaced=true;
+    ensureReview().positionBoxPlaced=true;ensureReview().positionBoxHidden=false;selectedChartObject={type:'position',key:replayKey()};
     manualEntryTime=bar.time;manualEntryInterval=interval;manualEntryTimeframe=currentTimeframe;
     $('manual-entry').value=bar.close;manualEntryMessage='Current closed candle selected. Check SL/TP, then confirm entry.';refreshManualPlan();showManualBox();
   });
@@ -1118,7 +1147,7 @@ __WORKSPACE_STYLES__
     }
     const trade=payload?.selectedTrade || {};
     for(const level of payload?.dayContext?.levels || [])if(level.price!=null && Number.isFinite(Number(level.price))){low=Math.min(low,Number(level.price));high=Math.max(high,Number(level.price));}
-    if(replayActive && manualPlanDraft && currentReview()?.positionBoxPlaced!==false) {
+    if(replayActive && manualPlanDraft && currentReview()?.positionBoxPlaced!==false && !currentReview()?.positionBoxHidden) {
       for(const price of [manualPlanDraft.entry,manualPlanDraft.stop,manualPlanDraft.target]) {
         if(Number.isFinite(price) && price>0){low=Math.min(low,price);high=Math.max(high,price);}
       }
@@ -1804,7 +1833,7 @@ __WORKSPACE_STYLES__
     $('trade-card').hidden=!(payload && chart && candles && replayActive && manualPlanDraft);
     if (!payload || !chart || !candles) return;
     const manual=Boolean(replayActive && manualPlanDraft);
-    const boxUnplaced=manual && currentReview()?.positionBoxPlaced===false && !currentReview()?.manualEntry;
+    const boxUnplaced=manual && (currentReview()?.positionBoxHidden || (currentReview()?.positionBoxPlaced===false && !currentReview()?.manualEntry));
     let shownPlan=manual && positionResize?.price!=null?{...manualPlanDraft,[positionResize.key]:positionResize.price}:manualPlanDraft;
     if(manual && positionResize?.key==='entry' && positionResize.price!=null){const delta=positionResize.price-manualPlanDraft.entry;shownPlan={...shownPlan,stop:manualPlanDraft.stop+delta,target:manualPlanDraft.target+delta};}
     const trade=manual ? {...payload.selectedTrade,Entry:shownPlan.entry,Stop:shownPlan.stop,Target:shownPlan.target} : (payload.selectedTrade || {});
@@ -1840,6 +1869,8 @@ __WORKSPACE_STYLES__
       if ([a,b].some(v => v == null || !Number.isFinite(Number(v)))) return;
       const el=document.createElement('div');
       el.className='trade-rect '+className;
+      if(manual && selectedChartObject?.type==='position' && selectedChartObject.key===replayKey())el.classList.add('selected-position');
+      if(manual && $('drawing-tool').value==='cursor' && !manualPick){el.style.pointerEvents='auto';el.style.cursor='pointer';el.title='Click to select · Delete hides this box';el.addEventListener('click',event=>{event.stopPropagation();chartWrap.focus({preventScroll:true});selectedChartObject={type:'position',key:replayKey()};$('drawing-selected').value='';drawUserDrawings();drawTradeBox();});}
       if(manual && (!currentReview()?.manualEntry || manualPlanDraft.error)){el.style.borderStyle='dashed';el.style.opacity='.65';}
       el.style.left=left+'px';
       el.style.width=width+'px';
@@ -1917,6 +1948,7 @@ __WORKSPACE_STYLES__
     replaySeries.push({series:candles,kind:'candles',data:payload.candles || []});
     chart.subscribeClick(event=>{
       if(drawingClick(event))return;
+      if(!manualPick){selectedChartObject=null;$('drawing-selected').value='';drawUserDrawings();drawTradeBox();}
       if(manualPick==='exit'){
         if(manualCloseLocked())return;
         const point=drawingPoint(event);if(point)closeManualPosition({time:point.time,price:point.price});return;
@@ -1930,7 +1962,7 @@ __WORKSPACE_STYLES__
         const entry=candles.coordinateToPrice(event.point.y),side=$('day-side').value;
         const stop=candles.coordinateToPrice(event.point.y+(side==='LONG'?48:-48));
         const plan=cslPositionToolPlan(side,entry,time,stop,chartInterval(),currentTimeframe);if(plan.error)return;
-        record.positionBoxPlaced=true;record.manualBoxBars=null;
+        record.positionBoxPlaced=true;record.positionBoxHidden=false;record.manualBoxBars=null;selectedChartObject={type:'position',key:replayKey()};
         loadManualPlan(plan);storeManualPlan();saveReviews();positionToolsButton.setAttribute('aria-pressed','false');$('position-placement-hint').hidden=true;workspacePanels.show('plan');redrawOverlays();return;
       }
       if(manualPick==='candle') {
@@ -1940,7 +1972,7 @@ __WORKSPACE_STYLES__
         if(!closed || !Number.isFinite(time) || time<first || !(payload.candles || []).some(bar=>bar.time===time)) {
           manualEntryMessage=dayMode?'Choose a closed candle in this UTC day.':'Choose a closed candle at or after the automatic entry.';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();return;
         }
-        ensureReview().positionBoxPlaced=true;manualEntryTime=time;manualEntryInterval=chartInterval();manualEntryTimeframe=currentTimeframe;manualEntryMessage='';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();showManualBox();return;
+        ensureReview().positionBoxPlaced=true;ensureReview().positionBoxHidden=false;selectedChartObject={type:'position',key:replayKey()};manualEntryTime=time;manualEntryInterval=chartInterval();manualEntryTimeframe=currentTimeframe;manualEntryMessage='';manualPick=null;chartWrap.style.cursor='';refreshManualPlan();showManualBox();return;
       }
       const price=candles.coordinateToPrice(event.point.y);
       if(price==null || !Number.isFinite(price) || price<=0) return;
@@ -2106,6 +2138,7 @@ __WORKSPACE_STYLES__
   let positionResize=null;
   chartWrap.addEventListener('pointerdown',event=>{
     const handle=event.target.closest?.('.position-handle');if(!handle || event.button!==0)return;
+    selectedChartObject={type:'position',key:replayKey()};
     event.preventDefault();event.stopImmediatePropagation();stopReplay();
     positionResize={key:handle.dataset.positionLevel,price:null,bars:null,boxLeft:Number(handle.dataset.boxLeft),pointerId:event.pointerId};
     chartWrap.setPointerCapture(event.pointerId);
@@ -2165,7 +2198,7 @@ __WORKSPACE_STYLES__
   // Primarily vertical left-drag moves the chart price range up/down.
   // Horizontal drags remain normal time-axis panning.
   chartWrap.addEventListener('pointerdown',event => {
-    if(event.target.closest?.('.position-handle,#trade-card'))return;
+    if(event.target.closest?.('.position-handle,.trade-rect,[data-drawing-id],#trade-card'))return;
     if (event.button !== 0 || !candles || !inCandlePane(event)) return;
     const rect=chartWrap.getBoundingClientRect();
     if (event.clientX-rect.left >= rect.width-86) return;

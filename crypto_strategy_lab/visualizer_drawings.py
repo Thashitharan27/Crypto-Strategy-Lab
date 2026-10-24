@@ -1,6 +1,10 @@
 """Chart drawing geometry shared by the browser and Node regression checks."""
 
 DRAWING_HELPERS = r"""
+function cslChartDeleteAllowed(event,activeElement) {
+  const editable=node=>Boolean(node && (node.isContentEditable || node.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')));
+  return event.key==='Delete' && !event.defaultPrevented && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && !editable(event.target) && !editable(activeElement);
+}
 function cslDrawingShapes(item, project, width, height) {
   const p=item.points.map(project);if(p.some(point=>!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)))return [];
   const a=p[0],b=p[1] || a,color=item.color || '#60a5fa',stroke={'stroke':color,'stroke-width':item.width || 2,fill:'none'};

@@ -17,6 +17,18 @@ def shapes(tool, points=None):
     return json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
 
 
+def test_delete_guard_preserves_typing_and_modified_shortcuts():
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for Delete keyboard guard')
+    script=DRAWING_HELPERS+'''
+const field={closest:()=>({})},plain={closest:()=>null},event={key:'Delete',target:plain};
+console.log(JSON.stringify({normal:cslChartDeleteAllowed(event,plain),input:cslChartDeleteAllowed({...event,target:field},plain),focusedInput:cslChartDeleteAllowed(event,field),editable:cslChartDeleteAllowed(event,{isContentEditable:true}),ctrl:cslChartDeleteAllowed({...event,ctrlKey:true},plain),composing:cslChartDeleteAllowed({...event,isComposing:true},plain),handled:cslChartDeleteAllowed({...event,defaultPrevented:true},plain),backspace:cslChartDeleteAllowed({...event,key:'Backspace'},plain)}));
+'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result.pop('normal')
+    assert not any(result.values())
+
+
 def test_trend_ray_and_fixed_price_lines_use_chart_coordinates():
     trend=shapes('trend')[0]['attrs']
     assert (trend['x1'],trend['y1'],trend['x2'],trend['y2'])==(20,100,40,120)
