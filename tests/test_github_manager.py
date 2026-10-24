@@ -198,12 +198,16 @@ def test_widget_initial_refresh_fetches_remote_and_uses_clean_labels(qapp, monke
         behind=2,
     )
     fetch_values = []
+    manager = GitManager()
 
-    def fake_status(self, fetch=False):
+    def fake_status(fetch=False):
         fetch_values.append(fetch)
         return status
 
-    monkeypatch.setattr(GitManager, "status", fake_status)
+    # Other GUI tests can leave status tasks in the global Qt thread pool.
+    # Scope this spy to the new widget's manager, not those older instances.
+    monkeypatch.setattr(manager, "status", fake_status)
+    monkeypatch.setattr("crypto_strategy_lab.gui.github_manager.GitManager", lambda: manager)
     monkeypatch.setattr(
         GitHubIntegrationWidget,
         "_async",
