@@ -15,6 +15,27 @@ def evaluate_manual(expression):
     return json.loads(result.stdout)
 
 
+@pytest.mark.parametrize('side', ['LONG','SHORT'])
+def test_position_tool_places_directional_two_to_one_preview(side):
+    result=evaluate_manual(f'''console.log(JSON.stringify(cslPositionToolPlan('{side}',100,900,96,300,'5m')));''')
+    assert result['side']==side and result['entryTime']==900 and result['interval']==300
+    assert result['timeframe']=='5m' and result['rewardRisk']==2
+    if side=='LONG':assert result['stop']<result['entry']<result['target']
+    else:assert result['target']<result['entry']<result['stop']
+    assert 'manualEntry' not in result
+
+
+def test_position_box_width_is_bounded_and_does_not_depend_on_replay_duration():
+    result=evaluate_manual('''console.log(JSON.stringify({normal:cslPositionBoxWidth(8),zoom:cslPositionBoxWidth(100),wide:cslPositionBoxWidth(8,40),cap:cslPositionBoxWidth(100,100),tiny:cslPositionBoxWidth(1,1)}));''')
+    assert result=={'normal':96,'zoom':180,'wide':320,'cap':720,'tiny':48}
+
+
+def test_position_tool_keeps_prices_positive_and_rejects_invalid_side():
+    result=evaluate_manual('''console.log(JSON.stringify({plan:cslPositionToolPlan('SHORT',1,900,1000,60,'1m'),bad:cslPositionToolPlan('BUY',100,900,90,60,'1m')}));''')
+    assert result['plan']['target']>0 and result['plan']['stop']>1
+    assert 'error' in result['bad']
+
+
 def test_multiple_day_trades_keep_legacy_record_and_independent_results():
     result=evaluate_manual('''
 const first={key:JSON.stringify(['run','BTCUSDT','manual-day',0]),runId:'run',symbol:'BTCUSDT',reviewType:'manual-day',day:0,side:'LONG',manualEntry:{entry:100,stop:90,candleTime:60,interval:60},manualExit:{price:110,candleTime:120,availableAt:180,grossR:1}};

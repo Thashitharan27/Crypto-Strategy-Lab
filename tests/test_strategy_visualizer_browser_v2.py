@@ -513,6 +513,32 @@ console.log(JSON.stringify({draws,text:handle.textContent,draft:manualPlanDraft,
     assert result['draft']['target']==120 and result['preview']==130
     assert 'formatPrice(trade.Target ?? trade.target)+targetRText' in html
 
+def test_position_width_drag_only_saves_display_width_and_cancel_keeps_it():
+    import json,shutil,subprocess,pytest
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for position width')
+    html=build_browser_visualizer_v2_html(_Model(),'position-width')
+    start=html.index("  chartWrap.addEventListener('pointermove',event=>{\n    if(!positionResize)")
+    end=html.index("  chartWrap.addEventListener('pointerup',finishPositionResize",start)
+    code=html[start:end]
+    script='''
+let move,draws=0,saves=0;
+const chartWrap={addEventListener:(type,fn)=>move=fn,getBoundingClientRect:()=>({left:0}),releasePointerCapture:()=>{}};
+const chart={timeScale:()=>({options:()=>({barSpacing:8})})};
+let positionResize={key:'width',boxLeft:100,bars:null,pointerId:1,price:null};
+const manualPlanDraft={entry:100,stop:90,target:120},record={};
+const drawTradeBox=()=>draws++,redrawOverlays=()=>{},ensureReview=()=>record,saveReviews=()=>saves++;
+'''+code+'''
+const event={clientX:340,preventDefault(){},stopImmediatePropagation(){}};
+move(event);finishPositionResize({...event,type:'pointerup'});
+positionResize={key:'width',bars:50,pointerId:2};finishPositionResize({...event,type:'pointercancel'});
+console.log(JSON.stringify({record,saves,draws,plan:manualPlanDraft}));
+'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['record']=={'manualBoxBars':30} and result['saves']==1
+    assert result['draws']==1 and result['plan']=={'entry':100,'stop':90,'target':120}
+
+
 def test_cover_costs_button_uses_saved_run_rates_and_records_atomic_action():
     import json
     import shutil
