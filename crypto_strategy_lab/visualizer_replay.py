@@ -162,6 +162,19 @@ function cslManualSettlement(record, price, cutoff=Infinity) {
     estimatedSlippageR:model?estimatedSlippage/risk:null,
     estimatedNetR:netR!=null && Math.abs(netR)<1e-10?0:netR};
 }
+function cslRiskPositionSize(plan,record,amount,percent,equity,mode,costs) {
+  const entry=record?.manualEntry || plan,side=record?.side || plan?.side;
+  const riskBudget=mode==='percent'?equity*percent/100:amount;
+  if(!['amount','percent'].includes(mode) || !Number.isFinite(riskBudget) || riskBudget<=0 || (mode==='percent' && (!Number.isFinite(equity) || equity<=0 || !Number.isFinite(percent) || percent<=0 || percent>100)))return {error:'Enter a positive risk amount, or equity and risk percentage (up to 100%).'};
+  if(!entry || !['LONG','SHORT'].includes(side) || ![entry.entry,entry.stop].every(v=>Number.isFinite(v) && v>0))return {error:'Set a valid entry and stop first.'};
+  const priceRisk=(side==='SHORT'?-1:1)*(entry.entry-entry.stop)/entry.entry;
+  if(priceRisk<=0)return {error:'The initial stop must be on the loss side of entry.'};
+  const model=record?.manualCostModel || costs;
+  const costsIncluded=Boolean(model && [model.entryFee,model.exitFee,model.slippage].every(v=>Number.isFinite(v) && v>=0 && v<1));
+  const stopRatio=entry.stop/entry.entry;
+  const lossPerQuote=priceRisk+(costsIncluded?model.entryFee+stopRatio*model.exitFee+(1+stopRatio)*model.slippage:0);
+  return {riskBudget,notional:riskBudget/lossPerQuote,costsIncluded};
+}
 function cslTradeCardQuote(plan,record,price,notional,costs,cutoff=Infinity) {
   const entry=record?.manualEntry || plan;
   const side=record?.side || plan?.side;

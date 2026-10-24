@@ -636,7 +636,7 @@ checkbox.checked=false;drawStructureGuide();console.log(JSON.stringify({before,a
     assert result['before']==0 and result['after']>0 and result['hidden']==0
 
 
-def test_trade_card_updates_closed_results_and_moves_without_recreating_size_input():
+def test_trade_card_updates_risk_sized_closed_results_and_moves_without_recreating_inputs():
     import json,shutil,subprocess,pytest
     from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
     node=shutil.which('node')
@@ -652,15 +652,21 @@ const sourcePayload={selectedTrade:{Side:'LONG'}},boot={run:{manualCosts:{entryF
 const replayCutoff=30,record={side:'LONG',manualEntry:{entry:100,stop:90}};
 const currentReview=()=>record;
 '''+code+'''
-$('trade-card-size').value='1000';
+$('trade-card-risk-mode').value='amount';$('trade-card-risk').value='101.9';
 refreshTradeCard({entry:100,stop:90,target:120},110,true);
 const rows=$('trade-card-values').children.map(x=>x.textContent);
 $('trade-card-corner').handlers.click();
-console.log(JSON.stringify({rows,title:$('trade-card-title').textContent,hidden:$('trade-card').hidden,style:$('trade-card').style,size:$('trade-card-size').value}));
+const title=$('trade-card-title').textContent;
+$('trade-card-risk-mode').value='percent';$('trade-card-percent').value='1';$('trade-card-equity').value='1000';
+refreshTradeCard({entry:100,stop:90,target:120},110,false);
+const percentageRows=$('trade-card-values').children.map(x=>x.textContent);
+console.log(JSON.stringify({rows,percentageRows,title,hidden:$('trade-card').hidden,style:$('trade-card').style,risk:$('trade-card-risk').value,percentVisible:!$('trade-card-percent-field').hidden,amountHidden:$('trade-card-amount-field').hidden}));
 '''
     result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
     assert result['title'].startswith('Closed · LONG') and not result['hidden']
-    assert 'Net result est.' in result['rows'] and '+97.90 (+9.79%)' in result['rows']
+    assert 'Net result est.' in result['rows'] and '+97.90 (+0.96R)' in result['rows']
     assert 'Net at target' not in result['rows']
-    assert result['style']['left']=='12px' and result['size']=='1000'
+    assert result['style']['left']=='12px' and result['risk']=='101.9'
+    assert result['percentVisible'] and result['amountHidden']
+    assert '10.00 quote' in result['percentageRows']
     assert "if(manual)refreshTradeCard(shownPlan" in html
