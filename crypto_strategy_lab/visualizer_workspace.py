@@ -27,6 +27,17 @@ button:disabled{opacity:.35}
 #drawing-rail button{width:38px;min-height:34px;background:transparent;color:#b2b5be}
 #drawing-rail button[aria-pressed=true]{background:#2962ff20;color:#82aaff;border-color:transparent}
 #drawing-settings{background:#1e222d;border-color:#363a45}
+#position-tools-menu{position:absolute;left:52px;z-index:25;width:245px;padding:10px;background:#1e222d;border:1px solid #363a45;border-radius:6px;box-shadow:0 6px 24px #0008}
+#position-tools-menu[hidden],#position-placement-hint[hidden]{display:none}
+#position-tools-menu strong{display:block;font-size:11px;color:#9598a1;text-transform:uppercase;padding:5px 8px}
+#position-tools-menu button{display:flex;align-items:center;gap:12px;width:100%;background:transparent;border:0;text-align:left;padding:10px 8px}
+#position-tools-menu button:hover{background:#2a2e39}
+#position-tools-menu small{display:block;padding:8px;color:#9598a1;font-size:11px;line-height:1.5}
+.position-long-icon{color:#26a69a;font-size:21px}.position-short-icon{color:#f23645;font-size:21px}
+#position-placement-hint{position:absolute;z-index:8;left:12px;bottom:42px;max-width:calc(100% - 100px);padding:7px 10px;border:1px solid #2962ff80;background:#171f35ed;color:#b4c9ff;border-radius:4px;font-size:12px;pointer-events:none}
+.position-handle{height:10px!important;min-width:10px;border:1px solid #ced7ee!important;background:#2962ff!important;border-radius:2px}
+.position-width-handle{cursor:ew-resize}
+.position-side-label{position:absolute;padding:2px 4px;background:#131722d9;border-radius:3px;font:10px/1.2 Segoe UI,sans-serif;pointer-events:none}
 #reviewbar{grid-area:context;flex-wrap:nowrap;gap:7px;padding:7px 12px;background:#131722;border-top:1px solid #2a2e39;border-bottom:0;min-width:0;overflow-x:auto;white-space:nowrap}
 #reviewbar>*{flex-shrink:0}#trade{width:195px;max-width:230px;min-width:120px}
 #reviewbar{scrollbar-width:thin;scrollbar-color:#434957 #131722}#reviewbar::-webkit-scrollbar{height:4px}#reviewbar::-webkit-scrollbar-thumb{background:#434957;border-radius:4px}

@@ -97,6 +97,16 @@ function cslManualPlan(entry, stop, target, side) {
     return {error:long?'Long plan needs SL < entry < TP.':'Short plan needs TP < entry < SL.'};
   return {entry,stop,target,rewardRisk:Math.abs(target-entry)/Math.abs(entry-stop)};
 }
+function cslPositionToolPlan(side,entry,entryTime,stopCandidate,interval,timeframe) {
+  if(!['LONG','SHORT'].includes(side) || !Number.isFinite(entry) || entry<=0 || !Number.isFinite(entryTime))return {error:'Choose a valid entry on the chart.'};
+  const risk=Math.max(entry*.0001,Math.min(entry*.2,Math.abs(entry-stopCandidate) || entry*.003));
+  const sign=side==='LONG'?1:-1,stop=entry-sign*risk,target=entry+sign*risk*2;
+  return {...cslManualPlan(entry,stop,target,side),side,entryTime,interval,timeframe};
+}
+function cslPositionBoxWidth(spacing,bars=null) {
+  const step=Number.isFinite(spacing) && spacing>0?spacing:6;
+  return Number.isFinite(bars) && bars>0?Math.max(48,Math.min(720,bars*step)):Math.max(96,Math.min(180,12*step));
+}
 function cslTargetR(plan, side, originalEntry=null) {
   if(!['LONG','SHORT'].includes(String(side).toUpperCase()))return null;
   const base=originalEntry || plan,sign=String(side).toUpperCase()==='SHORT'?-1:1;
