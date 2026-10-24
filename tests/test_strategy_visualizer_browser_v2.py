@@ -97,10 +97,10 @@ def test_supply_demand_overlay_and_details_use_saved_evidence():
     assert "\nFirst touch:" not in html
 
 
-def test_v2_html_is_minimal_and_diagnostic():
+def test_v2_html_keeps_diagnostics_in_chart_workspace():
     html = build_browser_visualizer_v2_html(_Model(), "abc")
 
-    assert "Strategy Visualizer V2 · Diagnostic" in html
+    assert "CSL · Chart workspace" in html
     assert "FULL RUN CANDLES:" in html
     assert "persisted entry time:" in html
     assert "entry candle index:" in html
@@ -645,7 +645,7 @@ def test_new_day_trade_button_preserves_closed_trade_and_can_select_it_again():
     code=html[html.index('  function selectDayTrade('):html.index("  $('structure-guide').addEventListener")]
     script=REPLAY_HELPERS+'''
 let replayBusy=false,dayMode=true,replayRevealed=false,replayDay=0,replayCutoff=240,replayInterval=60,manualDayTradeKey='first',manualPlanDraft={},sourcePayload={},draws=0,saves=0;
-const boot={run:{runId:'r',symbol:'s',timeframe:'1m',swingStrength:1}};
+const boot={run:{runId:'r',symbol:'s',timeframe:'1m',swingStrength:1}},workspacePanels={show:()=>{}};
 const first={key:'first',runId:'r',symbol:'s',reviewType:'manual-day',day:0,side:'LONG',manualPlan:{entry:100,stop:90,target:120,entryTime:60},manualEntry:{entry:100,stop:90,candleTime:60,interval:60},manualExit:{candleTime:120,availableAt:180,grossR:1}};
 const original=JSON.stringify(first),reviewRecords=[first];
 const marketPayload={candles:[{time:180,open:110,close:111,high:112,low:109}]},payload=marketPayload;
@@ -706,7 +706,7 @@ def test_trade_card_updates_risk_sized_closed_results_and_moves_without_recreati
     node=shutil.which('node')
     if not node:pytest.skip('Node required for trade card')
     html=build_browser_visualizer_v2_html(_Model(),'trade-card')
-    code=html[html.index('  let tradeCardCorner='):html.index('  function drawTradeBox()')]
+    code=html[html.index("  $('trade-card-corner').addEventListener"):html.index('  function drawTradeBox()')]
     script=REPLAY_HELPERS+'''
 const elements={};
 const el=()=>({style:{},handlers:{},children:[],addEventListener(type,fn){this.handlers[type]=fn;},replaceChildren(){this.children=[];},append(...items){this.children.push(...items);}});
@@ -714,6 +714,7 @@ const $=id=>elements[id] || (elements[id]=el());
 const document={createElement:el},formatPrice=String,drawTradeBox=()=>{};
 const sourcePayload={selectedTrade:{Side:'LONG'}},boot={run:{manualCosts:{entryFee:.001,exitFee:.001,slippage:0}}};
 const replayCutoff=30,record={side:'LONG',manualEntry:{entry:100,stop:90}};
+let openedPanel=null;const workspacePanels={show:name=>openedPanel=name};
 const currentReview=()=>record;
 '''+code+'''
 $('trade-card-risk-mode').value='amount';$('trade-card-risk').value='101.9';
@@ -724,13 +725,13 @@ const title=$('trade-card-title').textContent;
 $('trade-card-risk-mode').value='percent';$('trade-card-percent').value='1';$('trade-card-equity').value='1000';
 refreshTradeCard({entry:100,stop:90,target:120},110,false);
 const percentageRows=$('trade-card-values').children.map(x=>x.textContent);
-console.log(JSON.stringify({rows,percentageRows,title,hidden:$('trade-card').hidden,style:$('trade-card').style,risk:$('trade-card-risk').value,percentVisible:!$('trade-card-percent-field').hidden,amountHidden:$('trade-card-amount-field').hidden}));
+console.log(JSON.stringify({rows,percentageRows,title,hidden:$('trade-card').hidden,openedPanel,risk:$('trade-card-risk').value,percentVisible:!$('trade-card-percent-field').hidden,amountHidden:$('trade-card-amount-field').hidden}));
 '''
     result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
     assert result['title'].startswith('Closed · LONG') and not result['hidden']
     assert 'Net result est.' in result['rows'] and '+97.90 (+0.96R)' in result['rows']
     assert 'Net at target' not in result['rows']
-    assert result['style']['left']=='12px' and result['risk']=='101.9'
+    assert result['openedPanel']=='plan' and result['risk']=='101.9'
     assert result['percentVisible'] and result['amountHidden']
     assert '10.00 quote' in result['percentageRows']
     assert "if(manual)refreshTradeCard(shownPlan" in html
