@@ -15,6 +15,38 @@ def evaluate_manual(expression):
     return json.loads(result.stdout)
 
 
+def test_multiple_day_trades_keep_legacy_record_and_independent_results():
+    result=evaluate_manual('''
+const first={key:JSON.stringify(['run','BTCUSDT','manual-day',0]),runId:'run',symbol:'BTCUSDT',reviewType:'manual-day',day:0,side:'LONG',manualEntry:{entry:100,stop:90,candleTime:60,interval:60},manualExit:{price:110,candleTime:120,availableAt:180,grossR:1}};
+const original=JSON.stringify(first),records=[first],next=cslNextDayTrade(records,'run','BTCUSDT',0,240,60);
+const pending={key:next.key,runId:'run',symbol:'BTCUSDT',reviewType:'manual-day',day:0,side:'SHORT',tradeNotBefore:next.notBefore,manualPlan:{entry:110,stop:120,target:90,entryTime:180}};
+const second=cslConfirmManualEntry(pending,[{time:180,open:110,high:115,low:105,close:111}],240,60,'confirmed');
+const ended={...second,manualExit:{price:90,candleTime:240,availableAt:300,grossR:2}};
+const third=cslNextDayTrade([first,ended],'run','BTCUSDT',0,300,60);
+console.log(JSON.stringify({next,third,second,unchanged:original===JSON.stringify(first),report:cslReviewComparison([], [first,ended]),pending:cslNextDayTrade([first,pending],'run','BTCUSDT',0,240,60),blocked:cslNextDayTrade([first,second],'run','BTCUSDT',0,300,60),future:cslNextDayTrade([first],'run','BTCUSDT',0,120,60)}));
+''')
+    assert result['unchanged'] and result['next']['notBefore']==180
+    assert result['second']['manualEntry']['candleTime']==180
+    assert result['next']['key']!=result['third']['key']
+    assert result['pending']['existingKey']==result['next']['key']
+    assert 'error' in result['blocked'] and 'error' in result['future']
+    assert result['report']['closed']==2
+    assert [r['after'] for r in result['report']['rows']]==[1,2]
+    assert result['report']['rows'][1]['label'].endswith('Trade 2')
+    assert result['report']['rows'][1]['entryTime']=='1970-01-01T00:03:00.000Z'
+
+
+def test_second_trade_rejects_an_entry_before_previous_exit_and_day_end():
+    result=evaluate_manual('''
+const record={tradeNotBefore:180,side:'LONG',manualPlan:{entry:100,stop:90,target:120,entryTime:120}};
+const early=cslConfirmManualEntry(record,[{time:120,low:90,high:110}],240,60,'now');
+const late=cslNextDayTrade([{runId:'r',symbol:'s',reviewType:'manual-day',day:0,manualEntry:{interval:60},manualExit:{candleTime:86340,availableAt:86400}}],'r','s',0,86400,60);
+console.log(JSON.stringify({early,late}));
+''')
+    assert 'previous position' in result['early']['error']
+    assert 'error' in result['late']
+
+
 @pytest.mark.parametrize('side,exit_price,gross,fees', [('LONG',120,200,3.4),('SHORT',80,200,2.6)])
 def test_trade_card_estimates_size_fees_and_slippage(side,exit_price,gross,fees):
     result=evaluate_manual(f'''
