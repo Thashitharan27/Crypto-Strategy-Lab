@@ -37,7 +37,8 @@ def context_zones(bars, strength=2, displacement_atr=1.):
     """One release slot per complete HTF candle; no unconfirmed pivots used.
 
     Zones must break an existing unbroken swing with a close in an established
-    HH/HL or LH/LL trend. The target is that prior swing, frozen before breakout.
+    HH/HL or LH/LL trend. The broken swing confirms structure; the target is
+    the known impulse/formation extreme, frozen before the future pullback.
     """
     result = [None]*len(bars)
     pivots = {"LONG": [], "SHORT": []}
@@ -53,14 +54,16 @@ def context_zones(bars, strength=2, displacement_atr=1.):
             long = candidate["side"] == "LONG"
             gap = bar["low"] > origin["high"] if long else bar["high"] < origin["low"]
             if gap:
+                target=float(max(impulse['high'],bar['high']) if long else min(impulse['low'],bar['low']))
+                target_bar=impulse if (impulse['high']>=bar['high'] if long else impulse['low']<=bar['low']) else bar
                 zone = dict(bottom=origin["low"], top=origin["high"], pivotTime=origin["time"].isoformat(),
                     confirmedTime=bar["end"].isoformat(), touchTime=None, bounceTime=None)
                 result[i] = dict(version=1, strategy=MODE, entryModel=CONFIRMED, side=candidate["side"],
-                    target=swing["price"], structureLevel=swing["price"], structureTime=swing["time"].isoformat(),
+                    target=target, targetSource="FORMATION_EXTREME", structureLevel=swing["price"], structureTime=swing["time"].isoformat(),
                     structureBreakTime=impulse["end"].isoformat(), signalTime=None, zone=zone,
                     imbalance=dict(bottom=origin["high"] if long else bar["high"], top=bar["low"] if long else origin["low"]),
-                    opposingZone=dict(bottom=swing["price"]*.999999, top=swing["price"]*1.000001,
-                                      pivotTime=swing["time"].isoformat(), confirmedTime=swing["confirmedTime"].isoformat()))
+                    opposingZone=dict(bottom=target*.999999, top=target*1.000001,
+                                      pivotTime=target_bar["time"].isoformat(), confirmedTime=bar["end"].isoformat()))
         candidate = None
         prev_close = history[-1]["close"] if history else bar["close"]
         trs.append(max(bar["high"]-bar["low"],abs(bar["high"]-prev_close),abs(bar["low"]-prev_close)))

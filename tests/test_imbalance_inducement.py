@@ -1,4 +1,4 @@
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 import json
 
@@ -37,7 +37,7 @@ def test_completed_context_shift_separate_retest_and_prefix_causality(side):
     assert [i for i,z in enumerate(result) if z]==[84]
     z=result[84]
     assert z['side']==side and z['entryModel']==CONFIRMED
-    assert z['target']==(19 if side=='LONG' else 21)
+    assert z['target']==(23 if side=='LONG' else 17)
     assert z['reversalExtreme']==pytest.approx(14.8 if side=='LONG' else 25.2)
     assert pd.Timestamp(z['zone']['confirmedTime'])<=pd.Timestamp(z['zone']['touchTime'])
     assert pd.Timestamp(z['shiftTime'])<=pd.Timestamp(z['entryZone']['touchTime'])
@@ -48,7 +48,7 @@ def test_completed_context_shift_separate_retest_and_prefix_causality(side):
 
 def test_context_requires_confirmed_trend_and_close_break_not_wick():
     bars,_=fixture()
-    assert context_zones(bars,1,.5)[19]['target']==19
+    assert context_zones(bars,1,.5)[19]['target']==23
     for end in range(1,len(bars)+1):
         assert context_zones(bars[:end],1,.5)==context_zones(bars,1,.5)[:end]
     bars[18]['close']=18.5
@@ -57,6 +57,19 @@ def test_context_requires_confirmed_trend_and_close_break_not_wick():
     assert not any(context_zones(bars,1,.5))
     bars,_=fixture();bars[17].update(low=11,close=11.5)
     assert not any(context_zones(bars,1,.5))
+
+
+def test_target_uses_known_formation_extreme_not_the_broken_structure_level():
+    bars,_=fixture()
+    setup=context_zones(bars,1,.5)[19]
+    assert setup['structureLevel']==19
+    assert setup['target']==23 and setup['targetSource']=='FORMATION_EXTREME'
+    assert setup['opposingZone']['pivotTime']==bars[19]['time'].isoformat()
+    # The displacement, rather than gap-confirmation candle, can supply target.
+    bars[19]['high']=21.5
+    setup=context_zones(bars,1,.5)[19]
+    assert setup['target']==22
+    assert setup['opposingZone']['pivotTime']==bars[18]['time'].isoformat()
 
 
 @pytest.mark.parametrize('change',['partial_fill','origin_close_failure','stop_breach','wick_shift','missing_lower','missing_context','expire','no_retest'])
@@ -88,9 +101,17 @@ def test_production_entry_sweep_stop_target_and_saved_visualizer_evidence():
     engine=RuleAwareDataLakeProductionBacktestEngine(frame,cfg);engine.market_regime_values[:]='SIDEWAYS'
     assert engine._entry_decision(84)['execution_index']==85
     plan=engine._sr_stop_plan(84,85)
-    assert plan['passed'] and plan['stop_price']<14.8 and plan['level_price']==19
+    assert plan['passed'] and plan['stop_price']<14.8 and plan['level_price']==23
+    # Confirmation may enter beyond the already-broken 19 swing, while 23
+    # remains a valid target. Reusing 19 would incorrectly reject this entry.
+    expected=engine._expected_entry_price;engine._expected_entry_price=lambda *a:20.5
+    assert engine._sr_stop_plan(84,85)['passed']
+    engine._expected_entry_price=lambda *a:24.
+    assert engine._sr_stop_plan(84,85)['reason']=='IMBALANCE_TARGET_NOT_AHEAD'
+    engine._expected_entry_price=lambda *a:22.8
+    assert engine._sr_stop_plan(84,85)['reason']=='IMBALANCE_MINIMUM_R_NOT_MET'
     # Next-open failure of the refined origin cannot use the wider sweep stop.
-    expected=engine._expected_entry_price;engine._expected_entry_price=lambda *a:17.
+    engine._expected_entry_price=lambda *a:17.
     assert not engine._sr_stop_plan(84,85)['passed']
     engine._expected_entry_price=expected
     trades=engine.run();assert len(trades)>0
@@ -100,6 +121,14 @@ def test_production_entry_sweep_stop_target_and_saved_visualizer_evidence():
     saved=CompletedRunVisualizer.supply_demand_derivation(fake,0)
     assert saved['status']=='AVAILABLE' and isinstance(saved['shiftTime'],int)
     assert isinstance(saved['entryZone']['confirmedTime'],int)
+    strict=RuleAwareDataLakeProductionBacktestEngine(frame,replace(cfg,sd_minimum_r=3.))
+    strict.market_regime_values[:]='SIDEWAYS'
+    assert strict.run().empty
+    rejection=next(row for row in strict.skipped_signals if row['entry_filter_reason']=='IMBALANCE_MINIMUM_R_NOT_MET')
+    assert rejection['side']=='LONG'
+    assert rejection['proposed_entry']>0 and rejection['proposed_stop']<14.8
+    assert rejection['proposed_target']==23
+    assert 0<rejection['proposed_reward_risk']<3
 
 
 def test_open_deeper_origin_filters_shallow_entry_in_complete_pipeline(monkeypatch):

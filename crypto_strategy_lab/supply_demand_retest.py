@@ -191,6 +191,15 @@ class SupplyDemandRetestMixin:
         stop=boundary-buffer if side=="LONG" else boundary+buffer
         risk=entry-stop if side=="LONG" else stop-entry
         reward=setup["target"]-entry if side=="LONG" else entry-setup["target"]
+        if self.signal_strategy_mode=="IMBALANCE_ORIGIN_RETEST":
+            details={**reject,"entry_price":entry,"stop_price":stop,"target_price":setup["target"],
+                     "reward_risk":reward/risk if np.isfinite([reward,risk]).all() and risk>0 else None}
+            if not np.isfinite([entry,stop,risk,reward]).all() or stop<=0 or risk<=0:
+                return {**details,"reason":"IMBALANCE_INVALID_STOP_GEOMETRY"}
+            if reward<=0:
+                return {**details,"reason":"IMBALANCE_TARGET_NOT_AHEAD"}
+            if reward/risk<self.config.sd_minimum_r:
+                return {**details,"reason":"IMBALANCE_MINIMUM_R_NOT_MET"}
         if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk<self.config.sd_minimum_r:
             return reject
         return {"passed":True,"applied":True,"reason":"SD_ZONE_STOP","distance":risk,"stop_price":stop,
@@ -209,6 +218,18 @@ class SupplyDemandRetestMixin:
         if getattr(self,"signal_strategy_mode",None) in MODES:
             return True,None
         return super()._sr_tp_filter_result(i,execution_i)
+
+    def _record_skipped_signal(self,i,reason):
+        result=super()._record_skipped_signal(i,reason)
+        if getattr(self,"signal_strategy_mode",None)=="IMBALANCE_ORIGIN_RETEST" and self.sd_setups[i] and self.skipped_signals:
+            row=self.skipped_signals[-1]
+            # Do not let report adapters infer this strategy's direction from DI.
+            row["side"]=self.sd_setups[i]["side"]
+            if reason in {"IMBALANCE_INVALID_STOP_GEOMETRY","IMBALANCE_TARGET_NOT_AHEAD","IMBALANCE_MINIMUM_R_NOT_MET"}:
+                plan=self._sr_stop_plan(i,i+1 if i+1<len(self.times) else None)
+                row.update(proposed_entry=plan.get("entry_price"),proposed_stop=plan.get("stop_price"),
+                           proposed_target=plan.get("target_price"),proposed_reward_risk=plan.get("reward_risk"))
+        return result
 
     def _open_pair(self,i,entry_filter_passed=True,entry_filter_reason="Strategy profile passed",schedule=None):
         before=len(self.active_pairs)
