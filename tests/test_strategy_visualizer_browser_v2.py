@@ -636,6 +636,36 @@ checkbox.checked=false;drawStructureGuide();console.log(JSON.stringify({before,a
     assert result['before']==0 and result['after']>0 and result['hidden']==0
 
 
+def test_structure_renderer_fades_filled_fvgs_and_starts_ifvg_at_inversion():
+    import json,shutil,subprocess,pytest
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for structure renderer')
+    html=build_browser_visualizer_v2_html(_Model(),'fvg-lifecycle')
+    code=html[html.index('  const structureCache='):html.index('  function drawSupplyDemandOverlay(')]
+    script='''
+const replayActive=true,replayCutoff=360;
+const bars=[{time:0,high:2,low:1},{time:300,high:2,low:1}];
+const marketPayload={candles:bars},replayChartSource=null,sourcePayload=null,boot={run:{swingStrength:1}};
+const chartInterval=()=>60,chartWrap={clientWidth:1000};
+const chart={panes:()=>[{getHeight:()=>500}],timeScale:()=>({options:()=>({barSpacing:6}),getVisibleRange:()=>({to:360}),timeToCoordinate:t=>t})};
+const candles={priceToCoordinate:p=>300-p};
+const node=kind=>({kind,attrs:{},style:{},children:[],setAttribute(k,v){this.attrs[k]=v;},appendChild(x){this.children.push(x);},replaceChildren(){this.children=[];}});
+const layer=node('layer'),checkbox={checked:true},$=id=>id==='structure-layer'?layer:checkbox;
+const document={createElementNS:(ns,kind)=>node(kind),createTextNode:text=>({text})},formatPrice=String,fmtTime=String;
+const cslBuildStructureGuide=()=>({});
+const cslStructureGuideView=()=>({left:0,events:[
+ {kind:'fvg',from:0,time:0,availableAt:60,endAt:120,top:20,bottom:10,side:'LONG',status:'Filled'},
+ {kind:'ifvg',from:180,time:180,availableAt:240,endAt:null,top:20,bottom:10,side:'SHORT',status:'Fresh'}
+]});
+'''+code+'''
+drawStructureGuide();console.log(JSON.stringify(layer.children[0].children.filter(n=>n.kind==='rect').map(n=>n.attrs)));
+'''
+    boxes=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert boxes[0]['width']=='120' and boxes[0]['stroke-opacity']=='0.28'
+    assert boxes[1]['x']=='180' and boxes[1]['width']=='180'
+    assert boxes[1]['stroke-dasharray']=='4 3' and boxes[1]['stroke-opacity']=='0.7'
+
+
 def test_trade_card_updates_risk_sized_closed_results_and_moves_without_recreating_inputs():
     import json,shutil,subprocess,pytest
     from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
