@@ -1402,6 +1402,14 @@ __WORKSPACE_STYLES__
       return found==null ? fallback : (chart.timeScale().timeToCoordinate(found) ?? fallback);
     }
     const end=xAt(sd.signalTime,chartWrap.clientWidth-76);
+    if(sd.strategy==='NY_OPENING_RANGE_REVERSAL') {
+      for(const [price,name,color] of [[sd.zone.top,'NY 4h high','#60a5fa'],[sd.zone.bottom,'NY 4h low','#60a5fa'],[sd.stop,'Breakout stop','#ef4444'],[sd.target,'Target '+String(sd.targetR)+'R','#22c55e']]) {
+        const y=candles.priceToCoordinate(price);if(y==null || y<0 || y>height)continue;
+        const start=Math.max(0,xAt(sd.zone.pivotTime,0)),line=document.createElement('div');line.className='fvg-level';line.title=name+' '+formatPrice(price);
+        Object.assign(line.style,{left:start+'px',top:y+'px',width:Math.max(3,end-start)+'px',borderColor:color});fvgLayer.appendChild(line);
+      }
+      return;
+    }
     if(sd.strategy==='TJR_CONFLUENCE') {
       for(const [zone,name,color] of [[sd.zone,'Entry FVG','#22c55e30'],[sd.inverseFvg,'Inverted FVG','#a78bfa30']]) {
         if(!zone)continue;
@@ -1584,11 +1592,12 @@ __WORKSPACE_STYLES__
       fvgReview.hidden=false; $('setup-panel').hidden=false; $('review-setup').hidden=false;
       $('review-setup').setAttribute('aria-pressed',String(reviewMode));
       $('setup-panel').setAttribute('aria-label','Supply and demand setup explanation');
-      fvgReview.textContent=(sd.strategy==='IMBALANCE_ORIGIN_RETEST'?'Imbalance origin':sd.strategy==='TJR_CONFLUENCE'?'Confluence':sd.strategy==='SNEAKY_PIVOT'?'Sneaky Pivot':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
+      fvgReview.textContent=(sd.strategy==='NY_OPENING_RANGE_REVERSAL'?'NY opening range':sd.strategy==='IMBALANCE_ORIGIN_RETEST'?'Imbalance origin':sd.strategy==='TJR_CONFLUENCE'?'Confluence':sd.strategy==='SNEAKY_PIVOT'?'Sneaky Pivot':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
       const panel=$('setup-panel'); panel.replaceChildren();
-      const title=document.createElement('h3'); title.textContent=sd.strategy==='IMBALANCE_ORIGIN_RETEST'?(sd.entryZone?'Inducement → structure shift → origin retest':'Full imbalance fill → origin rejection'):sd.strategy==='TJR_CONFLUENCE'?'Sweep + structure + IFVG + FVG pullback':sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
+      const title=document.createElement('h3'); title.textContent=sd.strategy==='NY_OPENING_RANGE_REVERSAL'?'New York 4h range → outside close → inside close':sd.strategy==='IMBALANCE_ORIGIN_RETEST'?(sd.entryZone?'Inducement → structure shift → origin retest':'Full imbalance fill → origin rejection'):sd.strategy==='TJR_CONFLUENCE'?'Sweep + structure + IFVG + FVG pullback':sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
       const facts=document.createElement('p'); facts.style.whiteSpace='pre-line';
       facts.textContent='Zone confirmed: '+fmtTime(sd.zone.confirmedTime)+'\\nFirst touch: '+fmtTime(sd.zone.touchTime)+'\\nBounce: '+fmtTime(sd.zone.bounceTime)+'\\nRetest: '+fmtTime(sd.signalTime)+'\\nTarget swing: '+formatPrice(sd.target)+'\\nEntry is the next candle open. Zones are saved decision-time evidence.';
+      if(sd.strategy==='NY_OPENING_RANGE_REVERSAL') facts.textContent='New York session '+String(sd.sessionDay)+'; range ready '+fmtTime(sd.zone.confirmedTime)+'; outside close candle '+fmtTime(sd.breakoutTime)+'; inside close candle '+fmtTime(sd.signalTime)+'. Exact breakout extreme stop '+formatPrice(sd.stop)+'; actual-fill target '+String(sd.targetR)+'R ('+formatPrice(sd.target)+'). Entry at next open, still inside the range and within the same New York day. Range uses four elapsed hours from New York midnight; saved decision-time evidence.';
       if(sd.entryZone) facts.textContent='HTF structure close: '+fmtTime(sd.structureBreakTime)+'; origin touch: '+fmtTime(sd.zone.touchTime)+'; lower-timeframe shift: '+fmtTime(sd.shiftTime)+'; confirmation origin retest: '+fmtTime(sd.signalTime)+'. Reversal extreme '+formatPrice(sd.reversalExtreme)+'; '+(sd.targetSource==='FORMATION_EXTREME'?'pre-pullback extreme target ':'saved legacy swing target ')+formatPrice(sd.target)+'. Entry at next open. All zones and timestamps are saved decision-time evidence.';
       if(sd.strategy==='SNEAKY_PIVOT') facts.textContent='Initial test: '+fmtTime(sd.zone.touchTime)+'; reversal: '+fmtTime(sd.signalTime)+'; '+String(sd.levelName)+' '+formatPrice(sd.level)+'; breakout trigger '+formatPrice(sd.trigger)+'; stop '+formatPrice(sd.stop)+(sd.stopSource?' ('+String(sd.stopSource)+')':' (legacy defended-level rule)')+'; fixed target '+formatPrice(sd.target)+'. Enter only on a breakout during the next 15m candle using 1m data. Previous-day levels are fixed at setup; no session restriction.';
       if(sd.strategy==='SNEAKY_PIVOT') {

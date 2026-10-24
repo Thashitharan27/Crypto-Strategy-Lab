@@ -1030,7 +1030,7 @@ class CompletedRunVisualizer:
                 value["sweepTime"]=_unix_seconds(_utc(value["sweepTime"]))
                 for key in ("firstTime","secondTime"):
                     value["liquidity"][key]=_unix_seconds(_utc(value["liquidity"][key]))
-            for time_key in ("structureTime","structureBreakTime","shiftTime"):
+            for time_key in ("structureTime","structureBreakTime","shiftTime","breakoutTime","dayEnd"):
                 if value.get(time_key) is not None:
                     value[time_key]=_unix_seconds(_utc(value[time_key]))
             for key in ("zone","opposingZone", *(["entryZone"] if value.get("entryZone") else [])):

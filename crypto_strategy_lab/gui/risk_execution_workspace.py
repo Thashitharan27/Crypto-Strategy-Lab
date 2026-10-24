@@ -152,6 +152,8 @@ class RiskExecutionWorkspace(QWidget):
         self.sd_card = FormCard("Supply & demand retest", note="Strategy-owned stop and target. See the Effective Plan for entry conditions. 0 stop buffer uses the exact defended boundary.")
         for name,label in (("sd_swing_strength","Swing candles on each side"),("sd_stop_buffer_atr","Stop buffer beyond zone (ATR)"),("sd_minimum_r","Minimum reward / risk")):
             self.sd_card.add_field(name,label,self.account[name])
+        self.sd_card.add_field("ny_range_target_r", "New York range target (R)", self.account["ny_range_target_r"])
+        self.account["ny_range_target_r"].setRange(2.,100.)
         self.sd_card.add_field("io_entry_model", "Imbalance entry model", self.account["io_entry_model"])
         model=self.account["io_entry_model"]
         model.setItemText(model.findData("ORIGIN_REJECTION"), "Origin rejection (original)")
@@ -978,11 +980,12 @@ class RiskExecutionWorkspace(QWidget):
             self.trade["position_sizing_stop_override_enabled"].setChecked(False)
             self.trade["position_sizing_stop_override_enabled"].setEnabled(False)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
+        ny_range = self._signal_strategy_mode() == "NY_OPENING_RANGE_REVERSAL"
         imbalance = self._signal_strategy_mode() == "IMBALANCE_ORIGIN_RETEST"
         liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
         confluence = self._signal_strategy_mode() == "TJR_CONFLUENCE"
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
-        supply_demand = self._signal_strategy_mode() in {"IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
+        supply_demand = self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
         self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
             self.sd_card.set_row_visible(name,liquidity or (imbalance and name in {"ls_displacement_atr","ls_max_wait_bars"}))
@@ -996,10 +999,16 @@ class RiskExecutionWorkspace(QWidget):
         if confluence:self.sd_card.setTitle("Confluence - sweep, structure and FVG")
         if sneaky:self.sd_card.setTitle("Sneaky Pivot — all day")
         self.sd_card.set_row_visible("sd_minimum_r",not sneaky or self.account["sp_minimum_r_enabled"].isChecked())
-        self.sd_card.set_row_visible("sd_stop_buffer_atr",True)
+        self.sd_card.set_row_visible("sd_stop_buffer_atr",not ny_range)
         self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond sweep (ATR)" if confluence else "Stop buffer beyond swing (ATR)" if sneaky else "Stop buffer beyond zone (ATR)")
         for name in ("sp_minimum_r_enabled","sp_recent_swings_enabled","sp_require_level_reclaim","sp_cost_cover_enabled","sp_level_tolerance_atr","sp_body_atr","sp_min_body_percent","sp_confirmation_bars","sp_hold_minutes"):
             self.sd_card.set_row_visible(name,sneaky)
+        self.sd_card.set_row_visible("sd_swing_strength",not ny_range)
+        self.sd_card.set_row_visible("ny_range_target_r",ny_range)
+        if ny_range:
+            self.sd_card.setTitle("New York opening 4h range reversal")
+            for name in ("sd_swing_strength","sd_minimum_r","sd_stop_buffer_atr"):
+                self.sd_card.set_row_visible(name,False)
         self.sd_card.setVisible(supply_demand)
         self.ema_gap_card.setVisible(automatic_reversal)
         for card in (self.entry_card, self.stop_card, self.target_card, self.ladder_card,
@@ -1064,6 +1073,9 @@ class RiskExecutionWorkspace(QWidget):
             self.window.strategy_tf.setCurrentIndex(self.window.strategy_tf.findData("15m"))
 
     def update_summary(self, execution, base) -> None:
+        if self._signal_strategy_mode() == "NY_OPENING_RANGE_REVERSAL":
+            self.summary_label.setText(f"New York range reversal: 5m candles; first four elapsed hours from America/New_York midnight. Wait for all 48 candles to close before using the range. Close above high then strictly inside = short; below low then inside = long. Wicks alone cannot arm. Enter next open on the same NY day and still inside range. Exact stop at the full breakout excursion extreme (including re-entry candle); TP {execution.ny_range_target_r:g}R from actual fill. Fresh excursions can trade again that day; existing portfolio limits apply. Missing opening candles invalidate that day's range; later gaps reset the excursion. No inherited supply/demand minimum-R filter or discretionary stop refinement. Open trades retain SL/TP overnight.")
+            return
         if self._signal_strategy_mode() == "IMBALANCE_ORIGIN_RETEST" and execution.io_entry_model == "INDUCEMENT_CONFIRMATION":
             self.summary_label.setText(f"Inducement confirmation: completed {execution.io_context_minutes}m zones, entry candles on the strategy timeframe (must divide the zone timeframe). Confirmed HH/HL or LH/LL trend; displacement >= {execution.ls_displacement_atr:g} HTF ATR closes through an unbroken swing and leaves a gap. Skip shallow origins above/below an open deeper origin. Full fill into origin; a sweep must close back inside. Then confirmed lower-timeframe swing break, later retest of its opposing origin and directional rejection; enter next open. SL beyond reversal extreme +{execution.sd_stop_buffer_atr:g} entry ATR; TP known displacement/formation extreme, frozen before pullback; minimum {execution.sd_minimum_r:g}R. Expire {execution.ls_max_wait_bars} zone candles after formation. Research interpretation, not order-book evidence.")
             return
