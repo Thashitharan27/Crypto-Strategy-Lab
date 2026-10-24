@@ -60,6 +60,37 @@ def test_imbalance_origin_selection_settings_and_summary():
         window.close()
 
 
+def test_new_york_range_selection_defaults_target_and_no_inherited_minimum_r():
+    app, window = _window()
+    try:
+        widgets=window.execution_form.widgets
+        widgets['sd_minimum_r'].setValue(3.)
+        selector=window.rule_builder.direction_mode
+        index=selector.findData('NY_OPENING_RANGE_REVERSAL')
+        assert index>=0
+        selector.setCurrentIndex(index);selector.activated.emit(index)
+        app.processEvents()
+        assert window.strategy_tf.currentData()=='5m'
+        assert widgets['entry_timing_mode'].currentData()=='NEXT_CANDLE_OPEN'
+        assert not widgets['ny_range_target_r'].isHidden()
+        assert widgets['ny_range_target_r'].value()==2
+        for name in ('sd_minimum_r','sd_swing_strength','sd_stop_buffer_atr','io_entry_model'):
+            assert widgets[name].isHidden()
+        widgets['ny_range_target_r'].setValue(2.5)
+        config=window.build_config()
+        assert config.execution.ny_range_target_r==2.5
+        assert config.execution.sd_minimum_r==3
+        assert 'TP 2.5R' in window.risk_execution_workspace.summary_label.text()
+        window.apply_config(config)
+        assert widgets['ny_range_target_r'].value()==2.5
+        # Shared swing controls must be restored when leaving the range model.
+        selector.setCurrentIndex(selector.findData('IMBALANCE_ORIGIN_RETEST'));app.processEvents()
+        assert not widgets['sd_swing_strength'].isHidden()
+        assert widgets['ny_range_target_r'].isHidden()
+    finally:
+        window.close()
+
+
 def test_imbalance_inducement_selection_timeframe_and_settings_round_trip():
     app, window = _window()
     try:

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 MODE = "SUPPLY_DEMAND_RETEST"
-MODES = {MODE, "IMBALANCE_ORIGIN_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE"}
+MODES = {MODE, "NY_OPENING_RANGE_REVERSAL", "IMBALANCE_ORIGIN_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE"}
 
 
 def validate_settings(strength, buffer, minimum_r):
@@ -89,7 +89,13 @@ class SupplyDemandRetestMixin:
         modes={r.get("_strategy_direction_mode") for p in self.config.strategy_profiles.values() for r in getattr(p,"entry_rules",())}
         if "SNEAKY_PIVOT" in modes:
             return  # Configured by SneakyPivotMixin.
-        if "TJR_CONFLUENCE" in modes:
+        if "NY_OPENING_RANGE_REVERSAL" in modes:
+            from .ny_opening_range import range_reversal_setups
+            if self.config.strategy_timeframe_minutes!=5:
+                raise ValueError("New York opening range reversal requires 5m strategy candles")
+            self.sd_setups=range_reversal_setups(self.times,self.open,self.high,self.low,self.close,
+                target_r=self.config.ny_range_target_r)
+        elif "TJR_CONFLUENCE" in modes:
             from crypto_strategy_lab.tjr_confluence import confluence_setups
             self.sd_setups=confluence_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
                 strength=self.config.sd_swing_strength,timeframe_minutes=self.config.strategy_timeframe_minutes,
@@ -149,7 +155,7 @@ class SupplyDemandRetestMixin:
         context=super()._profile_context(i)
         if getattr(self,"signal_strategy_mode",None) not in MODES or context is None:
             return context
-        profile=replace(context[3],reward_risk_ratio=self.config.tc_target_r if self.signal_strategy_mode=="TJR_CONFLUENCE" else 1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
+        profile=replace(context[3],reward_risk_ratio=self.config.ny_range_target_r if self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL" else self.config.tc_target_r if self.signal_strategy_mode=="TJR_CONFLUENCE" else 1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
                         partial_profit_enabled=False,partial_stop_enabled=False,trailing_enabled=False,break_even_enabled=False,
                         r_step_trailing_enabled=False,atr_checkpoint_tp_extension_enabled=False,timeout_enabled=False)
         return (*context[:3],profile)
@@ -163,6 +169,16 @@ class SupplyDemandRetestMixin:
         if not setup or side!=setup["side"]:
             return reject
         entry=float(self._expected_entry_price(i,execution_i,side))
+        if self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL":
+            sign=1 if side=="LONG" else -1;stop=setup['stop'];risk=sign*(entry-stop)
+            target=entry+sign*self.config.ny_range_target_r*risk
+            details={**reject,"entry_price":entry,"stop_price":stop,"target_price":target}
+            if not np.isfinite([entry,stop,risk,target]).all() or stop<=0 or risk<=0 or target<=0:
+                return {**details,"reason":"NY_RANGE_INVALID_ENTRY_GEOMETRY"}
+            if not setup['zone']['bottom']<entry<setup['zone']['top']:
+                return {**details,"reason":"NY_RANGE_ENTRY_OUTSIDE_RANGE"}
+            return {"passed":True,"applied":True,"reason":"NY_RANGE_EXCURSION_STOP","distance":risk,"stop_price":stop,
+                    "boundary_price":stop,"level_price":target,"distance_atr":None,"timeframe_minutes":5}
         atr=float(self.atr_values[i])
         if not np.isfinite(atr) or atr<=0:
             return reject
@@ -209,7 +225,9 @@ class SupplyDemandRetestMixin:
         if getattr(self,"signal_strategy_mode",None) not in MODES:
             return super()._apply_sr_take_profit(i,pair)
         for pos in pair.positions():
-            if self.signal_strategy_mode=="TJR_CONFLUENCE":
+            if self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL":
+                pos.tp=pos.entry_price+(1 if pos.side.value=="LONG" else -1)*self.config.ny_range_target_r*pos.risk
+            elif self.signal_strategy_mode=="TJR_CONFLUENCE":
                 pos.tp=pos.entry_price+(1 if pos.side.value=="LONG" else -1)*self.config.tc_target_r*pos.risk
             else:
                 pos.tp=float(self.sd_setups[i]["target"])
@@ -221,11 +239,11 @@ class SupplyDemandRetestMixin:
 
     def _record_skipped_signal(self,i,reason):
         result=super()._record_skipped_signal(i,reason)
-        if getattr(self,"signal_strategy_mode",None)=="IMBALANCE_ORIGIN_RETEST" and self.sd_setups[i] and self.skipped_signals:
+        if getattr(self,"signal_strategy_mode",None) in {"IMBALANCE_ORIGIN_RETEST","NY_OPENING_RANGE_REVERSAL"} and self.sd_setups[i] and self.skipped_signals:
             row=self.skipped_signals[-1]
             # Do not let report adapters infer this strategy's direction from DI.
             row["side"]=self.sd_setups[i]["side"]
-            if reason in {"IMBALANCE_INVALID_STOP_GEOMETRY","IMBALANCE_TARGET_NOT_AHEAD","IMBALANCE_MINIMUM_R_NOT_MET"}:
+            if reason in {"IMBALANCE_INVALID_STOP_GEOMETRY","IMBALANCE_TARGET_NOT_AHEAD","IMBALANCE_MINIMUM_R_NOT_MET","NY_RANGE_INVALID_ENTRY_GEOMETRY","NY_RANGE_ENTRY_OUTSIDE_RANGE"}:
                 plan=self._sr_stop_plan(i,i+1 if i+1<len(self.times) else None)
                 row.update(proposed_entry=plan.get("entry_price"),proposed_stop=plan.get("stop_price"),
                            proposed_target=plan.get("target_price"),proposed_reward_risk=plan.get("reward_risk"))
@@ -237,9 +255,12 @@ class SupplyDemandRetestMixin:
         if getattr(self,"signal_strategy_mode",None) in MODES and len(self.active_pairs)>before:
             j=schedule["indicator_index"] if schedule else i
             self.active_pairs[-1].sd_setup=copy.deepcopy(self.sd_setups[j])
-            if self.signal_strategy_mode=="TJR_CONFLUENCE":
+            if self.signal_strategy_mode in {"TJR_CONFLUENCE","NY_OPENING_RANGE_REVERSAL"}:
                 pos=self.active_pairs[-1].position
-                self.active_pairs[-1].sd_setup.update(stop=float(pos.original_sl),target=float(pos.tp),targetR=float(self.config.tc_target_r))
+                saved=self.active_pairs[-1].sd_setup
+                saved.update(stop=float(pos.original_sl),target=float(pos.tp),targetR=float(self.config.ny_range_target_r if self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL" else self.config.tc_target_r))
+                if self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL":
+                    saved['opposingZone'].update(bottom=float(pos.tp)*.999999,top=float(pos.tp)*1.000001)
         return result
 
     def _build_result_row(self,pair,row_kind,positions):
@@ -248,4 +269,6 @@ class SupplyDemandRetestMixin:
             row["supply_demand_setup"]=json.dumps(getattr(pair,"sd_setup",None),allow_nan=False)
             if self.signal_strategy_mode=="TJR_CONFLUENCE":
                 row["applied_reward_risk_ratio"]=float(self.config.tc_target_r)
+            elif self.signal_strategy_mode=="NY_OPENING_RANGE_REVERSAL":
+                row["applied_reward_risk_ratio"]=float(self.config.ny_range_target_r)
         return row
