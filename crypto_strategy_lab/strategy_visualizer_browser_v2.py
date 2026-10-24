@@ -1694,7 +1694,7 @@ button:disabled{opacity:.45;cursor:default}
   }
   function drawTradeBox() {
     tradeBoxLayer.replaceChildren();
-    $('trade-card').hidden=true;
+    $('trade-card').hidden=!(payload && chart && candles && replayActive && manualPlanDraft);
     if (!payload || !chart || !candles) return;
     const manual=Boolean(replayActive && manualPlanDraft);
     const shownPlan=manual && positionResize?.price!=null?{...manualPlanDraft,[positionResize.key]:positionResize.price}:manualPlanDraft;
