@@ -112,8 +112,9 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #trade-card[hidden]{display:none}
 #trade-card summary{cursor:pointer;padding:9px 12px;color:#e6edf3;font-weight:600}
 .trade-card-body{padding:0 12px 10px}
-.trade-card-controls{display:flex;align-items:center;gap:6px;margin-bottom:8px}
-#trade-card-size{width:80px;background:#0c1420;color:#e6edf3;border:1px solid #475569;border-radius:4px;padding:4px}
+.trade-card-controls{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.trade-card-controls input{width:80px;background:#0c1420;color:#e6edf3;border:1px solid #475569;border-radius:4px;padding:4px}
+.trade-card-controls label{display:flex;align-items:center;gap:6px}.trade-card-controls [hidden]{display:none}
 #trade-card-values{display:grid;grid-template-columns:1fr auto;gap:4px 12px;margin:8px 0}
 #trade-card-values dt{color:#93a9bd}#trade-card-values dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .trade-card-note{font-size:10px;color:#93a9bd}.trade-card-positive{color:#6ee7b7}.trade-card-negative{color:#fda4af}
@@ -295,9 +296,15 @@ button:disabled{opacity:.45;cursor:default}
     <details id="trade-card" aria-label="Manual trade estimate" open hidden>
       <summary id="trade-card-title">Trade estimate</summary>
       <div class="trade-card-body">
-        <div class="trade-card-controls"><label for="trade-card-size">Size (quote)</label><input id="trade-card-size" type="number" min="0.01" step="any" value="1000" aria-label="Estimated position notional in quote currency"><button id="trade-card-corner" title="Move card to next corner" aria-label="Move trade card to next corner">↗</button></div>
+        <div class="trade-card-controls">
+          <select id="trade-card-risk-mode" aria-label="Risk sizing method"><option value="amount">Fixed risk</option><option value="percent">% of equity</option></select><button id="trade-card-corner" title="Move card to next corner" aria-label="Move trade card to next corner">↗</button>
+          <label id="trade-card-amount-field"><span id="trade-card-risk-label">Risk (quote)</span><input id="trade-card-risk" type="number" min="0.01" step="any" value="10" aria-label="Risk amount in quote currency"></label>
+          <label id="trade-card-percent-field" hidden>Risk % <input id="trade-card-percent" type="number" min="0.01" max="100" step="any" value="1" aria-label="Risk percentage of equity"></label>
+          <label id="trade-card-equity-field" hidden><span id="trade-card-equity-label">Equity (quote)</span><input id="trade-card-equity" type="number" min="0.01" step="any" placeholder="Your equity" aria-label="Account equity in quote currency"></label>
+        </div>
         <dl id="trade-card-values"></dl>
-        <div class="trade-card-note">Sizing estimate only · quote currency. Includes run fees and slippage when available. Excludes funding and rounding.</div>
+        <div id="trade-card-risk-note" class="trade-card-note"></div>
+        <div class="trade-card-note">Sizing estimate only. Uses the initial stop after entry; excludes funding, rounding and stop gaps.</div>
       </div>
     </details>
     <svg id="drawing-layer" width="100%" height="100%" aria-label="Chart drawings"></svg>
@@ -1669,22 +1676,32 @@ button:disabled{opacity:.45;cursor:default}
     tradeCardCorner=(tradeCardCorner+1)%4;
     Object.assign($('trade-card').style,{top:tradeCardCorner<2?'12px':'auto',bottom:tradeCardCorner<2?'auto':'32px',right:tradeCardCorner===0 || tradeCardCorner===3?'86px':'auto',left:tradeCardCorner===1 || tradeCardCorner===2?'12px':'auto'});
   });
-  $('trade-card-size').addEventListener('input',()=>drawTradeBox());
+  for(const id of ['trade-card-risk','trade-card-percent','trade-card-equity'])$(id).addEventListener('input',()=>drawTradeBox());
+  $('trade-card-risk-mode').addEventListener('change',()=>drawTradeBox());
   for(const type of ['pointerdown','pointermove','pointerup','click','dblclick','wheel'])$('trade-card').addEventListener(type,event=>event.stopPropagation());
   function refreshTradeCard(plan,price,closed) {
     const record=currentReview(),card=$('trade-card'),values=$('trade-card-values');
     card.hidden=false;values.replaceChildren();
     const side=record?.side || sourcePayload?.selectedTrade?.Side;
     $('trade-card-title').textContent=(closed?'Closed':record?.manualEntry?'Open':'Preview')+' · '+side+' · Trade estimate';
-    const amount=Number($('trade-card-size').value),costs=boot.run.manualCosts;
+    const mode=$('trade-card-risk-mode').value,costs=boot.run.manualCosts;
+    $('trade-card-amount-field').hidden=mode==='percent';
+    $('trade-card-percent-field').hidden=mode!=='percent';$('trade-card-equity-field').hidden=mode!=='percent';
+    const currency=['USDT','USDC','BUSD','USD','BTC','ETH'].find(unit=>boot.run.symbol?.endsWith(unit)) || 'quote';
+    $('trade-card-risk-label').textContent='Risk ('+currency+')';$('trade-card-equity-label').textContent='Equity ('+currency+')';
+    const sizing=cslRiskPositionSize({...plan,side},record,Number($('trade-card-risk').value),Number($('trade-card-percent').value),Number($('trade-card-equity').value),mode,costs);
+    $('trade-card-risk-note').textContent=sizing.error || (sizing.costsIncluded?'Risk includes estimated fees and slippage at the initial stop.':'Risk uses price movement only; run fee/slippage settings are unavailable.');
+    const amount=sizing.notional;
     const quote=p=>cslTradeCardQuote({...plan,side},record,p,amount,costs,replayCutoff);
     const current=quote(price),tp=quote(plan.target),sl=quote(plan.stop);
     const money=v=>v==null?'Unavailable':(v>0?'+':'')+v.toFixed(2);
     const row=(name,value,tone='')=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=name;dd.textContent=value;dd.className=tone;values.append(dt,dd);};
     row('Entry',formatPrice(plan.entry));row('Stop loss',formatPrice(plan.stop));row('Take profit',formatPrice(plan.target));
-    if(!current || !tp || !sl){row('Estimate','Enter valid size and trade levels');return;}
+    if(!current || !tp || !sl){row('Estimate',sizing.error?'Check risk inputs':'Enter valid trade levels');return;}
+    row('Risk budget',sizing.riskBudget.toFixed(2)+' '+currency);
+    row('Position value',amount.toFixed(2)+' '+currency);
     row('Quantity / remaining',current.quantity.toFixed(6)+' / '+(current.remainingFraction*100).toFixed(1)+'%');
-    const result=(name,q)=>row(name,q.net==null?'Unavailable':money(q.net)+' ('+money(q.netPercent)+'%)',q.net==null?'':q.net>=0?'trade-card-positive':'trade-card-negative');
+    const result=(name,q)=>row(name,q.net==null?'Unavailable':money(q.net)+' ('+money(q.net/sizing.riskBudget)+'R)',q.net==null?'':q.net>=0?'trade-card-positive':'trade-card-negative');
     if(record?.manualEntry)result(closed?'Net result est.':'Net if closed now',current);
     if(!closed){result('Net at target',tp);result('Net at stop',sl);}
     const basis=record?.manualEntry?current:tp;

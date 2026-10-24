@@ -45,6 +45,36 @@ console.log(JSON.stringify({quote,unchanged:before===JSON.stringify(record),miss
     assert result['invalid'] is None
 
 
+@pytest.mark.parametrize('side,stop', [('LONG',90),('SHORT',110)])
+def test_risk_sizing_matches_net_stop_loss_for_amount_and_percent(side,stop):
+    result=evaluate_manual(f'''
+const plan={{entry:100,stop:{stop},target:{120 if side=='LONG' else 80},side:'{side}'}},costs={{entryFee:.001,exitFee:.002,slippage:.001}};
+const amount=cslRiskPositionSize(plan,null,10,0,0,'amount',costs);
+const percent=cslRiskPositionSize(plan,null,0,1,1000,'percent',costs);
+const atStop=cslTradeCardQuote(plan,null,plan.stop,amount.notional,costs);
+console.log(JSON.stringify({{amount,percent,atStop}}));
+''')
+    assert result['amount']['riskBudget']==10
+    assert result['amount']['costsIncluded']
+    assert result['amount']['notional']==result['percent']['notional']
+    assert result['atStop']['net']==pytest.approx(-10)
+
+
+def test_risk_sizing_retains_original_stop_after_break_even_and_partial_exit():
+    result=evaluate_manual('''
+const plan={entry:100,stop:100,target:120,side:'LONG'},record={side:'LONG',manualEntry:{entry:100,stop:90,target:120},partialExits:[{fraction:.5,price:110,effectiveAt:1}]};
+console.log(JSON.stringify(cslRiskPositionSize(plan,record,10,0,0,'amount',null)));
+''')
+    assert result['notional']==100
+    assert not result['costsIncluded']
+
+
+@pytest.mark.parametrize('amount,percent,equity,mode', [(0,1,1000,'amount'),(-10,1,1000,'amount'),(10,1,0,'percent'),(10,101,1000,'percent'),(10,0,1000,'percent')])
+def test_risk_sizing_rejects_invalid_budget(amount,percent,equity,mode):
+    result=evaluate_manual(f'''console.log(JSON.stringify(cslRiskPositionSize({{entry:100,stop:90,side:'LONG'}},null,{amount},{percent},{equity},'{mode}',null)));''')
+    assert 'error' in result
+
+
 @pytest.mark.parametrize('side,price,r',[('LONG',110,1),('LONG',95,-.5),('SHORT',90,1),('SHORT',105,-.5)])
 def test_manual_close_records_separate_result_without_changing_automatic_trade(side,price,r):
     stop=90 if side=='LONG' else 110
