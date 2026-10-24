@@ -106,6 +106,8 @@ class MainWindow(LegacyMainWindow):
             self.base_execution_form.widgets["di_partial_1r_enabled"].setChecked(False)
         if strategy in {"IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST"}:
             self.strategy_tf.setCurrentIndex(self.strategy_tf.findData("1h"))
+        if strategy == "IMBALANCE_ORIGIN_RETEST" and self.execution_form.widgets["io_entry_model"].currentData() == "INDUCEMENT_CONFIRMATION":
+            self.strategy_tf.setCurrentIndex(self.strategy_tf.findData("15m"))
         if strategy in {"SNEAKY_PIVOT", "TJR_CONFLUENCE"}:
             self.strategy_tf.setCurrentIndex(self.strategy_tf.findData("15m"))
             self.intrabar_tf.setCurrentIndex(self.intrabar_tf.findData("1m"))
