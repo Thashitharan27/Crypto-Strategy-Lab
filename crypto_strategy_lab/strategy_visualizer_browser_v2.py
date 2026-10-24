@@ -2005,6 +2005,7 @@ button:disabled{opacity:.45;cursor:default}
 
   // Wheel over the right price scale changes vertical zoom only.
   chartWrap.addEventListener('wheel',event => {
+    if(event.target.closest?.('#trade-card'))return;
     const rect=chartWrap.getBoundingClientRect();
     const overPriceScale=event.clientX-rect.left >= rect.width-86;
     if (!overPriceScale || !candles) return;
@@ -2029,7 +2030,7 @@ button:disabled{opacity:.45;cursor:default}
   // Primarily vertical left-drag moves the chart price range up/down.
   // Horizontal drags remain normal time-axis panning.
   chartWrap.addEventListener('pointerdown',event => {
-    if(event.target.closest?.('.position-handle'))return;
+    if(event.target.closest?.('.position-handle,#trade-card'))return;
     if (event.button !== 0 || !candles || !inCandlePane(event)) return;
     const rect=chartWrap.getBoundingClientRect();
     if (event.clientX-rect.left >= rect.width-86) return;
