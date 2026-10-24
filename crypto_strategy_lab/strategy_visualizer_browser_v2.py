@@ -1198,6 +1198,15 @@ button:disabled{opacity:.45;cursor:default}
     svg.setAttribute('width','100%');svg.setAttribute('height',String(height));svg.style.overflow='hidden';layer.appendChild(svg);
     const make=(kind,attrs,title)=>{const node=document.createElementNS(ns,kind);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,String(v));node.style.pointerEvents='stroke';const tip=document.createElementNS(ns,'title');tip.textContent=title;node.appendChild(tip);svg.appendChild(node);return node;};
     const x=time=>{const snapped=Math.floor(time/interval)*interval;const direct=chart.timeScale().timeToCoordinate(snapped);if(direct!=null)return Math.max(0,Math.min(width,direct));return time<bars[0].time?0:width;};
+    const occupied=[],labelQueue=[];
+    const candleSpacing=Math.max(3,chart.timeScale().options().barSpacing || 6);
+    for(const bar of bars) {
+      const cx=chart.timeScale().timeToCoordinate(bar.time);
+      if(cx==null || cx<0 || cx>width)continue;
+      const top=candles.priceToCoordinate(bar.high),bottom=candles.priceToCoordinate(bar.low);
+      if(top!=null && bottom!=null)occupied.push({x:cx-candleSpacing*.4-2,y:top-2,w:candleSpacing*.8+4,h:bottom-top+4});
+    }
+    const queueLabel=(text,cx,cy,color,title,above=true)=>labelQueue.push({text,cx,cy,color,title,above});
     const pivots=view.events.filter(e=>e.kind==='swing').sort((a,b)=>a.time-b.time);
     for(let i=1;i<pivots.length;i++) {
       const a=pivots[i-1],b=pivots[i];if(a.swing===b.swing || a.time===b.time)continue;
@@ -1209,6 +1218,7 @@ button:disabled{opacity:.45;cursor:default}
       if(e.kind==='fvg'||e.kind==='ifvg') {
         const top=candles.priceToCoordinate(e.top),bottom=candles.priceToCoordinate(e.bottom);if(top==null||bottom==null||bottom<0||top>height)continue;
         const color=e.side==='LONG'?'#34d399':'#fb7185';
+        if(right-left>36)queueLabel(e.kind==='ifvg'?'IFVG':'FVG',right-4,Math.max(0,top),color,(e.side==='LONG'?'Bullish ':'Bearish ')+(e.kind==='ifvg'?'IFVG':'FVG'));
         make('rect',{x:left,y:Math.max(0,top),width:Math.max(1,right-left),height:Math.max(1,Math.min(height,bottom)-Math.max(0,top)),fill:color,'fill-opacity':.08,stroke:color,'stroke-opacity':.7,'stroke-dasharray':e.kind==='ifvg'?'4 3':'none'},(e.side==='LONG'?'Bullish ':'Bearish ')+(e.kind==='ifvg'?'IFVG':'FVG')+' '+formatPrice(e.bottom)+' - '+formatPrice(e.top)+'; known '+fmtTime(e.availableAt));
         continue;
       }
@@ -1218,6 +1228,20 @@ button:disabled{opacity:.45;cursor:default}
       const title=name+' '+formatPrice(e.price)+'; known '+fmtTime(e.availableAt);
       make('line',{x1:left,x2:right,y1:y,y2:y,stroke:color,'stroke-width':1,'stroke-opacity':e.endAt?.5:.85,'stroke-dasharray':e.kind==='equilibrium'?'5 4':e.kind==='swing'?'2 3':'none'},title);
       if(e.kind!=='equilibrium')make('circle',{cx:x(e.time),cy:y,r:e.kind==='swing'?2:3,fill:color,stroke:color},title);
+      queueLabel(e.kind==='swing'?e.label:e.kind==='sweep'?'Sweep':e.kind==='break'?'Break':'50%',e.kind==='swing'?x(e.time):right,y,color,title,e.kind==='swing'?e.swing==='high':true);
+    }
+    for(const item of labelQueue) {
+      const w=item.text.length*6+6,h=13;
+      const left=Math.max(2,Math.min(width-w-2,item.cx-w));
+      for(const offset of (item.above?[-17,5,-32,20]:[5,-17,20,-32])) {
+        const top=item.cy+offset;
+        if(top<2 || top+h>height-2)continue;
+        if(occupied.some(b=>left<b.x+b.w && left+w>b.x && top<b.y+b.h && top+h>b.y))continue;
+        const label=make('text',{x:left+3,y:top+10,fill:item.color,'fill-opacity':.78,'font-size':10,'font-family':'system-ui, sans-serif','font-weight':500,'paint-order':'stroke',stroke:'#0f1720','stroke-width':2.5,'stroke-linejoin':'round'},item.title);
+        label.appendChild(document.createTextNode(item.text));
+        occupied.push({x:left-3,y:top-2,w:w+6,h:h+4});
+        break;
+      }
     }
   }
 

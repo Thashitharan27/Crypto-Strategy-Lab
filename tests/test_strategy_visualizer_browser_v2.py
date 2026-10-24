@@ -622,11 +622,11 @@ let replayActive=true,replayCutoff=0;
 const bars=[{time:0,open:1,high:2,low:1,close:2},{time:900,open:2,high:4,low:2,close:4},{time:1800,open:5,high:6,low:5,close:6}];
 const marketPayload={candles:bars},replayChartSource=null,sourcePayload=null,boot={run:{swingStrength:1}};
 const chartInterval=()=>900,chartWrap={clientWidth:1000};
-const chart={panes:()=>[{getHeight:()=>500}],timeScale:()=>({getVisibleRange:()=>({to:2700}),timeToCoordinate:t=>t/10})};
+const chart={panes:()=>[{getHeight:()=>500}],timeScale:()=>({options:()=>({barSpacing:6}),getVisibleRange:()=>({to:2700}),timeToCoordinate:t=>t/10})};
 const candles={priceToCoordinate:p=>300-p};
 const node=()=>({style:{},children:[],setAttribute(){},appendChild(x){this.children.push(x);},replaceChildren(){this.children=[];}});
 const layer=node(),checkbox={checked:true},$=id=>id==='structure-layer'?layer:checkbox;
-const document={createElementNS:node},formatPrice=String,fmtTime=String;
+const document={createElementNS:node,createTextNode:text=>({text})},formatPrice=String,fmtTime=String;
 """+code+"""
 drawStructureGuide();const before=layer.children[0].children.length;
 replayCutoff=2700;drawStructureGuide();const after=layer.children[0].children.length;
