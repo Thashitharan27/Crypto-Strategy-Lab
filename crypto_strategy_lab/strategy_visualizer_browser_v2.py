@@ -21,6 +21,7 @@ from crypto_strategy_lab.strategy_visualizer import (
 from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
 from crypto_strategy_lab.visualizer_drawings import DRAWING_HELPERS
 from crypto_strategy_lab.visualizer_structure import STRUCTURE_HELPERS
+from crypto_strategy_lab.visualizer_workspace import WORKSPACE_HELPERS, WORKSPACE_STYLES
 from crypto_strategy_lab.visualizer_review_report import build_review_report_html
 
 
@@ -67,7 +68,7 @@ def build_browser_visualizer_v2_html(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Strategy Visualizer V2 · Diagnostic</title>
+<title>CSL · Chart workspace</title>
 <style>
 html,body{height:100%;margin:0;background:#0b121a;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}
 #app{height:100%;display:grid;grid-template-rows:auto auto auto minmax(0,1fr)}
@@ -204,18 +205,21 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 #replay-toggle[aria-pressed=true]{background:#255b91;border-color:#60a5fa}
 #day-replay[aria-pressed=true]{background:#255b91;border-color:#60a5fa}
 button:disabled{opacity:.45;cursor:default}
+__WORKSPACE_STYLES__
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
 <body>
 <div id="app">
   <div id="toolbar">
-    <strong class="brand">CSL <small>Strategy Visualizer V2 · Diagnostic</small></strong>
+    <strong class="brand">CSL <small>Chart workspace</small></strong>
     <span id="chart-symbol" class="symbol"></span>
     <label for="chart-timeframe">Chart timeframe</label>
     <select id="chart-timeframe" aria-label="Chart timeframe"></select>
     <button id="indicators-btn" aria-haspopup="dialog">ƒx Indicators <span id="indicator-count"></span></button>
+    <button id="open-trade-plan" aria-controls="trade-panel" aria-pressed="false">Trade panel</button>
     <span class="toolbar-spacer"></span>
+    <details id="chart-options"><summary>Chart settings ▾</summary><div class="chart-options-body">
     <label title="Confirmed chart-timeframe swings, sweeps, structure breaks, FVGs and midpoint; visual references, not entries"><input id="structure-guide" type="checkbox"> Structure guide</label>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
@@ -223,6 +227,7 @@ button:disabled{opacity:.45;cursor:default}
     <select id="sr-width" aria-label="S/R zone width"><option value="1" selected>Narrow zones</option><option value="2">Normal zones</option><option value="4">Wide zones</option></select>
     <span id="sr-status" role="status" hidden></span>
     <label><input id="day-separators" type="checkbox" checked> UTC days</label>
+    </div></details>
   </div>
   <div id="reviewbar">
     <label for="trade">Review trade</label><select id="trade"></select>
@@ -298,7 +303,7 @@ button:disabled{opacity:.45;cursor:default}
       <summary id="trade-card-title">Trade estimate</summary>
       <div class="trade-card-body">
         <div class="trade-card-controls">
-          <select id="trade-card-risk-mode" aria-label="Risk sizing method"><option value="amount">Fixed risk</option><option value="percent">% of equity</option></select><button id="trade-card-corner" title="Move card to next corner" aria-label="Move trade card to next corner">↗</button>
+          <select id="trade-card-risk-mode" aria-label="Risk sizing method"><option value="amount">Fixed risk</option><option value="percent">% of equity</option></select><button id="trade-card-corner" title="Open trade plan" aria-label="Open trade plan">Plan</button>
           <label id="trade-card-amount-field"><span id="trade-card-risk-label">Risk (quote)</span><input id="trade-card-risk" type="number" min="0.01" step="any" value="10" aria-label="Risk amount in quote currency"></label>
           <label id="trade-card-percent-field" hidden>Risk % <input id="trade-card-percent" type="number" min="0.01" max="100" step="any" value="1" aria-label="Risk percentage of equity"></label>
           <label id="trade-card-equity-field" hidden><span id="trade-card-equity-label">Equity (quote)</span><input id="trade-card-equity" type="number" min="0.01" step="any" placeholder="Your equity" aria-label="Account equity in quote currency"></label>
@@ -309,7 +314,23 @@ button:disabled{opacity:.45;cursor:default}
       </div>
     </details>
     <svg id="drawing-layer" width="100%" height="100%" aria-label="Chart drawings"></svg>
-  </div><aside id="setup-panel" aria-label="FVG setup explanation" hidden></aside></div>
+  </div><aside id="setup-panel" aria-label="FVG setup explanation" hidden></aside>
+    <aside id="trade-panel" aria-label="Trade workspace" hidden>
+      <header class="workspace-panel-header"><strong>Trade workspace</strong><button id="close-trade-panel" aria-label="Close trade panel">×</button></header>
+      <nav class="workspace-tabs" role="tablist" aria-label="Trade workspace sections">
+        <button id="workspace-tab-plan" role="tab" aria-controls="plan-tab" aria-selected="true">Plan</button><button id="workspace-tab-risk" role="tab" aria-controls="risk-tab" aria-selected="false">Risk</button><button id="workspace-tab-journal" role="tab" aria-controls="journal-tab" aria-selected="false">Journal</button>
+      </nav>
+      <section id="plan-tab" class="workspace-tab" role="tabpanel" aria-labelledby="workspace-tab-plan"><div id="plan-content" hidden><details id="position-management" open><summary>Manage position</summary><div id="position-actions"></div></details><details id="plan-details"><summary>Plan details</summary><div id="plan-details-content"></div></details></div><p id="plan-empty" class="workspace-empty">Open Day replay or Trade replay to place and manage a trade.</p></section>
+      <section id="risk-tab" class="workspace-tab" role="tabpanel" aria-labelledby="workspace-tab-risk" hidden><div id="risk-content" hidden></div><p id="risk-empty" class="workspace-empty">Open a replay to choose your risk and see fees and expected returns.</p></section>
+      <section id="journal-tab" class="workspace-tab" role="tabpanel" aria-labelledby="workspace-tab-journal" hidden><div id="journal-content" hidden></div><p id="journal-empty" class="workspace-empty">Open a replay to record decisions and review results.</p></section>
+    </aside>
+    <nav id="workspace-rail" aria-label="Workspace panels">
+      <button id="trade-panel-toggle" title="Trade plan and risk" aria-label="Trade plan and risk" aria-controls="trade-panel" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 10h16M10 10v9"/></svg></button>
+      <button id="journal-panel-toggle" title="Review journal" aria-label="Review journal" aria-controls="trade-panel" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h13v18H6zM3 7h5M3 12h5M3 17h5M11 8h5M11 12h5M11 16h4"/></svg></button>
+      <button id="diagnostics-toggle" title="Chart diagnostics" aria-label="Chart diagnostics" aria-controls="diagnostics" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 6v1"/></svg></button>
+    </nav>
+  </div>
+  <span id="workspace-clock" aria-live="off"></span>
 </div>
 <dialog id="indicator-dialog" aria-labelledby="indicator-title">
   <div class="dialog-header"><h2 id="indicator-title">Indicators</h2><button id="close-indicators" aria-label="Close indicators">✕</button></div>
@@ -356,6 +377,7 @@ button:disabled{opacity:.45;cursor:default}
   __REPLAY_HELPERS__
   __DRAWING_HELPERS__
   __STRUCTURE_HELPERS__
+  __WORKSPACE_HELPERS__
   const boot = __BOOTSTRAP__;
   const $ = id => document.getElementById(id);
   $('chart-symbol').textContent = boot.run.symbol;
@@ -419,13 +441,14 @@ button:disabled{opacity:.45;cursor:default}
   const tradeSelect = $('trade');
   const diag = $('diag');
   const chartWrap = $('chart-wrap');
+  const workspacePanels=cslOrganizeWorkspace($);
   const fibLayer = $('fib-layer');
   const tradeBoxLayer = $('trade-box-layer');
   const fvgLayer = $('fvg-layer');
   const fvgReview = document.createElement('div');
   fvgReview.id = 'fvg-review';
   fvgReview.hidden = true;
-  $('reviewbar').appendChild(fvgReview);
+  $('journal-content').appendChild(fvgReview);
   fvgReview.style.flexBasis = '100%';
   let payload = null;
   let sourcePayload = null;
@@ -716,6 +739,8 @@ button:disabled{opacity:.45;cursor:default}
   }
   function updateReplayControls() {
     const record=currentReview();
+    workspacePanels.setReplay(replayActive);
+    $('workspace-clock').textContent=replayActive?fmtTime(replayCutoff)+' UTC · '+cslManualReviewState(record):'';
     $('replay-reveal').textContent=dayMode?'Reveal day':'Reveal result';
     $('replay-restart').textContent=dayMode?'Restart day':'Restart at entry';
     $('manual-reset').textContent=dayMode?'Reset starting levels':'Use auto levels';
@@ -846,7 +871,7 @@ button:disabled{opacity:.45;cursor:default}
     const next=cslNextDayTrade(reviewRecords,boot.run.runId,boot.run.symbol,replayDay,replayCutoff,replayInterval);
     if(next.error){manualEntryMessage=next.error;refreshManualPlan();return;}
     if(next.existingKey){selectDayTrade(next.existingKey);return;}
-    stopReplay();manualDayTradeKey=next.key;
+    stopReplay();manualDayTradeKey=next.key;workspacePanels.show('plan');
     const record=ensureReview();record.tradeNotBefore=next.notBefore;record.startedReplayTime=replayCutoff;
     const bar=(marketPayload.candles || []).filter(b=>b.time>=next.notBefore && b.time>=replayDay && b.time<replayDay+86400 && b.time+replayInterval<=replayCutoff).at(-1);
     const plan=automaticPlan(),entry=bar?.close ?? (payload.candles || []).at(-1)?.close ?? plan.entry;
@@ -1709,11 +1734,7 @@ button:disabled{opacity:.45;cursor:default}
     resetPriceScale();redrawOverlays();
   }
 
-  let tradeCardCorner=0;
-  $('trade-card-corner').addEventListener('click',()=>{
-    tradeCardCorner=(tradeCardCorner+1)%4;
-    Object.assign($('trade-card').style,{top:tradeCardCorner<2?'12px':'auto',bottom:tradeCardCorner<2?'auto':'32px',right:tradeCardCorner===0 || tradeCardCorner===3?'86px':'auto',left:tradeCardCorner===1 || tradeCardCorner===2?'12px':'auto'});
-  });
+  $('trade-card-corner').addEventListener('click',()=>workspacePanels.show('plan'));
   for(const id of ['trade-card-risk','trade-card-percent','trade-card-equity'])$(id).addEventListener('input',()=>drawTradeBox());
   $('trade-card-risk-mode').addEventListener('change',()=>drawTradeBox());
   for(const type of ['pointerdown','pointermove','pointerup','click','dblclick','wheel'])$('trade-card').addEventListener(type,event=>event.stopPropagation());
@@ -1827,8 +1848,8 @@ button:disabled{opacity:.45;cursor:default}
     replaySeries=[];
     chart = window.LightweightCharts.createChart($('chart'),{
       autoSize:true,
-      layout:{background:{type:'solid',color:'#0f1720'},textColor:'#b8c2cc'},
-      grid:{vertLines:{color:'#1d2937'},horzLines:{color:'#1d2937'}},
+      layout:{background:{type:'solid',color:'#131722'},textColor:'#9598a1',fontFamily:'Segoe UI, Arial, sans-serif'},
+      grid:{vertLines:{color:'#202430'},horzLines:{color:'#202430'}},
       rightPriceScale:{borderColor:'#334155',autoScale:true,entireTextOnly:true,scaleMargins:{top:.08,bottom:.08}},
       timeScale:{borderColor:'#334155',timeVisible:true,secondsVisible:false,rightOffset:8},
       handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},
@@ -1839,8 +1860,8 @@ button:disabled{opacity:.45;cursor:default}
       },
     });
     candles = chart.addSeries(window.LightweightCharts.CandlestickSeries,{
-      upColor:'#22a06b',downColor:'#d84a4a',borderVisible:false,
-      wickUpColor:'#22a06b',wickDownColor:'#d84a4a',
+      upColor:'#089981',downColor:'#f23645',borderVisible:false,
+      wickUpColor:'#089981',wickDownColor:'#f23645',
       autoscaleInfoProvider: original => {
         const info=original();
         const base=defaultPriceRange || info?.priceRange;
@@ -2238,7 +2259,7 @@ button:disabled{opacity:.45;cursor:default}
 </script>
 </body>
 </html>"""
-    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS).replace("__STRUCTURE_HELPERS__", STRUCTURE_HELPERS)
+    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS).replace("__STRUCTURE_HELPERS__", STRUCTURE_HELPERS).replace("__WORKSPACE_HELPERS__", WORKSPACE_HELPERS).replace("__WORKSPACE_STYLES__", WORKSPACE_STYLES)
 
 
 class _LoopbackHTTPServer(ThreadingHTTPServer):
