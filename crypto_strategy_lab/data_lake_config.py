@@ -408,6 +408,9 @@ class ExecutionConfig:
     fvg_target_mode: str = "FIXED_R"
     ema_reversal_min_entry_ema300_atr: float = 0.5
     ny_range_target_r: float = 2.0
+    ny_range_overshoot_policy: str = "DEFAULT"
+    ny_range_max_extension_pct: float = 0.0
+    ny_range_sr_buffer_atr: float = 0.05
     io_entry_model: str = "ORIGIN_REJECTION"
     io_context_minutes: int = 60
     ls_equal_tolerance_atr: float = 0.15
@@ -534,8 +537,11 @@ class ResearchRunConfig:
         validate_confluence(self.execution.tc_displacement_atr,self.execution.tc_max_wait_bars,self.execution.tc_fvg_lookback,self.execution.tc_min_reversal_body_percent,self.execution.tc_target_r,self.execution.tc_min_sweep_atr)
         from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
         validate_liquidity(self.execution.ls_equal_tolerance_atr,self.execution.ls_displacement_atr,self.execution.ls_base_bars,self.execution.ls_max_wait_bars)
-        from .ny_opening_range import validate_target, validate_timeframe
+        from .ny_opening_range import validate_target, validate_timeframe, validate_policy, requires_sr
         validate_target(self.execution.ny_range_target_r)
+        validate_policy(self.execution.ny_range_overshoot_policy,self.execution.ny_range_max_extension_pct,self.execution.ny_range_sr_buffer_atr)
+        if requires_sr(self.strategy.profiles,self.execution.ny_range_overshoot_policy) and not self.features.enable_support_resistance_analysis:
+            raise ValueError("New York S/R-stop option requires support/resistance analysis")
         validate_timeframe(self.strategy.profiles,self.data.strategy_timeframe_minutes)
         from .imbalance_inducement import validate_model
         validate_model(self.execution.io_entry_model,self.execution.io_context_minutes,self.data.strategy_timeframe_minutes, active=any(r.get("_strategy_direction_mode")=="IMBALANCE_ORIGIN_RETEST" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())))

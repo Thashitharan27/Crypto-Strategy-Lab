@@ -91,6 +91,41 @@ def test_new_york_range_selection_defaults_target_and_no_inherited_minimum_r():
         window.close()
 
 
+def test_new_york_target_room_options_and_automatic_sr_dependency():
+    app, window = _window()
+    try:
+        selector=window.rule_builder.direction_mode
+        index=selector.findData('NY_OPENING_RANGE_REVERSAL')
+        selector.setCurrentIndex(index);selector.activated.emit(index)
+        widgets=window.execution_form.widgets;policy=widgets['ny_range_overshoot_policy']
+        app.processEvents()
+        assert policy.currentData()=='DEFAULT'
+        assert widgets['ny_range_max_extension_pct'].isHidden()
+        policy.setCurrentIndex(policy.findData('SKIP'));app.processEvents()
+        assert not widgets['ny_range_max_extension_pct'].isHidden()
+        assert widgets['ny_range_sr_buffer_atr'].isHidden()
+        widgets['ny_range_max_extension_pct'].setValue(10.)
+        policy.setCurrentIndex(policy.findData('SR_STOP'));app.processEvents()
+        sr_toggle=window.feature_form.widgets['enable_support_resistance_analysis']
+        assert sr_toggle.isChecked() and not sr_toggle.isEnabled()
+        assert not widgets['ny_range_sr_buffer_atr'].isHidden()
+        widgets['ny_range_sr_buffer_atr'].setValue(.15)
+        config=window.build_config();config.validate()
+        assert config.execution.ny_range_overshoot_policy=='SR_STOP'
+        assert config.execution.ny_range_max_extension_pct==10.
+        assert config.execution.ny_range_sr_buffer_atr==.15
+        assert config.features.enable_support_resistance_analysis
+        window.apply_config(config);app.processEvents()
+        assert policy.currentData()=='SR_STOP'
+        assert widgets['ny_range_max_extension_pct'].value()==10.
+        assert 'skip if absent/broken' in window.risk_execution_workspace.summary_label.text()
+        policy.setCurrentIndex(policy.findData('DEFAULT'));app.processEvents()
+        assert sr_toggle.isEnabled()
+        assert widgets['ny_range_sr_buffer_atr'].isHidden()
+    finally:
+        window.close()
+
+
 def test_imbalance_inducement_selection_timeframe_and_settings_round_trip():
     app, window = _window()
     try:

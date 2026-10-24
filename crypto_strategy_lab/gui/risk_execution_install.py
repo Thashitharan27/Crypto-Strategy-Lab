@@ -50,7 +50,8 @@ def _sync_target_sr_dependency(window) -> None:
         )
         native_stop = strategy_mode in {"EMA_9_20_PULLBACK", "EMA_100_300_REVERSAL", "NY_OPENING_RANGE_REVERSAL", "IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", "FIB_RETRACEMENT"}
         required_by_target = not native_stop and target_value in {"SR_CAPPED_R", "SR_LEVEL"}
-        required_by_stop = (not native_stop) and stop_value == "SR_STRUCTURE"
+        ny_sr = strategy_mode == "NY_OPENING_RANGE_REVERSAL" and execution_form.widgets["ny_range_overshoot_policy"].currentData()=="SR_STOP"
+        required_by_stop = ((not native_stop) and stop_value == "SR_STRUCTURE") or ny_sr
         required_by_execution = required_by_target or required_by_stop
         was_required = bool(getattr(window, "_sr_target_dependency_active", False))
         panel = getattr(window, "research_features_panel", None)
@@ -125,6 +126,9 @@ def apply_risk_execution_workspace(window) -> None:
         lambda _index: _sync_target_sr_dependency(window)
     )
     window.execution_form.widgets["risk_mode"].currentIndexChanged.connect(
+        lambda _index: _sync_target_sr_dependency(window)
+    )
+    window.execution_form.widgets["ny_range_overshoot_policy"].currentIndexChanged.connect(
         lambda _index: _sync_target_sr_dependency(window)
     )
     window.feature_form.widgets["enable_support_resistance_analysis"].toggled.connect(
