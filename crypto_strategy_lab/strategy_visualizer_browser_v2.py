@@ -1432,7 +1432,7 @@ __WORKSPACE_STYLES__
         Object.assign(label.style,{left:(start+3)+'px',top:Math.max(2,y-22)+'px'}); fvgLayer.appendChild(label);
       }
     }
-    for(const [zone,name,color] of [[sd.zone,sd.strategy==='SNEAKY_PIVOT'?'Defended setup range':(sd.side==='LONG'?'Demand entry zone':'Supply entry zone'),'#22c55e30'],[sd.opposingZone,sd.strategy==='SNEAKY_PIVOT'?'Previous UTC day range':'Opposing swing / target','#ef444430']]) {
+    for(const [zone,name,color] of [[sd.zone,sd.strategy==='SNEAKY_PIVOT'?'Defended setup range':(sd.side==='LONG'?'Demand entry zone':'Supply entry zone'),'#22c55e30'],[sd.opposingZone,sd.strategy==='SNEAKY_PIVOT'?'Previous UTC day range':(sd.strategy==='IMBALANCE_ORIGIN_RETEST'?'Displacement range / target':'Opposing swing / target'),'#ef444430']]) {
       const a=candles.priceToCoordinate(zone.top), b=candles.priceToCoordinate(zone.bottom);
       if(a==null || b==null) continue;
       const start=Math.max(0,xAt(zone.pivotTime,0));
@@ -1442,7 +1442,7 @@ __WORKSPACE_STYLES__
       const label=document.createElement('span'); label.className='fvg-note'; label.textContent=name+' '+formatPrice(zone.bottom)+' – '+formatPrice(zone.top);
       Object.assign(label.style,{left:(start+5)+'px',top:Math.max(2,a-22)+'px'}); fvgLayer.appendChild(label);
     }
-    for(const [time,text] of (sd.strategy==='SNEAKY_PIVOT' ? [[sd.zone.touchTime,'Initial level test'],[sd.zone.bounceTime,'Reversal candle'],[sd.signalTime,'Breakout armed']] : sd.strategy==='LIQUIDITY_SWEEP_RETEST' ? [[sd.sweepTime,'Liquidity sweep'],[sd.zone.bounceTime,'Displacement'],[sd.signalTime,'Zone retest']] : [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']])) {
+    for(const [time,text] of (sd.strategy==='SNEAKY_PIVOT' ? [[sd.zone.touchTime,'Initial level test'],[sd.zone.bounceTime,'Reversal candle'],[sd.signalTime,'Breakout armed']] : sd.strategy==='IMBALANCE_ORIGIN_RETEST' ? [[sd.zone.confirmedTime,'Imbalance confirmed'],[sd.signalTime,'Full fill + origin rejection']] : sd.strategy==='LIQUIDITY_SWEEP_RETEST' ? [[sd.sweepTime,'Liquidity sweep'],[sd.zone.bounceTime,'Displacement'],[sd.signalTime,'Zone retest']] : [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']])) {
       if(time==null) continue;
       const label=document.createElement('span'); label.className='fvg-note'; label.textContent=text;
       Object.assign(label.style,{left:Math.max(2,xAt(time,0))+'px',top:Math.max(4,(candles.priceToCoordinate(sd.zone.top) ?? 30)+8)+'px'}); fvgLayer.appendChild(label);

@@ -660,6 +660,7 @@ DIRECTION_LABELS = {
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
     "EMA_320_CLOSE_CROSS": "EMA 320 Price Close Cross — ATR SL/TP",
+    "IMBALANCE_ORIGIN_RETEST": "Imbalance Origin Retest (JeaFx-inspired)",
     "LIQUIDITY_SWEEP_RETEST": "Liquidity Sweep — Trend + Zone Retest",
     "TJR_CONFLUENCE": "Confluence - Sweep + Structure + IFVG + FVG",
     "SNEAKY_PIVOT": "Sneaky Pivot — All Day (15m)",

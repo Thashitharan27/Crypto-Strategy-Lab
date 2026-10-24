@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 MODE = "SUPPLY_DEMAND_RETEST"
-MODES = {MODE, "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE"}
+MODES = {MODE, "IMBALANCE_ORIGIN_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE"}
 
 
 def validate_settings(strength, buffer, minimum_r):
@@ -98,6 +98,12 @@ class SupplyDemandRetestMixin:
                 require_structure=self.config.tc_require_structure,require_ifvg=self.config.tc_require_ifvg,
                 require_equilibrium=self.config.tc_require_equilibrium,
                 require_live_confirmations=self.config.tc_require_live_confirmations,min_sweep_atr=self.config.tc_min_sweep_atr)
+        elif "IMBALANCE_ORIGIN_RETEST" in modes:
+            from crypto_strategy_lab.imbalance_origin_retest import origin_retest_setups
+            self.sd_setups=origin_retest_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
+                timeframe_minutes=self.config.strategy_timeframe_minutes,
+                strength=self.config.sd_swing_strength,displacement_atr=self.config.ls_displacement_atr,
+                max_wait=self.config.ls_max_wait_bars)
         elif "LIQUIDITY_SWEEP_RETEST" in modes:
             from crypto_strategy_lab.liquidity_sweep_retest import liquidity_sweep_setups
             self.sd_setups=liquidity_sweep_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
@@ -171,6 +177,8 @@ class SupplyDemandRetestMixin:
                     "boundary_price":setup["sweepExtreme"],"level_price":target,"distance_atr":risk/setup["setupAtr"],
                     "timeframe_minutes":self.config.strategy_timeframe_minutes}
         zone=setup["zone"]
+        if self.signal_strategy_mode=="IMBALANCE_ORIGIN_RETEST" and (entry<zone["bottom"] if side=="LONG" else entry>zone["top"]):
+            return {**reject,"reason":"IMBALANCE_ORIGIN_FAILED_AT_ENTRY"}
         buffer=self.config.sd_stop_buffer_atr*atr
         stop=zone["bottom"]-buffer if side=="LONG" else zone["top"]+buffer
         risk=entry-stop if side=="LONG" else stop-entry
