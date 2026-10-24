@@ -15,6 +15,36 @@ def evaluate_manual(expression):
     return json.loads(result.stdout)
 
 
+@pytest.mark.parametrize('side,exit_price,gross,fees', [('LONG',120,200,3.4),('SHORT',80,200,2.6)])
+def test_trade_card_estimates_size_fees_and_slippage(side,exit_price,gross,fees):
+    result=evaluate_manual(f'''
+const plan={{entry:100,stop:{90 if side=='LONG' else 110},target:{exit_price},side:'{side}'}};
+console.log(JSON.stringify(cslTradeCardQuote(plan,null,{exit_price},1000,{{entryFee:.001,exitFee:.002,slippage:.001}})));
+''')
+    assert result['quantity']==10
+    assert result['gross']==pytest.approx(gross)
+    assert result['fees']==pytest.approx(fees)
+    slippage=2.2 if side=='LONG' else 1.8
+    assert result['slippage']==pytest.approx(slippage)
+    assert result['net']==pytest.approx(gross-fees-slippage)
+
+
+def test_trade_card_preserves_original_risk_and_weights_only_known_partials():
+    result=evaluate_manual('''
+const record={side:'LONG',manualEntry:{entry:100,stop:90},partialExits:[{effectiveAt:20,fraction:.25,price:110},{effectiveAt:40,fraction:.25,price:120}]};
+const before=JSON.stringify(record),plan={entry:100,stop:100,target:130};
+const quote=cslTradeCardQuote(plan,record,100,1000,{entryFee:.001,exitFee:.001,slippage:0},30);
+console.log(JSON.stringify({quote,unchanged:before===JSON.stringify(record),missing:cslTradeCardQuote(plan,record,100,1000,null,30),invalid:cslTradeCardQuote(plan,record,100,0,null,30)}));
+''')
+    assert result['unchanged']
+    assert result['quote']['remainingFraction']==.75
+    assert result['quote']['gross']==25
+    assert result['quote']['fees']==pytest.approx(2.025)
+    assert result['quote']['net']==pytest.approx(22.975)
+    assert result['missing']['net'] is None
+    assert result['invalid'] is None
+
+
 @pytest.mark.parametrize('side,price,r',[('LONG',110,1),('LONG',95,-.5),('SHORT',90,1),('SHORT',105,-.5)])
 def test_manual_close_records_separate_result_without_changing_automatic_trade(side,price,r):
     stop=90 if side=='LONG' else 110

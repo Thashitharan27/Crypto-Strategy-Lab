@@ -108,6 +108,15 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #review-setup[aria-pressed=true]{background:#195d76;border-color:#22d3ee}
 @media(max-width:900px){#setup-panel{width:215px;padding:10px}}
 #trade-box-layer{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}
+#trade-card{position:absolute;z-index:9;top:12px;right:86px;width:260px;max-width:calc(100% - 100px);max-height:calc(100% - 32px);overflow:auto;background:#101c29ed;border:1px solid #3a5065;border-radius:9px;box-shadow:0 4px 18px #0004;font:12px/1.5 system-ui,sans-serif;color:#c9d8e6}
+#trade-card[hidden]{display:none}
+#trade-card summary{cursor:pointer;padding:9px 12px;color:#e6edf3;font-weight:600}
+.trade-card-body{padding:0 12px 10px}
+.trade-card-controls{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+#trade-card-size{width:80px;background:#0c1420;color:#e6edf3;border:1px solid #475569;border-radius:4px;padding:4px}
+#trade-card-values{display:grid;grid-template-columns:1fr auto;gap:4px 12px;margin:8px 0}
+#trade-card-values dt{color:#93a9bd}#trade-card-values dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.trade-card-note{font-size:10px;color:#93a9bd}.trade-card-positive{color:#6ee7b7}.trade-card-negative{color:#fda4af}
 #drawing-layer{position:absolute;inset:0;z-index:6;pointer-events:none;overflow:hidden}
 #drawing-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 10px;background:#121e2b;border-bottom:1px solid #334155}
 #drawing-tools{flex-basis:100%}
@@ -283,6 +292,14 @@ button:disabled{opacity:.45;cursor:default}
     <div id="structure-layer" aria-label="Market structure references"></div>
     <div id="fvg-layer"></div>
     <div id="trade-box-layer"></div>
+    <details id="trade-card" aria-label="Manual trade estimate" open hidden>
+      <summary id="trade-card-title">Trade estimate</summary>
+      <div class="trade-card-body">
+        <div class="trade-card-controls"><label for="trade-card-size">Size (quote)</label><input id="trade-card-size" type="number" min="0.01" step="any" value="1000" aria-label="Estimated position notional in quote currency"><button id="trade-card-corner" title="Move card to next corner" aria-label="Move trade card to next corner">↗</button></div>
+        <dl id="trade-card-values"></dl>
+        <div class="trade-card-note">Sizing estimate only · quote currency. Includes run fees and slippage when available. Excludes funding and rounding.</div>
+      </div>
+    </details>
     <svg id="drawing-layer" width="100%" height="100%" aria-label="Chart drawings"></svg>
   </div><aside id="setup-panel" aria-label="FVG setup explanation" hidden></aside></div>
 </div>
@@ -1647,8 +1664,37 @@ button:disabled{opacity:.45;cursor:default}
     resetPriceScale();redrawOverlays();
   }
 
+  let tradeCardCorner=0;
+  $('trade-card-corner').addEventListener('click',()=>{
+    tradeCardCorner=(tradeCardCorner+1)%4;
+    Object.assign($('trade-card').style,{top:tradeCardCorner<2?'12px':'auto',bottom:tradeCardCorner<2?'auto':'32px',right:tradeCardCorner===0 || tradeCardCorner===3?'86px':'auto',left:tradeCardCorner===1 || tradeCardCorner===2?'12px':'auto'});
+  });
+  $('trade-card-size').addEventListener('input',()=>drawTradeBox());
+  for(const type of ['pointerdown','pointermove','pointerup','click','dblclick','wheel'])$('trade-card').addEventListener(type,event=>event.stopPropagation());
+  function refreshTradeCard(plan,price,closed) {
+    const record=currentReview(),card=$('trade-card'),values=$('trade-card-values');
+    card.hidden=false;values.replaceChildren();
+    const side=record?.side || sourcePayload?.selectedTrade?.Side;
+    $('trade-card-title').textContent=(closed?'Closed':record?.manualEntry?'Open':'Preview')+' · '+side+' · Trade estimate';
+    const amount=Number($('trade-card-size').value),costs=boot.run.manualCosts;
+    const quote=p=>cslTradeCardQuote({...plan,side},record,p,amount,costs,replayCutoff);
+    const current=quote(price),tp=quote(plan.target),sl=quote(plan.stop);
+    const money=v=>v==null?'Unavailable':(v>0?'+':'')+v.toFixed(2);
+    const row=(name,value,tone='')=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=name;dd.textContent=value;dd.className=tone;values.append(dt,dd);};
+    row('Entry',formatPrice(plan.entry));row('Stop loss',formatPrice(plan.stop));row('Take profit',formatPrice(plan.target));
+    if(!current || !tp || !sl){row('Estimate','Enter valid size and trade levels');return;}
+    row('Quantity / remaining',current.quantity.toFixed(6)+' / '+(current.remainingFraction*100).toFixed(1)+'%');
+    const result=(name,q)=>row(name,q.net==null?'Unavailable':money(q.net)+' ('+money(q.netPercent)+'%)',q.net==null?'':q.net>=0?'trade-card-positive':'trade-card-negative');
+    if(record?.manualEntry)result(closed?'Net result est.':'Net if closed now',current);
+    if(!closed){result('Net at target',tp);result('Net at stop',sl);}
+    const basis=record?.manualEntry?current:tp;
+    row(record?.manualEntry?'Fees est. · exit here':'Fees est. · target exit',basis.fees==null?'Unavailable':basis.fees.toFixed(2));
+    row('Slippage est.',basis.slippage==null?'Unavailable':basis.slippage.toFixed(2));
+    row('Gross R · '+(record?.manualEntry?'current':'target'),basis.grossR.toFixed(2)+'R');
+  }
   function drawTradeBox() {
     tradeBoxLayer.replaceChildren();
+    $('trade-card').hidden=true;
     if (!payload || !chart || !candles) return;
     const manual=Boolean(replayActive && manualPlanDraft);
     const shownPlan=manual && positionResize?.price!=null?{...manualPlanDraft,[positionResize.key]:positionResize.price}:manualPlanDraft;
@@ -1674,6 +1720,7 @@ button:disabled{opacity:.45;cursor:default}
     const stopY=candles.priceToCoordinate(stop);
     const targetY=candles.priceToCoordinate(target);
     const exitY=candles.priceToCoordinate(exitPrice);
+    if(manual)refreshTradeCard(shownPlan,visibleManualExit?manualExit.price:lastVisible?.close ?? entry,visibleManualExit);
     if ([x1,x2,entryY].some(v => v == null || !Number.isFinite(Number(v)))) return;
 
     const left=Math.min(Number(x1),Number(x2));
@@ -1703,9 +1750,7 @@ button:disabled{opacity:.45;cursor:default}
     const signedMove=(String(trade.Side).toUpperCase()==='SHORT'?-1:1)*(Number(currentPrice)-entry);
     rect(entryY,stopY,'risk'+(manual && signedMove<0?' current-loss':''));
     rect(entryY,targetY,'reward'+(manual && signedMove>0?' current-profit':''));
-    const manualLabels=[];
-    manualLabels.push([addTradeLabel(left+4,entryY,'entry',(manual && !currentReview()?.manualEntry?'Preview entry ':'Entry ')+formatPrice(trade.Entry ?? trade.entry)),entryY,'#60a5fa']);
-    if(visibleManualExit)addTradeLabel(right+6,candles.priceToCoordinate(manualExit.price),'exit',(manualExit.reason || 'Manual close')+' '+formatPrice(manualExit.price)+' · '+manualExit.grossR.toFixed(2)+' R gross'+(manualExit.estimatedNetR!=null?' · '+manualExit.estimatedNetR.toFixed(2)+'R net est.':''));
+    if(!manual)addTradeLabel(left+4,entryY,'entry','Entry '+formatPrice(trade.Entry ?? trade.entry));
     if (!manual && !visibleManualExit && exit && Number.isFinite(exitPrice))
       addTradeLabel(Math.max(left+4,right-90),exitY,'exit',(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
 
@@ -1713,38 +1758,10 @@ button:disabled{opacity:.45;cursor:default}
     const hasPartial=manual && (currentReview()?.partialExits || []).some(p=>p.effectiveAt<=replayCutoff);
     const targetR=hasPartial?cslManualSettlement(currentReview(),target,replayCutoff).grossR:cslTargetR({entry,stop,target},trade.Side,manual?currentReview()?.manualEntry:null);
     const targetRText=targetR==null?'':' · '+targetR.toFixed(2)+'R';
-    if (Number.isFinite(target))
-      manualLabels.push([addTradeLabel(boundaryX,targetY,'tp',(manual && !currentReview()?.manualEntry?'Preview TP ':'Target ')+formatPrice(trade.Target ?? trade.target)+targetRText),targetY,'#34d399']);
-    if (Number.isFinite(stop))
-      manualLabels.push([addTradeLabel(boundaryX,stopY,'sl',(manual && !currentReview()?.manualEntry?'Preview SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)),stopY,'#fb7185']);
-    if(manual)for(const partial of currentReview()?.partialExits || []){
-      if(partial.effectiveAt>replayCutoff)continue;
-      const px=chart.timeScale().timeToCoordinate(displayCandleTime(partial.candleTime));
-      addTradeLabel(px ?? left,candles.priceToCoordinate(partial.price),'exit','Partial '+(100*partial.fraction).toFixed(2)+'% · '+partial.grossR.toFixed(2)+'R gross');
-    }
-    if(manual) {
-      // Preserve price ordering, with leaders to the exact price when labels
-      // need more room than the entry/stop separation provides.
-      const labels=manualLabels.filter(([label])=>label).sort((a,b)=>a[1]-b[1]);
-      const height=chart.panes()[0].getHeight(),plotRight=chartWrap.clientWidth-76;
-      let nextY=2;
-      for(const [label,y] of labels) {
-        label.classList.add('manual-price-label');
-        const top=Math.max(nextY,y-10);label.style.top=top+'px';
-        label.style.left=Math.max(2,plotRight-label.offsetWidth-4)+'px';
-        nextY=top+label.offsetHeight+4;
-      }
-      const shift=Math.max(0,nextY-height);
-      for(const [label,y,color] of labels) {
-        const top=Math.max(2,parseFloat(label.style.top)-shift);label.style.top=top+'px';
-        const x=parseFloat(label.style.left),center=top+label.offsetHeight/2;
-        const line=document.createElement('div');line.className='fvg-level';
-        Object.assign(line.style,{left:Math.min(left,x)+'px',top:y+'px',width:Math.max(3,Math.abs(x-left))+'px',borderColor:color});tradeBoxLayer.appendChild(line);
-        const leader=document.createElement('div');
-        Object.assign(leader.style,{position:'absolute',left:x+'px',top:Math.min(y,center)+'px',height:Math.abs(y-center)+'px',borderLeft:'1px solid '+color});tradeBoxLayer.appendChild(leader);
-      }
-    }
-
+    if (!manual && Number.isFinite(target))
+      addTradeLabel(boundaryX,targetY,'tp','Target '+formatPrice(trade.Target ?? trade.target)+targetRText);
+    if (!manual && Number.isFinite(stop))
+      addTradeLabel(boundaryX,stopY,'sl','Stop '+formatPrice(trade.Stop ?? trade.stop));
   }
 
   function buildChart() {
@@ -1974,7 +1991,7 @@ button:disabled{opacity:.45;cursor:default}
     positionResize.price=price;
     drawTradeBox();
     const handle=tradeBoxLayer.querySelector('[data-position-level="'+positionResize.key+'"]');
-    if(handle){handle.style.top=(y-6)+'px';const preview={...manualPlanDraft,[positionResize.key]:price};const record=currentReview();const r=(record?.partialExits || []).some(p=>p.effectiveAt<=replayCutoff)?cslManualSettlement(record,preview.target,replayCutoff).grossR:cslTargetR(preview,sourcePayload?.selectedTrade?.Side,record?.manualEntry);handle.textContent=formatPrice(price)+(positionResize.key==='target' && r!=null?' · '+r.toFixed(2)+'R':'');}
+    if(handle)handle.style.top=(y-6)+'px';
   },{capture:true});
   const finishPositionResize=event=>{
     if(!positionResize)return;event.preventDefault();event.stopImmediatePropagation();

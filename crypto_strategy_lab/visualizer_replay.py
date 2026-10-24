@@ -162,6 +162,19 @@ function cslManualSettlement(record, price, cutoff=Infinity) {
     estimatedSlippageR:model?estimatedSlippage/risk:null,
     estimatedNetR:netR!=null && Math.abs(netR)<1e-10?0:netR};
 }
+function cslTradeCardQuote(plan,record,price,notional,costs,cutoff=Infinity) {
+  const entry=record?.manualEntry || plan;
+  const side=record?.side || plan?.side;
+  if(!['LONG','SHORT'].includes(side) || !entry || (!record?.manualEntry && plan.error) || ![entry.entry,entry.stop,price,notional].every(Number.isFinite) || entry.entry<=0 || price<=0 || notional<=0 || entry.entry===entry.stop)return null;
+  if(!record?.manualEntry && cslManualPlan(plan.entry,plan.stop,plan.target,side).error)return null;
+  const model=record?.manualCostModel || costs;
+  const valid=model && [model.entryFee,model.exitFee,model.slippage].every(v=>Number.isFinite(v) && v>=0 && v<1);
+  const snapshot={...record,side,manualEntry:entry,manualCostModel:valid?model:null};
+  const result=cslManualSettlement(snapshot,price,cutoff),riskAmount=notional*Math.abs(entry.entry-entry.stop)/entry.entry;
+  return {...result,quantity:notional/entry.entry,riskAmount,gross:result.grossR*riskAmount,
+    fees:valid?result.estimatedFeesR*riskAmount:null,slippage:valid?result.estimatedSlippageR*riskAmount:null,
+    net:valid?result.estimatedNetR*riskAmount:null,netPercent:valid?100*result.estimatedNetR*riskAmount/notional:null};
+}
 function cslCoverCostsQuote(record, price, costs) {
   const entry=record?.manualEntry;
   if(!entry || record.manualExit)return {error:'An open confirmed position is required.'};
