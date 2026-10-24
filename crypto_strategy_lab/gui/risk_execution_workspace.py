@@ -970,17 +970,19 @@ class RiskExecutionWorkspace(QWidget):
             self.trade["position_sizing_stop_override_enabled"].setChecked(False)
             self.trade["position_sizing_stop_override_enabled"].setEnabled(False)
         automatic_reversal = self._signal_strategy_mode() == "EMA_100_300_REVERSAL"
+        imbalance = self._signal_strategy_mode() == "IMBALANCE_ORIGIN_RETEST"
         liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
         confluence = self._signal_strategy_mode() == "TJR_CONFLUENCE"
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
-        supply_demand = self._signal_strategy_mode() in {"SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
+        supply_demand = self._signal_strategy_mode() in {"IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
         self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
-            self.sd_card.set_row_visible(name,liquidity)
+            self.sd_card.set_row_visible(name,liquidity or (imbalance and name in {"ls_displacement_atr","ls_max_wait_bars"}))
         self.sd_card.set_row_visible("sp_cost_cover_close_pct", sp_cost)
         for name in ("tc_require_live_confirmations","tc_min_sweep_atr","tc_require_structure","tc_require_ifvg","tc_require_equilibrium","tc_displacement_atr",
                      "tc_max_wait_bars","tc_fvg_lookback","tc_min_reversal_body_percent","tc_target_r"):
             self.sd_card.set_row_visible(name,confluence)
+        if imbalance:self.sd_card.setTitle("Imbalance origin retest")
         if confluence:self.sd_card.setTitle("Confluence - sweep, structure and FVG")
         if sneaky:self.sd_card.setTitle("Sneaky Pivot — all day")
         self.sd_card.set_row_visible("sd_minimum_r",not sneaky or self.account["sp_minimum_r_enabled"].isChecked())
@@ -1045,6 +1047,9 @@ class RiskExecutionWorkspace(QWidget):
         return ", ".join(enabled) if enabled else "no optional trade management"
 
     def update_summary(self, execution, base) -> None:
+        if self._signal_strategy_mode() == "IMBALANCE_ORIGIN_RETEST":
+            self.summary_label.setText(f"Origin retest: displacement body >= {execution.ls_displacement_atr:g} ATR breaking the previous {2*execution.sd_swing_strength+1} bars; three-candle gap. Full fill into opposing/doji origin candle and directional close away. Enter next open; SL beyond origin +{execution.sd_stop_buffer_atr:g} ATR; target frozen impulse extreme; minimum {execution.sd_minimum_r:g}R. Expire after {execution.ls_max_wait_bars} candles. Wick through origin cancels. JeaFx-inspired research preset.")
+            return
         if self._signal_strategy_mode() == "SNEAKY_PIVOT":
             self.summary_label.setText(f"All-day 15m Sneaky Pivot; test the previous complete UTC-day low/high{' plus the latest recent confirmed swings' if execution.sp_recent_swings_enabled else ''}. Initial body ≥{execution.sp_min_body_percent:g}% of range and {execution.sp_body_atr:g} ATR; wick must touch the selected level within {execution.sp_level_tolerance_atr:g} ATR. First reversal within {execution.sp_confirmation_bars} candles{' closing back across the tested level' if execution.sp_require_level_reclaim else ''}; break its high/low during the next candle using 1m data. SL {execution.sd_stop_buffer_atr:g} ATR beyond the older confirmed swing low/high; skip if unavailable or breached. TP opposite prior-day boundary. Hold cap {execution.sp_hold_minutes} minutes from setup. One open trade; no session restriction. Cost-cover partial {str(execution.sp_cost_cover_close_pct) + '% at 1R, then SL to entry; widen swing stop only as needed' if execution.sp_cost_cover_enabled else 'off'}. Minimum-R filter {str(execution.sd_minimum_r) + 'R' if execution.sp_minimum_r_enabled else 'off'}.")
             return

@@ -34,6 +34,32 @@ def _window():
     return app, window
 
 
+def test_imbalance_origin_selection_settings_and_summary():
+    app, window = _window()
+    try:
+        selector=window.rule_builder.direction_mode
+        index=selector.findData('IMBALANCE_ORIGIN_RETEST')
+        assert index>=0
+        selector.setCurrentIndex(index);selector.activated.emit(index)
+        app.processEvents()
+        workspace=window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert window.strategy_tf.currentData()=='1h'
+        assert window.execution_form.widgets['entry_timing_mode'].currentData()=='NEXT_CANDLE_OPEN'
+        for name in ('ls_displacement_atr','ls_max_wait_bars','sd_stop_buffer_atr','sd_minimum_r'):
+            assert not window.execution_form.widgets[name].isHidden()
+        assert window.execution_form.widgets['ls_equal_tolerance_atr'].isHidden()
+        window.execution_form.widgets['ls_displacement_atr'].setValue(.8)
+        window.execution_form.widgets['ls_max_wait_bars'].setValue(12)
+        config=window.build_config()
+        assert config.execution.ls_displacement_atr==.8
+        assert config.execution.ls_max_wait_bars==12
+        assert 'Origin retest:' in workspace.summary_label.text()
+        assert '12 candles' in workspace.summary_label.text()
+    finally:
+        window.close()
+
+
 def test_sneaky_pivot_selection_and_settings_round_trip():
     app, window = _window()
     try:

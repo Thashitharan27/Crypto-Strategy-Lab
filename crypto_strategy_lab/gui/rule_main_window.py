@@ -104,19 +104,19 @@ class MainWindow(LegacyMainWindow):
         strategy = self.rule_builder.direction_mode.currentData()
         if strategy != "DI":
             self.base_execution_form.widgets["di_partial_1r_enabled"].setChecked(False)
-        if strategy in {"SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST"}:
+        if strategy in {"IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST"}:
             self.strategy_tf.setCurrentIndex(self.strategy_tf.findData("1h"))
         if strategy in {"SNEAKY_PIVOT", "TJR_CONFLUENCE"}:
             self.strategy_tf.setCurrentIndex(self.strategy_tf.findData("15m"))
             self.intrabar_tf.setCurrentIndex(self.intrabar_tf.findData("1m"))
-        if strategy in {"EMA_100_300_REVERSAL", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE"}:
+        if strategy in {"EMA_100_300_REVERSAL", "IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE"}:
             for name in ("di_ladder_enabled", "fvg_confirmation_enabled", "ema_cross_entry_confirmation_enabled"):
                 self.execution_form.widgets[name].setChecked(False)
             for name, value in (("sr_take_profit_mode", "FIXED_R"), ("risk_mode", "ATR")):
                 widget = self.execution_form.widgets[name]
                 widget.setCurrentIndex(widget.findData(value))
             self.strategy_form.widgets["enable_daily_entry_schedule"].setChecked(False)
-        target = "NEXT_CANDLE_OPEN" if strategy in {"EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "SNEAKY_PIVOT", "TJR_CONFLUENCE", "EMA_100_300_REVERSAL", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", "FIB_RETRACEMENT"} else "SIGNAL_CLOSE"
+        target = "NEXT_CANDLE_OPEN" if strategy in {"EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "SNEAKY_PIVOT", "TJR_CONFLUENCE", "EMA_100_300_REVERSAL", "IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", "FIB_RETRACEMENT"} else "SIGNAL_CLOSE"
         index = timing.findData(target)
         if index >= 0:
             timing.setCurrentIndex(index)
