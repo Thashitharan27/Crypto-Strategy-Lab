@@ -807,8 +807,11 @@ def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
         )
         try:
             connection.register("artifact_frame", frame)
+            # S/R rows contain whole JSON snapshots. The default 122880-row
+            # group can exceed the writer's 512MB limit even for a short run.
+            sr_group = ", ROW_GROUP_SIZE 2048" if path.name == "sr_zones.parquet" else ""
             connection.execute(
-                f"COPY artifact_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+                f"COPY artifact_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD{sr_group})"
             )
             actual = connection.execute(
                 f"SELECT count(*) FROM read_parquet('{escaped}')"
