@@ -63,13 +63,31 @@ This option combines the two video concepts with explicit mechanical rules:
    shift cancels; the stop never widens to accommodate it. The retest above/below
    that extreme supplies the higher-low/lower-high confirmation.
 8. Stop beyond the touch-to-shift reversal extreme plus the configured entry-ATR
-   buffer. Target the prior higher-timeframe swing frozen before displacement.
+   buffer. Target the known displacement/formation high for longs or low for shorts,
+   frozen at gap confirmation before the future pullback. The swing broken by
+   displacement confirms structure; it is not reused as the take-profit.
    Recheck minimum R and reject a next-open fill beyond the refined origin's far
    edge. All stages expire Maximum wait zone candles after gap confirmation.
 
 Each setup signals once, with no entry on its shift candle. Simultaneous opposing
 or overlapping confirmations are consumed without choosing an intrabar order.
 Saved chart evidence includes the original zone, refined origin, structure
-break, lower-timeframe shift, reversal extreme and prior swing target. The
+break, lower-timeframe shift, reversal extreme and pre-pullback extreme target. The
 interpretation remains discretionary-video-inspired; compare both models on
 the same data before drawing conclusions about performance.
+
+## Diagnosing few or no trades
+
+Visible chart imbalances are not entry signals. Confirmation mode needs complete
+zone candles, a qualified trend break, an origin fill, a lower-timeframe shift,
+and a later entry-origin rejection. Minimum reward/risk is then checked using
+the next-open entry including configured slippage and the strategy-owned stop.
+A 3R minimum can reject otherwise complete patterns with nearby targets.
+
+Rejected imbalance signals distinguish `IMBALANCE_TARGET_NOT_AHEAD`,
+`IMBALANCE_INVALID_STOP_GEOMETRY`, and `IMBALANCE_MINIMUM_R_NOT_MET`.
+Their saved signal rows include proposed entry, stop and target prices and the
+actual setup direction. Existing completed runs retain their original evidence;
+rerun to apply corrected targeting and these rejection reasons. Confirmation
+targets now use the known formation extreme, rather than the already-broken
+structure swing that could end up behind a delayed entry.
