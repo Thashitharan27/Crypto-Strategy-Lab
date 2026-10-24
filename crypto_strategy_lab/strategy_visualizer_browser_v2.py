@@ -1432,7 +1432,7 @@ __WORKSPACE_STYLES__
         Object.assign(label.style,{left:(start+3)+'px',top:Math.max(2,y-22)+'px'}); fvgLayer.appendChild(label);
       }
     }
-    for(const [zone,name,color] of [[sd.zone,sd.strategy==='SNEAKY_PIVOT'?'Defended setup range':(sd.side==='LONG'?'Demand entry zone':'Supply entry zone'),'#22c55e30'],[sd.opposingZone,sd.strategy==='SNEAKY_PIVOT'?'Previous UTC day range':(sd.strategy==='IMBALANCE_ORIGIN_RETEST'?'Displacement range / target':'Opposing swing / target'),'#ef444430']]) {
+    for(const [zone,name,color] of [[sd.zone,sd.strategy==='SNEAKY_PIVOT'?'Defended setup range':(sd.side==='LONG'?'Demand entry zone':'Supply entry zone'),'#22c55e30'],...(sd.entryZone?[[sd.entryZone,'Confirmation origin','#60a5fa20']]:[]),[sd.opposingZone,sd.strategy==='SNEAKY_PIVOT'?'Previous UTC day range':(sd.strategy==='IMBALANCE_ORIGIN_RETEST'?(sd.entryZone?'Prior swing target':'Displacement range / target'):'Opposing swing / target'),'#ef444430']]) {
       const a=candles.priceToCoordinate(zone.top), b=candles.priceToCoordinate(zone.bottom);
       if(a==null || b==null) continue;
       const start=Math.max(0,xAt(zone.pivotTime,0));
@@ -1584,11 +1584,12 @@ __WORKSPACE_STYLES__
       fvgReview.hidden=false; $('setup-panel').hidden=false; $('review-setup').hidden=false;
       $('review-setup').setAttribute('aria-pressed',String(reviewMode));
       $('setup-panel').setAttribute('aria-label','Supply and demand setup explanation');
-      fvgReview.textContent=(sd.strategy==='TJR_CONFLUENCE'?'Confluence':sd.strategy==='SNEAKY_PIVOT'?'Sneaky Pivot':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
+      fvgReview.textContent=(sd.strategy==='IMBALANCE_ORIGIN_RETEST'?'Imbalance origin':sd.strategy==='TJR_CONFLUENCE'?'Confluence':sd.strategy==='SNEAKY_PIVOT'?'Sneaky Pivot':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
       const panel=$('setup-panel'); panel.replaceChildren();
-      const title=document.createElement('h3'); title.textContent=sd.strategy==='TJR_CONFLUENCE'?'Sweep + structure + IFVG + FVG pullback':sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
+      const title=document.createElement('h3'); title.textContent=sd.strategy==='IMBALANCE_ORIGIN_RETEST'?(sd.entryZone?'Inducement → structure shift → origin retest':'Full imbalance fill → origin rejection'):sd.strategy==='TJR_CONFLUENCE'?'Sweep + structure + IFVG + FVG pullback':sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
       const facts=document.createElement('p'); facts.style.whiteSpace='pre-line';
       facts.textContent='Zone confirmed: '+fmtTime(sd.zone.confirmedTime)+'\\nFirst touch: '+fmtTime(sd.zone.touchTime)+'\\nBounce: '+fmtTime(sd.zone.bounceTime)+'\\nRetest: '+fmtTime(sd.signalTime)+'\\nTarget swing: '+formatPrice(sd.target)+'\\nEntry is the next candle open. Zones are saved decision-time evidence.';
+      if(sd.entryZone) facts.textContent='HTF structure close: '+fmtTime(sd.structureBreakTime)+'; origin touch: '+fmtTime(sd.zone.touchTime)+'; lower-timeframe shift: '+fmtTime(sd.shiftTime)+'; confirmation origin retest: '+fmtTime(sd.signalTime)+'. Reversal extreme '+formatPrice(sd.reversalExtreme)+'; prior swing target '+formatPrice(sd.target)+'. Entry at next open. All zones and timestamps are saved decision-time evidence.';
       if(sd.strategy==='SNEAKY_PIVOT') facts.textContent='Initial test: '+fmtTime(sd.zone.touchTime)+'; reversal: '+fmtTime(sd.signalTime)+'; '+String(sd.levelName)+' '+formatPrice(sd.level)+'; breakout trigger '+formatPrice(sd.trigger)+'; stop '+formatPrice(sd.stop)+(sd.stopSource?' ('+String(sd.stopSource)+')':' (legacy defended-level rule)')+'; fixed target '+formatPrice(sd.target)+'. Enter only on a breakout during the next 15m candle using 1m data. Previous-day levels are fixed at setup; no session restriction.';
       if(sd.strategy==='SNEAKY_PIVOT') {
         const levels=document.createElement('p'); levels.style.whiteSpace='pre-line';

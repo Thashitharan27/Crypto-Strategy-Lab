@@ -152,6 +152,14 @@ class RiskExecutionWorkspace(QWidget):
         self.sd_card = FormCard("Supply & demand retest", note="Strategy-owned stop and target. See the Effective Plan for entry conditions. 0 stop buffer uses the exact defended boundary.")
         for name,label in (("sd_swing_strength","Swing candles on each side"),("sd_stop_buffer_atr","Stop buffer beyond zone (ATR)"),("sd_minimum_r","Minimum reward / risk")):
             self.sd_card.add_field(name,label,self.account[name])
+        self.sd_card.add_field("io_entry_model", "Imbalance entry model", self.account["io_entry_model"])
+        model=self.account["io_entry_model"]
+        model.setItemText(model.findData("ORIGIN_REJECTION"), "Origin rejection (original)")
+        model.setItemText(model.findData("INDUCEMENT_CONFIRMATION"), "Inducement + structure confirmation")
+        self.sd_card.add_field("io_context_minutes", "Zone timeframe (minutes)", self.account["io_context_minutes"])
+        self.account["io_context_minutes"].setRange(1,10080)
+        model.currentIndexChanged.connect(self.refresh_visibility)
+        model.activated.connect(self._apply_imbalance_entry_timeframe)
         self.account["sd_swing_strength"].setRange(1,20)
         self.account["sd_stop_buffer_atr"].setRange(0.,100.)
         self.account["sd_minimum_r"].setRange(.01,100.)
@@ -982,6 +990,8 @@ class RiskExecutionWorkspace(QWidget):
         for name in ("tc_require_live_confirmations","tc_min_sweep_atr","tc_require_structure","tc_require_ifvg","tc_require_equilibrium","tc_displacement_atr",
                      "tc_max_wait_bars","tc_fvg_lookback","tc_min_reversal_body_percent","tc_target_r"):
             self.sd_card.set_row_visible(name,confluence)
+        self.sd_card.set_row_visible("io_entry_model",imbalance)
+        self.sd_card.set_row_visible("io_context_minutes",imbalance and self.account["io_entry_model"].currentData()=="INDUCEMENT_CONFIRMATION")
         if imbalance:self.sd_card.setTitle("Imbalance origin retest")
         if confluence:self.sd_card.setTitle("Confluence - sweep, structure and FVG")
         if sneaky:self.sd_card.setTitle("Sneaky Pivot — all day")
@@ -1046,7 +1056,17 @@ class RiskExecutionWorkspace(QWidget):
             enabled.append("ATR-checkpoint extension")
         return ", ".join(enabled) if enabled else "no optional trade management"
 
+    def _apply_imbalance_entry_timeframe(self, *_args):
+        if self._signal_strategy_mode() != "IMBALANCE_ORIGIN_RETEST" or self.account["io_entry_model"].currentData() != "INDUCEMENT_CONFIRMATION":
+            return
+        from .v2_main_window import timeframe_minutes
+        if timeframe_minutes(self.window.strategy_tf.currentData()) >= self.account["io_context_minutes"].value():
+            self.window.strategy_tf.setCurrentIndex(self.window.strategy_tf.findData("15m"))
+
     def update_summary(self, execution, base) -> None:
+        if self._signal_strategy_mode() == "IMBALANCE_ORIGIN_RETEST" and execution.io_entry_model == "INDUCEMENT_CONFIRMATION":
+            self.summary_label.setText(f"Inducement confirmation: completed {execution.io_context_minutes}m zones, entry candles on the strategy timeframe (must divide the zone timeframe). Confirmed HH/HL or LH/LL trend; displacement >= {execution.ls_displacement_atr:g} HTF ATR closes through an unbroken swing and leaves a gap. Skip shallow origins above/below an open deeper origin. Full fill into origin; a sweep must close back inside. Then confirmed lower-timeframe swing break, later retest of its opposing origin and directional rejection; enter next open. SL beyond reversal extreme +{execution.sd_stop_buffer_atr:g} entry ATR; TP prior HTF swing; minimum {execution.sd_minimum_r:g}R. Expire {execution.ls_max_wait_bars} zone candles after formation. Research interpretation, not order-book evidence.")
+            return
         if self._signal_strategy_mode() == "IMBALANCE_ORIGIN_RETEST":
             self.summary_label.setText(f"Origin retest: displacement body >= {execution.ls_displacement_atr:g} ATR breaking the previous {2*execution.sd_swing_strength+1} bars; three-candle gap. Full fill into opposing/doji origin candle and directional close away. Enter next open; SL beyond origin +{execution.sd_stop_buffer_atr:g} ATR; target frozen impulse extreme; minimum {execution.sd_minimum_r:g}R. Expire after {execution.ls_max_wait_bars} candles. Wick through origin cancels. JeaFx-inspired research preset.")
             return

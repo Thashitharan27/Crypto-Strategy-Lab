@@ -100,6 +100,13 @@ class SupplyDemandRetestMixin:
                 require_live_confirmations=self.config.tc_require_live_confirmations,min_sweep_atr=self.config.tc_min_sweep_atr)
         elif "IMBALANCE_ORIGIN_RETEST" in modes:
             from crypto_strategy_lab.imbalance_origin_retest import origin_retest_setups
+            if self.config.io_entry_model=="INDUCEMENT_CONFIRMATION":
+                from .imbalance_inducement import inducement_setups
+                self.sd_setups=inducement_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
+                    timeframe_minutes=self.config.strategy_timeframe_minutes,context_minutes=self.config.io_context_minutes,
+                    strength=self.config.sd_swing_strength,displacement_atr=self.config.ls_displacement_atr,
+                    max_wait=self.config.ls_max_wait_bars)
+                return
             self.sd_setups=origin_retest_setups(self.times,self.open,self.high,self.low,self.close,self.atr_values,
                 timeframe_minutes=self.config.strategy_timeframe_minutes,
                 strength=self.config.sd_swing_strength,displacement_atr=self.config.ls_displacement_atr,
@@ -176,11 +183,12 @@ class SupplyDemandRetestMixin:
             return {"passed":True,"applied":True,"reason":"CONFLUENCE_SWEEP_STOP","distance":risk,"stop_price":stop,
                     "boundary_price":setup["sweepExtreme"],"level_price":target,"distance_atr":risk/setup["setupAtr"],
                     "timeframe_minutes":self.config.strategy_timeframe_minutes}
-        zone=setup["zone"]
+        zone=setup.get("entryZone",setup["zone"])
         if self.signal_strategy_mode=="IMBALANCE_ORIGIN_RETEST" and (entry<zone["bottom"] if side=="LONG" else entry>zone["top"]):
             return {**reject,"reason":"IMBALANCE_ORIGIN_FAILED_AT_ENTRY"}
         buffer=self.config.sd_stop_buffer_atr*atr
-        stop=zone["bottom"]-buffer if side=="LONG" else zone["top"]+buffer
+        boundary=setup.get("reversalExtreme",zone["bottom"] if side=="LONG" else zone["top"])
+        stop=boundary-buffer if side=="LONG" else boundary+buffer
         risk=entry-stop if side=="LONG" else stop-entry
         reward=setup["target"]-entry if side=="LONG" else entry-setup["target"]
         if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk<self.config.sd_minimum_r:

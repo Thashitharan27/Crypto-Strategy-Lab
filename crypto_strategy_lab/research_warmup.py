@@ -117,6 +117,9 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
         # Three complete HTF candles plus one boundary-alignment bucket.
         duration = max(duration, pd.Timedelta(minutes=4 * execution.fvg_target_timeframe_minutes))
 
+    if getattr(execution, "io_entry_model", "ORIGIN_REJECTION") == "INDUCEMENT_CONFIRMATION":
+        duration = max(duration, pd.Timedelta(minutes=execution.io_context_minutes * (20 + 8 * execution.sd_swing_strength)))
+
     # Two strategy bars cover previous-value / candle-close boundary consumers
     # without rounding the whole window up to additional calendar days.
     return duration + (strategy_interval * 2)

@@ -60,6 +60,34 @@ def test_imbalance_origin_selection_settings_and_summary():
         window.close()
 
 
+def test_imbalance_inducement_selection_timeframe_and_settings_round_trip():
+    app, window = _window()
+    try:
+        selector=window.rule_builder.direction_mode
+        index=selector.findData('IMBALANCE_ORIGIN_RETEST')
+        selector.setCurrentIndex(index);selector.activated.emit(index)
+        widgets=window.execution_form.widgets
+        model=widgets['io_entry_model'];index=model.findData('INDUCEMENT_CONFIRMATION')
+        model.setCurrentIndex(index);model.activated.emit(index)
+        app.processEvents()
+        assert window.strategy_tf.currentData()=='15m'
+        assert not widgets['io_context_minutes'].isHidden()
+        widgets['io_context_minutes'].setValue(240)
+        config=window.build_config()
+        assert config.execution.io_entry_model=='INDUCEMENT_CONFIRMATION'
+        assert config.execution.io_context_minutes==240
+        assert 'completed 240m zones' in window.risk_execution_workspace.summary_label.text()
+        window.apply_config(config)
+        assert widgets['io_entry_model'].currentData()=='INDUCEMENT_CONFIRMATION'
+        assert widgets['io_context_minutes'].value()==240
+        assert window.strategy_tf.currentData()=='15m'
+        # The original entry mode remains selectable and hides unused context.
+        model.setCurrentIndex(model.findData('ORIGIN_REJECTION'));app.processEvents()
+        assert widgets['io_context_minutes'].isHidden()
+    finally:
+        window.close()
+
+
 def test_sneaky_pivot_selection_and_settings_round_trip():
     app, window = _window()
     try:

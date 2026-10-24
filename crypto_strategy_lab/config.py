@@ -82,6 +82,8 @@ class BacktestConfig:
     fvg_confirmation_minutes: int = 1
     fvg_target_mode: str = "FIXED_R"
     ema_reversal_min_entry_ema300_atr: float = 0.5
+    io_entry_model: str = "ORIGIN_REJECTION"
+    io_context_minutes: int = 60
     ls_equal_tolerance_atr: float = 0.15
     ls_displacement_atr: float = 1.0
     ls_base_bars: int = 3
@@ -214,6 +216,8 @@ class BacktestConfig:
         validate_confluence(self.tc_displacement_atr,self.tc_max_wait_bars,self.tc_fvg_lookback,self.tc_min_reversal_body_percent,self.tc_target_r,self.tc_min_sweep_atr)
         from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
         validate_liquidity(self.ls_equal_tolerance_atr,self.ls_displacement_atr,self.ls_base_bars,self.ls_max_wait_bars)
+        from .imbalance_inducement import validate_model
+        validate_model(self.io_entry_model,self.io_context_minutes,self.strategy_timeframe_minutes, active=any(r.get("_strategy_direction_mode")=="IMBALANCE_ORIGIN_RETEST" for p in self.strategy_profiles.values() for r in getattr(p,"entry_rules",())))
         if not math.isfinite(self.ema_reversal_min_gap_atr) or self.ema_reversal_min_gap_atr < 0:
             raise ValueError("EMA minimum gap must be finite and non-negative")
         if not math.isfinite(self.ema_reversal_target_r) or self.ema_reversal_target_r <= 0:

@@ -27,3 +27,49 @@ settings. Optional trailing/partial/BE management is disabled for this preset.
 Chart review uses the saved origin, target range and confirmation timestamps.
 Compare against the existing FVG strategy using the same dates, costs and risk;
 this change adds the strategy but does not establish profitability.
+
+## Optional inducement and structure confirmation
+
+In Risk & Execution, choose **Inducement + structure confirmation** under
+Imbalance entry model. The original **Origin rejection** mode stays available
+and remains the default for existing configurations. Choosing the new model
+switches a 1h entry timeframe to 15m. Zone timeframe defaults to 60 minutes;
+it must be larger than and exactly divisible by the entry timeframe. For example,
+use 60m zones with 15m entries, or 240m zones with 15m entries.
+
+This option combines the two video concepts with explicit mechanical rules:
+
+1. Aggregate complete UTC-aligned zone candles from the entry candles. Incomplete
+   buckets cannot form zones. A data gap clears pending entry state and breaks
+   higher-timeframe trend continuity.
+2. Require two confirmed higher highs and higher lows for longs, or two lower
+   highs and lower lows for shorts. Pivots use Swing candles on each side; they
+   become usable only after their right-hand candles close.
+3. The displacement must close through the latest unbroken trend swing and its
+   body must meet Minimum displacement body times the preceding 14 completed
+   zone candles' mean true range. A wick-only break cannot qualify. The immediate
+   opposing/doji origin and subsequent three-candle gap define the zone.
+4. Skip a new shallow same-side origin while an older, deeper qualified origin
+   and its gap remain unfilled. This is a price-based inducement proxy; it does
+   not claim to identify actual institutional orders.
+5. After confirmation, wait for a full fill touching the origin. A wick sweep
+   is allowed only if the same entry candle closes back within/above demand or
+   within/below supply. A close through the far edge cancels the setup.
+6. Wait for a lower-timeframe pivot formed at or after the touch to be confirmed,
+   then a directional close through it. The immediately preceding candle must
+   be opposing/doji; its full wick range defines the refined entry origin.
+7. Require a separate later retest of the refined origin and directional close
+   away from it. Enter at next open. A wick through the reversal extreme after
+   shift cancels; the stop never widens to accommodate it. The retest above/below
+   that extreme supplies the higher-low/lower-high confirmation.
+8. Stop beyond the touch-to-shift reversal extreme plus the configured entry-ATR
+   buffer. Target the prior higher-timeframe swing frozen before displacement.
+   Recheck minimum R and reject a next-open fill beyond the refined origin's far
+   edge. All stages expire Maximum wait zone candles after gap confirmation.
+
+Each setup signals once, with no entry on its shift candle. Simultaneous opposing
+or overlapping confirmations are consumed without choosing an intrabar order.
+Saved chart evidence includes the original zone, refined origin, structure
+break, lower-timeframe shift, reversal extreme and prior swing target. The
+interpretation remains discretionary-video-inspired; compare both models on
+the same data before drawing conclusions about performance.
