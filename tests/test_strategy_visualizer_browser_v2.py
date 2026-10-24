@@ -45,7 +45,7 @@ def test_replay_manual_plan_controls_history_and_chart_preview():
     assert 'planHistory' in html and 'originalPlan' in html
     assert 'chart.subscribeClick(event=>' in html
     assert 'candles.coordinateToPrice(event.point.y)' in html
-    assert 'Preview entry ' in html and 'Preview SL ' in html and 'Preview TP ' in html
+    assert 'id="trade-card"' in html and 'Net at target' in html and 'Net at stop' in html
     assert 'Move box' in html and 'Confirm manual entry' in html
     assert 'manual ? manualPlanDraft.entryTime : Number(open.time)' in html
     assert "payload.candles || []).some(bar=>bar.time===time)" in html
@@ -155,8 +155,8 @@ def test_v2_trade_box_shows_opposite_boundary_without_floating_markers():
     assert "trade['Exit Reason']" in html
     assert "(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason']" in html
     assert "layoutOverlayLabels" in html
-    assert "(manual && !currentReview()?.manualEntry?'Preview TP ':'Target ')+formatPrice(trade.Target ?? trade.target)" in html
-    assert "(manual && !currentReview()?.manualEntry?'Preview SL ':'Stop ')+formatPrice(trade.Stop ?? trade.stop)" in html
+    assert "'Target '+formatPrice(trade.Target ?? trade.target)" in html
+    assert "'Stop '+formatPrice(trade.Stop ?? trade.stop)" in html
 
 
 def test_v2_fib_overlay_has_structure_only_no_trade_specific_fib_labels():
@@ -509,7 +509,7 @@ handler({clientY:50,preventDefault(){},stopImmediatePropagation(){}});
 console.log(JSON.stringify({draws,text:handle.textContent,draft:manualPlanDraft,preview:positionResize.price}));
 '''
     result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
-    assert result['draws']==1 and result['text']=='130 · 3.00R'
+    assert result['draws']==1 and result.get('text') is None
     assert result['draft']['target']==120 and result['preview']==130
     assert 'formatPrice(trade.Target ?? trade.target)+targetRText' in html
 
@@ -634,3 +634,33 @@ checkbox.checked=false;drawStructureGuide();console.log(JSON.stringify({before,a
 """
     result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
     assert result['before']==0 and result['after']>0 and result['hidden']==0
+
+
+def test_trade_card_updates_closed_results_and_moves_without_recreating_size_input():
+    import json,shutil,subprocess,pytest
+    from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for trade card')
+    html=build_browser_visualizer_v2_html(_Model(),'trade-card')
+    code=html[html.index('  let tradeCardCorner='):html.index('  function drawTradeBox()')]
+    script=REPLAY_HELPERS+'''
+const elements={};
+const el=()=>({style:{},handlers:{},children:[],addEventListener(type,fn){this.handlers[type]=fn;},replaceChildren(){this.children=[];},append(...items){this.children.push(...items);}});
+const $=id=>elements[id] || (elements[id]=el());
+const document={createElement:el},formatPrice=String,drawTradeBox=()=>{};
+const sourcePayload={selectedTrade:{Side:'LONG'}},boot={run:{manualCosts:{entryFee:.001,exitFee:.001,slippage:0}}};
+const replayCutoff=30,record={side:'LONG',manualEntry:{entry:100,stop:90}};
+const currentReview=()=>record;
+'''+code+'''
+$('trade-card-size').value='1000';
+refreshTradeCard({entry:100,stop:90,target:120},110,true);
+const rows=$('trade-card-values').children.map(x=>x.textContent);
+$('trade-card-corner').handlers.click();
+console.log(JSON.stringify({rows,title:$('trade-card-title').textContent,hidden:$('trade-card').hidden,style:$('trade-card').style,size:$('trade-card-size').value}));
+'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['title'].startswith('Closed · LONG') and not result['hidden']
+    assert 'Net result est.' in result['rows'] and '+97.90 (+9.79%)' in result['rows']
+    assert 'Net at target' not in result['rows']
+    assert result['style']['left']=='12px' and result['size']=='1000'
+    assert "if(manual)refreshTradeCard(shownPlan" in html
