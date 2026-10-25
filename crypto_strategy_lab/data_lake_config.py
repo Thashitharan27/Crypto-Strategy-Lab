@@ -440,6 +440,9 @@ class ExecutionConfig:
     sd_swing_strength: int = 2
     sd_stop_buffer_atr: float = 0.05
     sd_minimum_r: float = 1.0
+    photon_confirmation_minutes: int = 1440
+    photon_retest_minutes: int = 60
+    photon_target_4h: bool = False
     ema_reversal_target_r: float = 1.0
     ema_reversal_min_gap_atr: float = 0.5
     fvg_reject_ema100_in_tp: bool = False
@@ -524,6 +527,8 @@ class ResearchRunConfig:
     config_version: int = CONFIG_VERSION
 
     def validate(self, request=None) -> None:
+        from crypto_strategy_lab.photon_trend import selected as photon_selected, validate_settings as validate_photon
+        validate_photon(self.execution.photon_confirmation_minutes,self.execution.photon_retest_minutes,self.data.strategy_timeframe_minutes,photon_selected(self.strategy.profiles))
         from crypto_strategy_lab.supply_demand_retest import validate_settings
         validate_settings(self.execution.sd_swing_strength,self.execution.sd_stop_buffer_atr,self.execution.sd_minimum_r)
         from crypto_strategy_lab.sneaky_pivot import validate_settings as validate_sneaky

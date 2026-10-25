@@ -152,6 +152,11 @@ class RiskExecutionWorkspace(QWidget):
         self.sd_card = FormCard("Supply & demand retest", note="Strategy-owned stop and target. See the Effective Plan for entry conditions. 0 stop buffer uses the exact defended boundary.")
         for name,label in (("sd_swing_strength","Swing candles on each side"),("sd_stop_buffer_atr","Stop buffer beyond zone (ATR)"),("sd_minimum_r","Minimum reward / risk")):
             self.sd_card.add_field(name,label,self.account[name])
+        for name,label in (("photon_confirmation_minutes","Photon context / confirmation expiry (minutes)"),("photon_retest_minutes","Photon origin retest expiry (minutes)")):
+            self.sd_card.add_field(name,label,self.account[name])
+            self.account[name].setRange(1,10080)
+        self.account["photon_target_4h"].setText("Target 4H swing instead of the first 15m swing objective")
+        self.sd_card.add_control("photon_target_4h",self.account["photon_target_4h"])
         self.sd_card.add_field("ny_range_target_r", "New York range target (R)", self.account["ny_range_target_r"])
         self.account["ny_range_target_r"].setRange(2.,100.)
         self.sd_card.add_field("ny_range_overshoot_policy", "When target extends too far", self.account["ny_range_overshoot_policy"])
@@ -997,7 +1002,10 @@ class RiskExecutionWorkspace(QWidget):
         liquidity = self._signal_strategy_mode() == "LIQUIDITY_SWEEP_RETEST"
         confluence = self._signal_strategy_mode() == "TJR_CONFLUENCE"
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
-        supply_demand = self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
+        photon = self._signal_strategy_mode() == "PHOTON_4H_TREND"
+        supply_demand = photon or self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
+        for name in ("photon_confirmation_minutes","photon_retest_minutes","photon_target_4h"):
+            self.sd_card.set_row_visible(name,photon)
         self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
             self.sd_card.set_row_visible(name,liquidity or (imbalance and name in {"ls_displacement_atr","ls_max_wait_bars"}))
@@ -1016,6 +1024,10 @@ class RiskExecutionWorkspace(QWidget):
         for name in ("sp_minimum_r_enabled","sp_recent_swings_enabled","sp_require_level_reclaim","sp_cost_cover_enabled","sp_level_tolerance_atr","sp_body_atr","sp_min_body_percent","sp_confirmation_bars","sp_hold_minutes"):
             self.sd_card.set_row_visible(name,sneaky)
         self.sd_card.set_row_visible("sd_swing_strength",not ny_range)
+        if photon:
+            self.sd_card.setTitle("Photon — 4H trend / 1m confirmation")
+            self.sd_card.set_row_visible("sd_swing_strength",False)
+            self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond 1m reaction extreme (ATR)")
         self.sd_card.set_row_visible("ny_range_target_r",ny_range)
         policy=self.account["ny_range_overshoot_policy"].currentData()
         self.sd_card.set_row_visible("ny_range_overshoot_policy",ny_range)
@@ -1089,6 +1101,10 @@ class RiskExecutionWorkspace(QWidget):
             self.window.strategy_tf.setCurrentIndex(self.window.strategy_tf.findData("15m"))
 
     def update_summary(self, execution, base) -> None:
+        if self._signal_strategy_mode() == "PHOTON_4H_TREND":
+            target="4H" if execution.photon_target_4h else "15m"
+            self.summary_label.setText(f"Photon: actual 1m candles; trade only with the completed 4H swing. Value-zone reaction → aligned 15m structure → later 15m-zone discount/premium pullback → later 1m CHoCH → proximal origin limit from the following minute. SL beyond the reaction extreme + {execution.sd_stop_buffer_atr:g} entry ATR; frozen {target} swing target; minimum {execution.sd_minimum_r:g}R. Context expires after {execution.photon_confirmation_minutes} minutes; retest after {execution.photon_retest_minutes}. One order per 15m zone; no partials, trailing or counter-4H trades. Same-minute stop is allowed; profit is deferred on the entry minute. Daily/weekly are narrative context.")
+            return
         if self._signal_strategy_mode() == "NY_OPENING_RANGE_REVERSAL":
             policy=execution.ny_range_overshoot_policy
             oversized=("Default: keep the breakout stop regardless of target extension." if policy=="DEFAULT" else
