@@ -82,6 +82,7 @@ SIGNAL_STRATEGIES = {
     "FVG_SIX_FACTOR": "Fair Value Gap - Six Factors (v1)",
     "FIB_RETRACEMENT": "Fib Retracement — Reaction",
     "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
+    "PHOTON_STRUCTURE_MAP": "Photon Market Structure — Parts 1 & 2 (mapping only)",
 }
 
 # Kept in this pure-Python module so the control server does not need to import

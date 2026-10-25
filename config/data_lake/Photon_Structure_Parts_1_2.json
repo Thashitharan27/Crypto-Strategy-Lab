@@ -1,0 +1,137 @@
+{
+  "config_version": 3,
+  "data": {
+    "strategy_timeframe_minutes": 15,
+    "intrabar_timeframe_minutes": 1,
+    "use_intrabar_data": false
+  },
+  "features": {},
+  "strategy": {
+    "profiles": {
+      "bull_long": {
+        "enabled": true,
+        "flip_direction": false,
+        "entry_rules": [
+          {
+            "action": "REJECT",
+            "indicator": "ATR_PCT",
+            "condition": "OUTSIDE",
+            "minimum": -1e+308,
+            "maximum": 1e+308,
+            "_builder_kind": "REQUIRED",
+            "_strategy_direction_mode": "PHOTON_STRUCTURE_MAP",
+            "_strategy_builtin_rule": "PHOTON_STRUCTURE_MAP_ONLY"
+          }
+        ],
+        "flip_rule_match_mode": "ANY",
+        "reject_rule_match_mode": "ANY",
+        "rsi_period": 14,
+        "momentum_lookback_hours": 24
+      },
+      "bull_short": {
+        "enabled": true,
+        "flip_direction": false,
+        "entry_rules": [
+          {
+            "action": "REJECT",
+            "indicator": "ATR_PCT",
+            "condition": "OUTSIDE",
+            "minimum": -1e+308,
+            "maximum": 1e+308,
+            "_builder_kind": "REQUIRED",
+            "_strategy_direction_mode": "PHOTON_STRUCTURE_MAP",
+            "_strategy_builtin_rule": "PHOTON_STRUCTURE_MAP_ONLY"
+          }
+        ],
+        "flip_rule_match_mode": "ANY",
+        "reject_rule_match_mode": "ANY",
+        "rsi_period": 14,
+        "momentum_lookback_hours": 24
+      },
+      "bear_long": {
+        "enabled": true,
+        "flip_direction": false,
+        "entry_rules": [
+          {
+            "action": "REJECT",
+            "indicator": "ATR_PCT",
+            "condition": "OUTSIDE",
+            "minimum": -1e+308,
+            "maximum": 1e+308,
+            "_builder_kind": "REQUIRED",
+            "_strategy_direction_mode": "PHOTON_STRUCTURE_MAP",
+            "_strategy_builtin_rule": "PHOTON_STRUCTURE_MAP_ONLY"
+          }
+        ],
+        "flip_rule_match_mode": "ANY",
+        "reject_rule_match_mode": "ANY",
+        "rsi_period": 14,
+        "momentum_lookback_hours": 24
+      },
+      "bear_short": {
+        "enabled": true,
+        "flip_direction": false,
+        "entry_rules": [
+          {
+            "action": "REJECT",
+            "indicator": "ATR_PCT",
+            "condition": "OUTSIDE",
+            "minimum": -1e+308,
+            "maximum": 1e+308,
+            "_builder_kind": "REQUIRED",
+            "_strategy_direction_mode": "PHOTON_STRUCTURE_MAP",
+            "_strategy_builtin_rule": "PHOTON_STRUCTURE_MAP_ONLY"
+          }
+        ],
+        "flip_rule_match_mode": "ANY",
+        "reject_rule_match_mode": "ANY",
+        "rsi_period": 14,
+        "momentum_lookback_hours": 24
+      },
+      "sideways_long": {
+        "enabled": true,
+        "flip_direction": false,
+        "entry_rules": [
+          {
+            "action": "REJECT",
+            "indicator": "ATR_PCT",
+            "condition": "OUTSIDE",
+            "minimum": -1e+308,
+            "maximum": 1e+308,
+            "_builder_kind": "REQUIRED",
+            "_strategy_direction_mode": "PHOTON_STRUCTURE_MAP",
+            "_strategy_builtin_rule": "PHOTON_STRUCTURE_MAP_ONLY"
+          }
+        ],
+        "flip_rule_match_mode": "ANY",
+        "reject_rule_match_mode": "ANY",
+        "rsi_period": 14,
+        "momentum_lookback_hours": 24
+      },
+      "sideways_short": {
+        "enabled": true,
+        "flip_direction": false,
+        "entry_rules": [
+          {
+            "action": "REJECT",
+            "indicator": "ATR_PCT",
+            "condition": "OUTSIDE",
+            "minimum": -1e+308,
+            "maximum": 1e+308,
+            "_builder_kind": "REQUIRED",
+            "_strategy_direction_mode": "PHOTON_STRUCTURE_MAP",
+            "_strategy_builtin_rule": "PHOTON_STRUCTURE_MAP_ONLY"
+          }
+        ],
+        "flip_rule_match_mode": "ANY",
+        "reject_rule_match_mode": "ANY",
+        "rsi_period": 14,
+        "momentum_lookback_hours": 24
+      }
+    }
+  },
+  "execution": {},
+  "reporting": {
+    "run_name": "Photon_Structure_Parts_1_2_Mapping_Only"
+  }
+}

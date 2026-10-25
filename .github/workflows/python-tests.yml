@@ -88,7 +88,7 @@ jobs:
           tests/test_fvg_market_structure.py
           tests/test_fvg_intrabar_confirmation.py
       - name: Verify blind replay projection
-        run: python -m pytest -q tests/test_visualizer_replay.py
+        run: python -m pytest -q tests/test_visualizer_replay.py tests/test_photon_structure.py
       - name: Run full Fibonacci strategy and quality regressions
         env:
           QT_QPA_PLATFORM: offscreen

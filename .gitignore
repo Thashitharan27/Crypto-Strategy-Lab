@@ -17,6 +17,7 @@ walk_forward_experiments/
 # Keep the canonical repository smoke fixture tracked.
 config/data_lake/*.json
 !config/data_lake/BTCUSDT_4H_SMOKE.json
+!config/data_lake/Photon_Structure_Parts_1_2.json
 
 # Atomic Binance downloads can leave a temporary file if the desktop process is terminated.
 data/.*.tmp

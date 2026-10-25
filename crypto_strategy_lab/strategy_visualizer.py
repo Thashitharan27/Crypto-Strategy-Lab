@@ -2222,6 +2222,27 @@ class CompletedRunVisualizer:
             "visibleEnd": _unix_seconds(visible_end),
         }
 
+    def _photon_mapping_payload(self):
+        """Independent chart analysis, never replay future HTF closes early."""
+        from crypto_strategy_lab.photon_structure import build_mapping, selected
+        config = getattr(self.seed, "config", None)
+        strategy = getattr(config, "strategy", None)
+        profiles = getattr(strategy, "profiles", {})
+        if not selected(profiles):
+            return None
+        if hasattr(self, "_photon_mapping_cache"):
+            return self._photon_mapping_cache
+        start = _utc(self.seed.request.period_start) - pd.Timedelta(days=60)
+        end = _utc(self.seed.request.period_end)
+        frame = self._market_frame(start, end, chart_timeframe="15m")
+        if frame.empty:
+            raise ValueError("Photon mapping requires canonical 15m candles; select a 15m dataset")
+        bars = [dict(time=_unix_seconds(row["period_start"]), **{
+            key: float(row[key]) for key in ("open", "high", "low", "close")
+        }) for _, row in frame.iterrows()]
+        self._photon_mapping_cache = build_mapping(bars)
+        return self._photon_mapping_cache
+
     def build_v2_diagnostic_payload(
         self,
         *,
@@ -2412,6 +2433,7 @@ class CompletedRunVisualizer:
             "candles": candles,
             "overlays": overlays,
             "markers": markers,
+            "photonMapping": self._photon_mapping_payload(),
             "fullRun": True,
             "chartTimeframe": chart_timeframe,
         }
