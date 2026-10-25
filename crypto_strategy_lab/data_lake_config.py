@@ -443,6 +443,7 @@ class ExecutionConfig:
     photon_confirmation_minutes: int = 1440
     photon_retest_minutes: int = 60
     photon_target_4h: bool = False
+    photon_flexible_entries: bool = False
     ema_reversal_target_r: float = 1.0
     ema_reversal_min_gap_atr: float = 0.5
     fvg_reject_ema100_in_tp: bool = False

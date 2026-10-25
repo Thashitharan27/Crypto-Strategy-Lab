@@ -7,7 +7,44 @@ primary candles to actual 1m data. Completed 15m, 4H, daily and Monday-based
 weekly candles are derived from those minutes, using UTC boundaries. Missing
 minutes retire zones and pending setups rather than bridging the gap.
 
-## Entry sequence
+## Flexible candidates and manual review
+
+New selections of this strategy and its saved preset enable **Flexible
+candidates**. Existing saved configurations that omit the setting retain strict
+behavior. The checkbox in Risk & Execution can switch between the two modes.
+
+Flexible mode accepts an already aligned 15m swing, or aligned 15m internal
+structure while the swing still opposes 4H. An existing aligned continuation
+can use the first 15m zone pullback without demanding a new break followed by
+another pullback. With opposing 15m swing structure, a later aligned internal
+shift can qualify the pullback instead of waiting for a full swing reversal.
+Both 4H and 15m value-location filters become review cautions rather than vetoes.
+
+The following still apply: a known 4H trend, no counter-4H entries, known active
+15m demand/supply, a **later 1m CHoCH**, a **subsequent origin retest**, structural
+stop and target geometry, minimum reward/risk, expiries and invalidations. A
+15m swing must be known to define its range/target; internal alignment does not
+invent a new confirmed swing. If only internal structure supports entry, the
+saved 15m swing range and target remain authoritative and the mismatch says so.
+
+Each simulated entry saves a checklist at the moment its 1m CHoCH arms the
+order: 4H entry value, 15m entry value, initial 4H reaction location, fresh versus
+existing 15m confirmation, 15m swing alignment, and daily/weekly context.
+Opposing or unknown daily/weekly context is a caution, not an entry gate.
+The trade selector and entry marker flag **REVIEW**; the chart's expandable
+**Manual review** banner lists every passed check and mismatch, including entry
+prices and midpoints. Legacy reports explicitly say these checks were not saved.
+Replay hides the banner before the confirmation is known. Later candles and
+outcomes cannot rewrite these checks.
+
+Use the existing replay **Confirm manual entry**, **Skip**, or **Unsure** controls
+to record your decision. The automatic trade is a simulated comparison, not a
+manual acceptance. Manual decisions remain separate from backtest results and
+can be exported through the existing review workflow. No live orders or
+background notifications are created. Trade CSV/Parquet also saves
+`photon_entry_model`, `photon_review_status`, and `photon_mismatches`.
+
+## Strict entry sequence
 
 1. Wait for a known, confirmed 4H swing trend. Longs require bullish 4H;
    shorts require bearish 4H. Daily and weekly provide saved narrative context,

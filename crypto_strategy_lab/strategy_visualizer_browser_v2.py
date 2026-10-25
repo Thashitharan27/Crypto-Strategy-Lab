@@ -299,6 +299,10 @@ body.mapping-only #replay-export{display:none!important}
     <div id="active-indicators" aria-label="Active indicators"></div>
     <span id="timeframe-note" class="muted" role="status"></span>
     <span id="photon-status" class="muted" role="status" style="display:block;max-width:100%;white-space:normal"></span>
+    <details id="photon-entry-review" hidden style="flex-basis:100%;padding:8px;border:1px solid #806627;background:#292516">
+      <summary id="photon-entry-review-label" role="status">Entry checks</summary>
+      <div id="photon-entry-checks"></div>
+    </details>
     <section id="photon-context" aria-label="Multi-timeframe market narrative" hidden>
       <div id="photon-context-strip" aria-live="polite"></div>
       <div id="photon-value-controls">
@@ -486,6 +490,7 @@ body.mapping-only #replay-export{display:none!important}
     $('manual-confirm').hidden=true;
   }
   if(boot.run.photonStructure) {
+    document.body.classList.add('photon-structure');
     $('photon-view').hidden=false;
     $('photon-view-label').hidden=false;
     $('photon-view').value=boot.run.mappingOnly?'LINES':'BOTH';
@@ -1647,7 +1652,7 @@ body.mapping-only #replay-export{display:none!important}
       const label=document.createElement('span'); label.className='fvg-note'; label.textContent=name+' '+formatPrice(zone.bottom)+' – '+formatPrice(zone.top);
       Object.assign(label.style,{left:(start+5)+'px',top:Math.max(2,a-22)+'px'}); fvgLayer.appendChild(label);
     }
-    for(const [time,text] of (sd.strategy==='PHOTON_4H_TREND' ? [[sd.contextTouchAt,'4H value reaction'],[sd.alignmentAt,'15m aligned'],[sd.parentTouchAt,'15m zone touch'],[sd.signalAvailableAt,'1m CHoCH armed']] : sd.strategy==='SNEAKY_PIVOT' ? [[sd.zone.touchTime,'Initial level test'],[sd.zone.bounceTime,'Reversal candle'],[sd.signalTime,'Breakout armed']] : sd.strategy==='IMBALANCE_ORIGIN_RETEST' ? [[sd.zone.confirmedTime,'Imbalance confirmed'],[sd.signalTime,'Full fill + origin rejection']] : sd.strategy==='LIQUIDITY_SWEEP_RETEST' ? [[sd.sweepTime,'Liquidity sweep'],[sd.zone.bounceTime,'Displacement'],[sd.signalTime,'Zone retest']] : [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']])) {
+    for(const [time,text] of (sd.strategy==='PHOTON_4H_TREND' ? [[sd.contextTouchAt,'Context zone reaction'],[sd.alignmentAt,'15m direction accepted'],[sd.parentTouchAt,'15m zone touch'],[sd.signalAvailableAt,'1m CHoCH armed']] : sd.strategy==='SNEAKY_PIVOT' ? [[sd.zone.touchTime,'Initial level test'],[sd.zone.bounceTime,'Reversal candle'],[sd.signalTime,'Breakout armed']] : sd.strategy==='IMBALANCE_ORIGIN_RETEST' ? [[sd.zone.confirmedTime,'Imbalance confirmed'],[sd.signalTime,'Full fill + origin rejection']] : sd.strategy==='LIQUIDITY_SWEEP_RETEST' ? [[sd.sweepTime,'Liquidity sweep'],[sd.zone.bounceTime,'Displacement'],[sd.signalTime,'Zone retest']] : [[sd.zone.touchTime,'First touch'],[sd.zone.bounceTime,'Bounce confirmed'],[sd.signalTime,'Directional retest']])) {
       if(time==null) continue;
       const label=document.createElement('span'); label.className='fvg-note'; label.textContent=text;
       Object.assign(label.style,{left:Math.max(2,xAt(time,0))+'px',top:Math.max(4,(candles.priceToCoordinate(sd.zone.top) ?? 30)+8)+'px'}); fvgLayer.appendChild(label);
@@ -1785,13 +1790,18 @@ body.mapping-only #replay-export{display:none!important}
     diag.textContent = lines.join('\\n');
     if(dayMode)diag.textContent='MANUAL DAY REVIEW · '+$('replay-day').value+' UTC · No automatic trade selected.\\nReplay time: '+fmtTime(replayCutoff)+'\\nManual plans and confirmations are recorded separately; no manual P&L is simulated.';
     const sd=payload.supplyDemandDerivation;
+    renderPhotonEntryReview(sd,replayActive?replayCutoff:Infinity);
     if(sd?.status==='AVAILABLE') {
       fvgReview.hidden=false; $('setup-panel').hidden=false; $('review-setup').hidden=false;
       $('review-setup').setAttribute('aria-pressed',String(reviewMode));
       $('setup-panel').setAttribute('aria-label','Supply and demand setup explanation');
       fvgReview.textContent=(sd.strategy==='PHOTON_4H_TREND'?'Photon 4H trend':sd.strategy==='NY_OPENING_RANGE_REVERSAL'?'NY opening range':sd.strategy==='IMBALANCE_ORIGIN_RETEST'?'Imbalance origin':sd.strategy==='TJR_CONFLUENCE'?'Confluence':sd.strategy==='SNEAKY_PIVOT'?'Sneaky Pivot':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Liquidity sweep':'Supply & demand')+' · '+sd.side+' · Setup details →';
+      if(sd.strategy==='PHOTON_4H_TREND') {
+        const review=cslPhotonReviewView(sd,replayActive?replayCutoff:Infinity);
+        if(review)fvgReview.textContent+=' · '+review.label;
+      }
       const panel=$('setup-panel'); panel.replaceChildren();
-      const title=document.createElement('h3'); title.textContent=sd.strategy==='PHOTON_4H_TREND'?'4H value reaction → 15m alignment → pullback → 1m CHoCH → origin retest':sd.strategy==='NY_OPENING_RANGE_REVERSAL'?'New York 4h range → outside close → inside close':sd.strategy==='IMBALANCE_ORIGIN_RETEST'?(sd.entryZone?'Inducement → structure shift → origin retest':'Full imbalance fill → origin rejection'):sd.strategy==='TJR_CONFLUENCE'?'Sweep + structure + IFVG + FVG pullback':sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
+      const title=document.createElement('h3'); title.textContent=sd.strategy==='PHOTON_4H_TREND'?(sd.entryModel==='FLEXIBLE_REVIEW'?'4H trend → 15m zone → 1m CHoCH → origin retest':'4H value reaction → 15m alignment → pullback → 1m CHoCH → origin retest'):sd.strategy==='NY_OPENING_RANGE_REVERSAL'?'New York 4h range → outside close → inside close':sd.strategy==='IMBALANCE_ORIGIN_RETEST'?(sd.entryZone?'Inducement → structure shift → origin retest':'Full imbalance fill → origin rejection'):sd.strategy==='TJR_CONFLUENCE'?'Sweep + structure + IFVG + FVG pullback':sd.strategy==='SNEAKY_PIVOT'?'All-day level test → reversal → breakout':sd.strategy==='LIQUIDITY_SWEEP_RETEST'?'Trend + liquidity sweep + zone retest':'1h confirmed swing retest'; panel.appendChild(title);
       const facts=document.createElement('p'); facts.style.whiteSpace='pre-line';
       facts.textContent='Zone confirmed: '+fmtTime(sd.zone.confirmedTime)+'\\nFirst touch: '+fmtTime(sd.zone.touchTime)+'\\nBounce: '+fmtTime(sd.zone.bounceTime)+'\\nRetest: '+fmtTime(sd.signalTime)+'\\nTarget swing: '+formatPrice(sd.target)+'\\nEntry is the next candle open. Zones are saved decision-time evidence.';
       if(sd.strategy==='NY_OPENING_RANGE_REVERSAL') facts.textContent='New York session '+String(sd.sessionDay)+'; range ready '+fmtTime(sd.zone.confirmedTime)+'; outside close candle '+fmtTime(sd.breakoutTime)+'; inside close candle '+fmtTime(sd.signalTime)+'. '+(sd.stopSource==='CONFIRMED_SR'?'Confirmed S/R stop ':'Breakout extreme stop ')+formatPrice(sd.stop)+'; actual-fill target '+String(sd.targetR)+'R ('+formatPrice(sd.target)+'). Entry at next open, still inside the range and within the same New York day. Range uses four elapsed hours from New York midnight; saved decision-time evidence.';
@@ -1806,7 +1816,7 @@ body.mapping-only #replay-export{display:none!important}
         const sweep=document.createElement('p'); sweep.textContent='Equal-level pool: '+formatPrice(sd.liquidity.bottom)+' – '+formatPrice(sd.liquidity.top)+'; swept '+fmtTime(sd.sweepTime)+'. A later displacement confirms the entry zone.'; panel.appendChild(sweep);
       }
       if(sd.strategy==='TJR_CONFLUENCE') facts.textContent='Sweep: '+fmtTime(sd.sweepTime)+'; structure close: '+fmtTime(sd.structureTime)+'; FVG inversion: '+fmtTime(sd.inverseTime)+'; pullback confirmation: '+fmtTime(sd.signalTime)+'. Midpoint '+formatPrice(sd.equilibrium)+'. SL beyond sweep; target '+String(sd.targetR)+'R. Entry at next candle open. Lines and zones show saved setup evidence; prices on hover.';
-      if(sd.strategy==='PHOTON_4H_TREND') facts.textContent='4H value reaction: '+fmtTime(sd.contextTouchAt)+'; 15m aligned structure: '+fmtTime(sd.alignmentAt)+'; later 15m zone pullback: '+fmtTime(sd.parentTouchAt)+'; 1m CHoCH known: '+fmtTime(sd.signalAvailableAt)+'. Limit '+formatPrice(sd.entry)+' at the 1m origin; stop '+formatPrice(sd.stop)+'; frozen '+(sd.targetMode==='4H_SWING'?'4H':'15m')+' swing target '+formatPrice(sd.target)+'. Fill requires a later 1m retest. Daily/weekly are context; every trade follows the 4H swing. Same-minute stops count; entry-minute profits are deferred. Saved decision-time evidence.';
+      if(sd.strategy==='PHOTON_4H_TREND') facts.textContent='Context-zone reaction: '+fmtTime(sd.contextTouchAt)+'; 15m alignment known: '+fmtTime(sd.alignmentAt)+'; 15m zone touch: '+fmtTime(sd.parentTouchAt)+'; 1m CHoCH known: '+fmtTime(sd.signalAvailableAt)+'. Limit '+formatPrice(sd.entry)+' at the 1m origin; stop '+formatPrice(sd.stop)+'; frozen '+(sd.targetMode==='4H_SWING'?'4H':'15m')+' swing target '+formatPrice(sd.target)+'. Fill requires a later 1m retest. Daily/weekly are context; every trade follows the 4H swing. Same-minute stops count; entry-minute profits are deferred. Saved decision-time evidence.';
       panel.appendChild(facts); return;
     }
     const fvg = payload.fvgDerivation;
