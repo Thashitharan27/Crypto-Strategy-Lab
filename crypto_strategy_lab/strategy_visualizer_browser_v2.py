@@ -48,6 +48,15 @@ def build_browser_visualizer_v2_html(
         }
     except (AttributeError,TypeError,ValueError):
         manual_costs=None
+    profiles=getattr(getattr(getattr(model.seed,"config",None),"strategy",None),"profiles",{})
+    photon_trading=photon_trading_selected(profiles)
+    default_chart_timeframe=request.strategy_timeframe
+    if photon_trading:
+        available=getattr(model,"available_chart_timeframes",lambda:[])()
+        if isinstance(available,(list,tuple)) and any(
+            item.get("interval")=="15m" and item.get("coverage")=="full" for item in available
+        ):
+            default_chart_timeframe="15m"
     bootstrap = {
         "sessionBase": f"/session/{session_token}",
         "trades": [
@@ -58,6 +67,7 @@ def build_browser_visualizer_v2_html(
             "runId": str(model.manifest.get("run_id") or model.run_dir.name),
             "symbol": request.symbol,
             "timeframe": request.strategy_timeframe,
+            "defaultChartTimeframe": default_chart_timeframe,
             "tradeCount": model.trade_count,
             "swingStrength": swing_strength,
             "manualCosts": manual_costs,
@@ -657,10 +667,10 @@ body.mapping-only #replay-export{display:none!important}
   const reviewStorageKey='csl-replay-reviews-v1';
   try { const saved=JSON.parse(localStorage.getItem(reviewStorageKey)||'[]'); if(Array.isArray(saved)) reviewRecords=saved; } catch { reviewStorageAvailable=false; }
   let reviewMode = false;
-  let currentTimeframe = boot.run.timeframe;
+  let currentTimeframe = boot.run.defaultChartTimeframe || boot.run.timeframe;
   let loadGeneration = 0;
   const timeframeSelect = $('chart-timeframe');
-  timeframeSelect.add(new Option(currentTimeframe + ' (strategy)', currentTimeframe));
+  timeframeSelect.add(new Option(currentTimeframe + (currentTimeframe===boot.run.timeframe?' (strategy)':' (chart)'), currentTimeframe));
   let currentTrade = 0;
   let chart = null;
   let chartResizeObserver = null;
@@ -1157,6 +1167,9 @@ body.mapping-only #replay-export{display:none!important}
     timeframeSelect.disabled=false;
     updateTradeLabels();
     if(replayActive && currentTimeframe!==boot.run.timeframe) {
+      // Keep Photon on its review chart while loading the actual 1m replay
+      // source separately. Researchers can inspect 1m only when needed.
+      if(boot.run.photonTrading){load();return;}
       currentTimeframe=boot.run.timeframe; timeframeSelect.value=currentTimeframe; load(); return;
     }
     if(replayActive) initializeReplay();
