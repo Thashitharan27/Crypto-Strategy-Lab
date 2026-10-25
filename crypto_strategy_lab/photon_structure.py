@@ -138,7 +138,11 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH):
             prior = low if up else high
             kind = "TREND_CHANGE" if trend and direction != trend else "BOS"
             emit(kind, direction, broken, at)
-            start = max(segment, broken["index"])
+            # The pullback begins AFTER the candle that set the broken level.
+            # Its opposite wick may predate that extreme and is not evidence
+            # of the following pullback. Including it creates false protected
+            # levels and duplicate high/low anchors at the same timestamp.
+            start = max(segment, broken["index"] + 1)
             key = "low" if up else "high"
             origin = min(range(start, i+1), key=lambda k: bars[k]["low"]) if up else max(range(start, i+1), key=lambda k: bars[k]["high"])
             protected = point(origin, key)

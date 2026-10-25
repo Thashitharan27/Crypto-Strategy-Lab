@@ -29,8 +29,10 @@ at which its candidate pivot formed. Historical raw-pivot traces are ignored.
 
 Each path uses only events known at the current replay clock. Consecutive same-
 side points simplify to the more extreme point; data gaps split the paths.
-Two opposing swing origins sharing a candle have unknown intrabar order, so
-the path splits there rather than inventing a high/low sequence. This display
+Two genuine opposing swing origins sharing a candle retain both confirmed price
+levels at that timestamp, with a short dashed vertical connector to indicate
+unknown intrabar order. They do not erase adjacent history. Only a real missing
+candle or invalid data resets/splits the history. This display
 does not change the strategy's mapping calculations or its no-entry gate.
 
 This is structure analysis, not an entry strategy. The engine refuses entries
@@ -46,6 +48,9 @@ or profitability claims are included. Other strategy configurations are unchange
   break confirms the originating swing point: the lowest point since the broken
   high for an upward break, or the highest point since the broken low for a
   downward break. It becomes the strong/protected side of the range.
+- Search for that pullback origin strictly after the broken pivot's candle.
+  Its opposite wick is not evidence of a later pullback. This avoids falsely
+  using the high and low of that pivot candle as two distinct swing origins.
 - Internal CHoCH uses strict wick penetration of the opposing internal point.
   Candle colour is irrelevant. Inside bars can start a counter run.
 - Distinguish swing direction from internal direction. Internal disagreement is

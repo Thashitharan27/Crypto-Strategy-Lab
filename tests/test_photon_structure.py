@@ -202,14 +202,15 @@ def test_swing_lines_use_origin_only_after_confirmation_and_ignore_choch():
     assert all(p["availableAt"] in (600, 800) for p in points)
 
 
-def test_swing_lines_split_gaps_and_ambiguous_same_candle_extremes():
+def test_swing_lines_split_real_gaps_but_keep_same_candle_confirmed_levels():
     def point(time, direction, price):
         return dict(kind="BOS_SWING", direction=direction, fromTime=time, price=price, availableAt=time+100)
     guide = {"events": [point(100, 1, 12), point(200, -1, 8),
         dict(kind="GAP", availableAt=350), point(400, 1, 16),
         point(500, 1, 18), point(500, -1, 9), point(600, -1, 10), point(700, 1, 20)]}
     paths = _swing_lines(guide, 900)
-    assert [[p["time"] for p in line] for line in paths] == [[100, 200], [400], [600, 700]]
+    assert [[p["time"] for p in line] for line in paths] == [[100, 200], [500, 500, 700]]
+    assert all(p.get("sameCandle") for p in paths[1][:2])
 
 
 def test_swing_line_projection_matches_mapping_from_historical_prefix():
@@ -267,6 +268,24 @@ def test_bullish_bos_confirms_pullback_low_only_when_high_closes_through():
     bearish = _swing_lines(map_structure(mirror),13500)[0]
     assert [p["price"] for p in bearish] == [190,205,187,196]
     assert [p["side"] for p in bearish] == [-1,1,-1,1]
+
+
+def test_pivot_candles_opposite_wick_is_not_a_subsequent_pullback():
+    # The high candle's 90 low is below the actual later pullback to 95.
+    # Previously that old wick became the protected low at the SAME time as
+    # the broken high, causing the chart to delete both anchors and leave a gap.
+    values = [(100,98,99),(104,100,102),(110,90,108),(108,101,105),
+              (105,99,102),(103,95,98),(105,98,103),(108,100,106),(113,105,112)]
+    source = [dict(time=i*900, open=c, high=h, low=l, close=c) for i,(h,l,c) in enumerate(values)]
+    bullish = map_structure(source)
+    assert [(p["fromTime"],p["price"]) for p in bullish["trace"]] == [(1800,110),(4500,95)]
+    assert bullish["snapshots"][-1]["low"]["price"] == 95
+    assert len(_swing_lines(bullish,8100)) == 1
+    mirror = [dict(time=b["time"], open=300-b["open"], close=300-b["close"],
+                   high=300-b["low"], low=300-b["high"]) for b in source]
+    bearish = map_structure(mirror)
+    assert [(p["fromTime"],p["price"]) for p in bearish["trace"]] == [(1800,190),(4500,205)]
+    assert bearish["snapshots"][-1]["high"]["price"] == 205
 
 
 def test_developing_leg_ends_at_closed_candle_and_does_not_cross_gaps():

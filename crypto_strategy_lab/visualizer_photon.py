@@ -23,8 +23,8 @@ function cslPhotonSwingLines(guide,cutoff) {
     for(let i=1;i<points.length;i++)if(points[i].time===points[i-1].time)ambiguous.add(points[i].time);
     let line=[];
     const flush=()=>{if(line.length)segments.push(line);line=[];};
-    for(const p of points) {
-      if(ambiguous.has(p.time)){flush();continue;}
+    for(const raw of points) {
+      const p=ambiguous.has(raw.time)?{...raw,sameCandle:true}:raw;
       const previous=line.at(-1);
       if(previous?.side===p.side) {
         if(p.side===1?p.price>=previous.price:p.price<=previous.price)line[line.length-1]=p;
@@ -83,12 +83,17 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
       const color=tf==='4h'?'#f8fafc':'#72a7f5',guide=mapping.timeframes[tf];if(!guide)continue;
       const segments=cslPhotonSwingLines(guide,cutoff);
       for(const segment of segments) {
-        let path=[];
+        let path=[],previous=null;
         const flush=()=>{if(path.length>1)make('polyline',{points:path.join(' '),fill:'none',stroke:color,'stroke-width':tf==='4h'?2.8:1.4,'stroke-linejoin':'round','stroke-linecap':'round'},tf+' confirmed swing path');path=[];};
         for(const p of segment) {
           const cx=x(p.time),cy=candles.priceToCoordinate(p.price);
-          if(cx==null || cy==null){flush();continue;}
+          if(cx==null || cy==null){flush();previous=null;continue;}
+          if(previous && p.time===previous.point.time && p.side!==previous.point.side) {
+            flush();
+            make('line',{x1:cx,x2:cx,y1:previous.y,y2:cy,stroke:color,'stroke-width':tf==='4h'?2.8:1.4,'stroke-dasharray':'2 3'},tf+' both levels confirmed by BOS on one candle; intrabar order unavailable');
+          }
           path.push(cx+','+cy);
+          previous={point:p,y:cy};
           if(cx>=0&&cx<=width&&cy>=0&&cy<=height)make('circle',{cx,cy,r:tf==='4h'?3:1.5,fill:color},tf+' '+(p.side===1?'swing high':'swing low')+' '+formatPrice(p.price)+' · confirmed '+fmtTime(p.availableAt));
         }
         flush();
