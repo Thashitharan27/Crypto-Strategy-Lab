@@ -1,5 +1,11 @@
 # Photon Market Structure — Parts 1 & 2
 
+**Fidelity status:** this implementation has not been validated candle by candle
+against the presenter's walkthrough. See
+[the reference sequences and rule audit](photon_presenter_reference.md) before
+interpreting the plotted swings as a reproduction of his method. The proposed
+weekly/daily context layout is a prototype, not yet a Lab feature.
+
 Select **Photon Market Structure — Parts 1 & 2 (mapping only)** in Strategy
 Builder, or load `config/data_lake/Photon_Structure_Parts_1_2.json`. Use a 15m
 dataset, choose a historical period, run the analysis, then open **Strategy
@@ -48,9 +54,6 @@ or profitability claims are included. Other strategy configurations are unchange
   break confirms the originating swing point: the lowest point since the broken
   high for an upward break, or the highest point since the broken low for a
   downward break. It becomes the strong/protected side of the range.
-- Search for that pullback origin strictly after the broken pivot's candle.
-  Its opposite wick is not evidence of a later pullback. This avoids falsely
-  using the high and low of that pivot candle as two distinct swing origins.
 - Internal CHoCH uses strict wick penetration of the opposing internal point.
   Candle colour is irrelevant. Inside bars can start a counter run.
 - Distinguish swing direction from internal direction. Internal disagreement is
@@ -61,6 +64,11 @@ or profitability claims are included. Other strategy configurations are unchange
   change. No forced one-to-one match exists between HTF CHoCH and LTF BOS.
 
 ## Explicit implementation choices
+
+The pullback-origin search starts strictly after the broken pivot's candle.
+This is an implementation convention, not a general rule established by the
+videos. The opposite wick's chronological relationship to the pivot extreme
+can require intrabar evidence; excluding it universally remains unvalidated.
 
 The videos do not mechanically define a meaningful swing pullback. This first
 version qualifies a swing extreme using **two strictly lower highs or higher
