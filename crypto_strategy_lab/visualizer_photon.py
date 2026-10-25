@@ -5,7 +5,7 @@ function cslPhotonSwingLines(guide,cutoff) {
   // Use origin times for geometry only after the event is known at the replay
   // clock. Never draw a forecast arrow or join structure across missing data.
   const groups=[[]];
-  for(const e of guide.events) {
+  for(const e of (guide.trace || guide.events)) {
     if(e.availableAt>cutoff)continue;
     if(e.kind==='GAP'){groups.push([]);continue;}
     if(!['PIVOT','SWING'].includes(e.kind))continue;
@@ -30,6 +30,16 @@ function cslPhotonSwingLines(guide,cutoff) {
     flush();
   }
   return segments;
+}
+function cslPhotonDevelopingLeg(guide,cutoff,segments) {
+  let lo=0,hi=guide.snapshots.length;
+  while(lo<hi){const mid=(lo+hi)>>1;if(guide.snapshots[mid].availableAt<=cutoff)lo=mid+1;else hi=mid;}
+  const s=lo?guide.snapshots[lo-1]:null,last=segments.at(-1)?.at(-1);
+  if(!s || !last || !Number.isFinite(s.close) || cutoff>=s.availableAt+guide.interval)return null;
+  const gap=(guide.trace || guide.events).filter(e=>e.kind==='GAP'&&e.availableAt<=cutoff).at(-1);
+  if(gap && last.availableAt<gap.availableAt)return null;
+  const end={time:s.availableAt-guide.interval,price:s.close,availableAt:s.availableAt};
+  return end.time>last.time?[last,end]:null;
 }
 function cslPhotonView(mapping,cutoff) {
   const result={};
@@ -64,19 +74,26 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     }
   };
   if(showLines) {
-    // Draw the fine structure first so the larger 4H swing remains prominent.
-    for(const tf of ['15m','4h']) {
+    // Coarse white stroke stays visible as an outline where the thinner blue
+    // trace follows exactly the same historical prices.
+    for(const tf of ['4h','15m']) {
       const color=tf==='4h'?'#f8fafc':'#72a7f5',guide=mapping.timeframes[tf];if(!guide)continue;
-      for(const segment of cslPhotonSwingLines(guide,cutoff)) {
+      const segments=cslPhotonSwingLines(guide,cutoff);
+      for(const segment of segments) {
         let path=[];
-        const flush=()=>{if(path.length>1)make('polyline',{points:path.join(' '),fill:'none',stroke:color,'stroke-width':tf==='4h'?2.8:1.6,'stroke-linejoin':'round','stroke-linecap':'round'},tf+' confirmed swing path');path=[];};
+        const flush=()=>{if(path.length>1)make('polyline',{points:path.join(' '),fill:'none',stroke:color,'stroke-width':tf==='4h'?2.8:1.4,'stroke-linejoin':'round','stroke-linecap':'round'},tf+' confirmed swing path');path=[];};
         for(const p of segment) {
           const cx=x(p.time),cy=candles.priceToCoordinate(p.price);
           if(cx==null || cy==null){flush();continue;}
           path.push(cx+','+cy);
-          if(cx>=0&&cx<=width&&cy>=0&&cy<=height)make('circle',{cx,cy,r:tf==='4h'?4:2.5,fill:color},tf+' '+(p.side===1?'swing high':'swing low')+' '+formatPrice(p.price)+' · confirmed '+fmtTime(p.availableAt));
+          if(cx>=0&&cx<=width&&cy>=0&&cy<=height)make('circle',{cx,cy,r:tf==='4h'?3:1.5,fill:color},tf+' '+(p.side===1?'swing high':'swing low')+' '+formatPrice(p.price)+' · confirmed '+fmtTime(p.availableAt));
         }
         flush();
+      }
+      const developing=cslPhotonDevelopingLeg(guide,cutoff,segments);
+      if(developing) {
+        const [a,b]=developing,ax=x(a.time),bx=x(b.time),ay=candles.priceToCoordinate(a.price),by=candles.priceToCoordinate(b.price);
+        if(ax!=null&&bx!=null&&ay!=null&&by!=null)make('line',{x1:ax,x2:bx,y1:ay,y2:by,stroke:color,'stroke-width':tf==='4h'?2.8:1.6,'stroke-dasharray':'6 4','stroke-opacity':.75},tf+' developing leg to latest completed candle; not a confirmed swing');
       }
     }
   }
@@ -87,6 +104,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     if(!s){summary.push(name+': waiting for completed candles');continue;}
     const direction=s.trend===1?'Bullish':s.trend===-1?'Bearish':'Unknown';
     summary.push(name+': '+direction+' · '+s.phase.toLowerCase().replaceAll('_',' '));
+    if(showLines && !$('photon-labels')?.checked)continue;
     for(const [key,p] of [['high',s.high],['low',s.low]]) {
       if(!p)continue;const y=candles.priceToCoordinate(p.price);if(y==null || y<0 || y>height)continue;
       const left=x(p.time) ?? 0,right=x(cutoff-interval) ?? width,color=tf==='4h'?'#fbbf24':'#60a5fa';
@@ -113,6 +131,6 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   const h=view['4h']?.state,m=view['15m']?.state;
   let alignment='Waiting for swing confirmation';
   if(h?.trend && m?.trend)alignment=h.trend===m.trend?'15m aligned with 4H; possible continuation':'15m opposes 4H; possible 4H pullback';
-  $('photon-status').textContent='Mapping only · '+(showLines?'White: 4H · Blue: 15m · Confirmed swings; no forecast lines. | ':'')+summary.join(' | ')+' | '+alignment+' | Swing qualification: 2 bars each side (interpretation).';
+  $('photon-status').textContent='Mapping only · '+(showLines?'White: 4H · Blue: 15m · Solid: confirmed turns · Dashed: developing leg · 60 days of prior context | ':'')+summary.join(' | ')+' | '+alignment+' | Swing qualification: 2 bars each side (interpretation).';
 }
 """

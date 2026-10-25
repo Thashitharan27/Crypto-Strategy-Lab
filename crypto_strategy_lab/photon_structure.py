@@ -84,7 +84,7 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH):
     """
     if not isinstance(strength, int) or isinstance(strength, bool) or strength < 1:
         raise ValueError("swing strength must be a positive integer")
-    events, snapshots = [], []
+    events, snapshots, trace = [], [], []
     segment = 0
     high = low = ih = il = None
     high_ready = low_ready = False
@@ -111,6 +111,7 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH):
             last_break = -1
             previous_high = previous_low = None
             events.append(dict(kind="GAP", time=b["time"], availableAt=at, label="Structure reset: data gap"))
+            trace.append(dict(kind="GAP", time=b["time"], availableAt=at))
         if not valid_bar(b):
             snapshots.append(dict(availableAt=at, trend=0, internal=0, high=None, low=None, phase="UNKNOWN"))
             continue
@@ -171,6 +172,11 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH):
                 if not qualifies:
                     continue
                 p = point(j, key)
+                # Display trace includes every qualified turning point, even
+                # when the protected swing range has not changed. BOS logic
+                # below remains separate from this historical geometry.
+                trace.append(dict(kind="PIVOT", direction=1 if key == "high" else -1,
+                                  fromTime=p["time"], price=p["price"], availableAt=at))
                 if key == "high" and (trend == 0 or (trend == 1 and not high_ready and j >= last_break and price == high["price"])):
                     previous = previous_high if trend else high["price"] if high else None
                     high, high_ready = p, True
@@ -202,10 +208,10 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH):
                     else:
                         il, run, extreme = extreme, 1, point(i, "high")
         phase = "UNKNOWN" if not trend or not internal else "POSSIBLE_CONTINUATION" if trend == internal else "POSSIBLE_PULLBACK"
-        snapshots.append(dict(availableAt=at, trend=trend, internal=internal,
+        snapshots.append(dict(availableAt=at, close=b["close"], trend=trend, internal=internal,
                               high=dict(high, strong=trend == -1, confirmed=high_ready) if high else None,
                               low=dict(low, strong=trend == 1, confirmed=low_ready) if low else None, phase=phase))
-    return dict(events=events, snapshots=snapshots, interval=interval)
+    return dict(events=events, trace=trace, snapshots=snapshots, interval=interval)
 
 
 def build_mapping(bars):

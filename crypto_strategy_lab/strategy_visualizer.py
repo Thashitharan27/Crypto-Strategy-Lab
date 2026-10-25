@@ -2276,6 +2276,11 @@ class CompletedRunVisualizer:
             strategy_warmup_period(self.seed.config)
             if strategy_timeframe == chart_timeframe else interval * 2240
         )
+        from crypto_strategy_lab.photon_structure import selected as photon_selected
+        mapping_only = photon_selected(self.seed.config.strategy.profiles)
+        display_start = run_start - pd.Timedelta(days=60) if mapping_only else run_start
+        if mapping_only:
+            calculation_start = min(calculation_start, display_start)
         market = self._market_frame(
             calculation_start,
             run_end,
@@ -2285,7 +2290,7 @@ class CompletedRunVisualizer:
             raise ValueError("no canonical strategy candles are available for this run")
 
         overlays = []
-        visible = market["period_start"] >= run_start
+        visible = market["period_start"] >= display_start
         # Standard Wilder RSI 14, alongside the two custom EMA RSI lines.
         wilder_values = native_rsi(market["close"].to_numpy(float), 14)
         overlays.append({
@@ -2314,7 +2319,7 @@ class CompletedRunVisualizer:
                     ema_values[visible.to_numpy()],
                 ),
             })
-        market = market.loc[market["period_start"] >= run_start].reset_index(drop=True)
+        market = market.loc[market["period_start"] >= display_start].reset_index(drop=True)
         candles = [
             {
                 "time": _unix_seconds(row["period_start"]),
