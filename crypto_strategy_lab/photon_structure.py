@@ -6,6 +6,7 @@ our two-sided pivot interpretation, not a rule specified by the videos.
 from __future__ import annotations
 
 from math import isfinite
+from collections.abc import Mapping
 
 MODE = "PHOTON_STRUCTURE_MAP"
 LABEL = "Photon Market Structure — Parts 1 & 2 (mapping only)"
@@ -13,6 +14,8 @@ SWING_STRENGTH = 2
 
 
 def selected(profiles):
+    if not isinstance(profiles, Mapping):
+        return False
     return any(
         rule.get("_strategy_direction_mode") == MODE
         for profile in profiles.values()
