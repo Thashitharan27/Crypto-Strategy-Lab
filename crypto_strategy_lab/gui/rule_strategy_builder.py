@@ -671,6 +671,7 @@ DIRECTION_LABELS = {
     "FVG_SIX_FACTOR": "Fair Value Gap - Six Factors (v1)",
     "FIB_RETRACEMENT": "Fib Retracement — Reaction",
     "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
+    "PHOTON_STRUCTURE_MAP": "Photon Market Structure — Parts 1 & 2 (mapping only)",
 }
 SR_TIMEFRAME_OPTIONS = (
     (None, "Configured S/R (legacy)"),
@@ -1934,6 +1935,13 @@ class RuleStrategyBuilder(QWidget):
         )
 
     def refresh_summary(self):
+        if self.direction_mode.currentData() == "PHOTON_STRUCTURE_MAP":
+            self.summary.setText(
+                "Photon Parts 1 & 2 · Mapping only · No entries · Run on 15m, then open Strategy Visualizer. "
+                "4H + 15m; swing breaks use closes, internal CHoCH uses wicks. "
+                "Swing qualification: 2 bars each side (implementation interpretation)."
+            )
+            return
         markets = []
         permissions = set(self.market_permissions())
         for regime in REGIMES:

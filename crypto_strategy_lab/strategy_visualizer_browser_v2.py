@@ -21,6 +21,8 @@ from crypto_strategy_lab.strategy_visualizer import (
 from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
 from crypto_strategy_lab.visualizer_drawings import DRAWING_HELPERS
 from crypto_strategy_lab.visualizer_structure import STRUCTURE_HELPERS
+from crypto_strategy_lab.visualizer_photon import PHOTON_HELPERS
+from crypto_strategy_lab.photon_structure import selected as photon_selected
 from crypto_strategy_lab.visualizer_workspace import WORKSPACE_HELPERS, WORKSPACE_STYLES
 from crypto_strategy_lab.visualizer_review_report import build_review_report_html
 
@@ -59,6 +61,7 @@ def build_browser_visualizer_v2_html(
             "swingStrength": swing_strength,
             "manualCosts": manual_costs,
             "emaReversal": getattr(model, "_ema_source", lambda period: "close")(300) == "high",
+            "mappingOnly": photon_selected(getattr(getattr(getattr(model.seed, "config", None), "strategy", None), "profiles", {})),
         },
     }
     encoded = json.dumps(bootstrap, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
@@ -206,6 +209,14 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 #day-replay[aria-pressed=true]{background:#255b91;border-color:#60a5fa}
 button:disabled{opacity:.45;cursor:default}
 __WORKSPACE_STYLES__
+body.mapping-only #trade-panel,body.mapping-only #open-trade-plan,
+body.mapping-only #trade-panel-toggle,body.mapping-only #journal-panel-toggle,
+body.mapping-only #position-tools-button,body.mapping-only #trade,
+body.mapping-only label[for="trade"],body.mapping-only #center,
+body.mapping-only #day-trade,body.mapping-only #manual-new-trade,
+body.mapping-only label:has(#day-side),body.mapping-only #replay-toggle{display:none!important}
+body.mapping-only #reviewbar{flex-wrap:wrap}
+body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
@@ -245,6 +256,7 @@ __WORKSPACE_STYLES__
     </span>
     <div id="active-indicators" aria-label="Active indicators"></div>
     <span id="timeframe-note" class="muted" role="status"></span>
+    <span id="photon-status" class="muted" role="status" style="display:block;max-width:100%;white-space:normal"></span>
     <div id="replay-controls" hidden>
       <strong>Your judgement:</strong>
       <span id="manual-workflow-state" role="status"></span><button data-replay-decision="Wait">Wait</button><button data-replay-decision="Skip">Skip</button><button data-replay-decision="Unsure">Unsure</button>
@@ -385,12 +397,22 @@ __WORKSPACE_STYLES__
   __REPLAY_HELPERS__
   __DRAWING_HELPERS__
   __STRUCTURE_HELPERS__
+  __PHOTON_HELPERS__
   __WORKSPACE_HELPERS__
   const boot = __BOOTSTRAP__;
   const $ = id => document.getElementById(id);
   $('chart-symbol').textContent = boot.run.symbol;
   const indicatorDialog = $('indicator-dialog');
   const indicatorInputs = [...document.querySelectorAll('.ema-period, .rsi-line, #show-rsi')];
+  if(boot.run.mappingOnly) {
+    document.body.classList.add('mapping-only');
+    for(const input of indicatorInputs)input.checked=false;
+    $('sr-zones').checked=false;
+    $('structure-review').textContent='Review structure';
+    $('structure-review').title='Map completed candles only; no trade entries';
+    $('manual-confirm').disabled=true;
+    $('manual-confirm').hidden=true;
+  }
   if (boot.run.emaReversal) {
     for (const input of indicatorInputs) input.checked=input.classList.contains('ema-period') && ['100','300'].includes(input.value);
   }
@@ -1326,6 +1348,7 @@ __WORKSPACE_STYLES__
   const structureCache=new WeakMap();
   function drawStructureGuide() {
     const layer=$('structure-layer');layer.replaceChildren();
+    $('photon-status').textContent='';
     if(!$('structure-guide').checked || !chart || !candles)return;
     const market=replayChartSource || marketPayload || sourcePayload,bars=market?.candles || [];
     if(!bars.length)return;
@@ -1336,6 +1359,7 @@ __WORKSPACE_STYLES__
     }
     const end=bars.at(-1).time+interval,range=chart.timeScale().getVisibleRange();
     const cutoff=replayActive?Math.min(replayCutoff,end):Math.min(end,Number.isFinite(range?.to)?range.to+interval:end);
+    if(market.photonMapping){drawPhotonMapping(market.photonMapping,cutoff,bars,interval,layer);return;}
     const view=cslStructureGuideView(cached,cutoff),height=chart.panes()[0].getHeight(),width=chartWrap.clientWidth-76;
     layer.style.height=height+'px';
     const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
@@ -2285,6 +2309,7 @@ __WORKSPACE_STYLES__
         : nextPayload;
       if (generation !== loadGeneration) return;
       manualMarkets.set(requestedTimeframe,nextPayload);
+      if(nextPayload.photonMapping)$('structure-guide').checked=true;
       if(preserveReplay && replayActive)replayChartSource=nextPayload;
       else {
         sourcePayload=strategyPayload;marketPayload=strategyPayload;payload=strategyPayload;
@@ -2362,7 +2387,7 @@ __WORKSPACE_STYLES__
 </script>
 </body>
 </html>"""
-    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS).replace("__STRUCTURE_HELPERS__", STRUCTURE_HELPERS).replace("__WORKSPACE_HELPERS__", WORKSPACE_HELPERS).replace("__WORKSPACE_STYLES__", WORKSPACE_STYLES)
+    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS).replace("__STRUCTURE_HELPERS__", STRUCTURE_HELPERS).replace("__PHOTON_HELPERS__", PHOTON_HELPERS).replace("__WORKSPACE_HELPERS__", WORKSPACE_HELPERS).replace("__WORKSPACE_STYLES__", WORKSPACE_STYLES)
 
 
 class _LoopbackHTTPServer(ThreadingHTTPServer):
