@@ -38,7 +38,7 @@ from crypto_strategy_lab.volume_profile import VOLUME_PROFILE_RULE_INDICATORS
 # selection but adds a deliberately simple, non-optimized trend confirmation
 # baseline at compile time. LONG/SHORT eligibility still belongs to the market
 # permission grid below.
-SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "EMA_100_300_REVERSAL", "NY_OPENING_RANGE_REVERSAL", "IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", FIB_RETRACEMENT_MODE, MTF_SR_REACTION_MODE, "PHOTON_STRUCTURE_MAP")
+SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "EMA_320_CLOSE_CROSS", "EMA_100_300_REVERSAL", "NY_OPENING_RANGE_REVERSAL", "IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", FIB_RETRACEMENT_MODE, MTF_SR_REACTION_MODE, "PHOTON_STRUCTURE_MAP", "PHOTON_4H_TREND")
 # Backward-compatible internal name retained while the UI moves to "Signal Strategy".
 DIRECTION_MODES = SIGNAL_STRATEGIES
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
@@ -1103,10 +1103,10 @@ def compile_profiles(
             native_rules = [{**_ema_320_close_cross_native_rules()[0],
                              _DMI_TREND_MODE_MARKER: mode,
                              _DMI_TREND_RULE_MARKER: mode+"_SIGNAL"}]
-        elif mode == "PHOTON_STRUCTURE_MAP":
+        elif mode in {"PHOTON_STRUCTURE_MAP","PHOTON_4H_TREND"}:
             native_rules = [{**_ema_320_close_cross_native_rules()[0],
                              _DMI_TREND_MODE_MARKER: mode,
-                             _DMI_TREND_RULE_MARKER: "PHOTON_STRUCTURE_MAP_ONLY"}]
+                             _DMI_TREND_RULE_MARKER: "PHOTON_STRUCTURE_MAP_ONLY" if mode=="PHOTON_STRUCTURE_MAP" else "PHOTON_4H_TREND_SIGNAL"}]
         elif mode == "EMA_100_300_REVERSAL":
             native_rules = [{**_ema_320_close_cross_native_rules()[0],
                              _DMI_TREND_MODE_MARKER: mode,

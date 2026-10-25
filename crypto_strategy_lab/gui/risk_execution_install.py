@@ -48,7 +48,7 @@ def _sync_target_sr_dependency(window) -> None:
             if builder is not None
             else "DI"
         )
-        native_stop = strategy_mode in {"EMA_9_20_PULLBACK", "EMA_100_300_REVERSAL", "NY_OPENING_RANGE_REVERSAL", "IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", "FIB_RETRACEMENT"}
+        native_stop = strategy_mode in {"PHOTON_4H_TREND", "EMA_9_20_PULLBACK", "EMA_100_300_REVERSAL", "NY_OPENING_RANGE_REVERSAL", "IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST", "LIQUIDITY_SWEEP_RETEST", "SNEAKY_PIVOT", "TJR_CONFLUENCE", "FAIR_VALUE_GAP", "FVG_SIX_FACTOR", "FIB_RETRACEMENT"}
         required_by_target = not native_stop and target_value in {"SR_CAPPED_R", "SR_LEVEL"}
         ny_sr = strategy_mode == "NY_OPENING_RANGE_REVERSAL" and execution_form.widgets["ny_range_overshoot_policy"].currentData()=="SR_STOP"
         required_by_stop = ((not native_stop) and stop_value == "SR_STRUCTURE") or ny_sr

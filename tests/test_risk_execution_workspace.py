@@ -8,6 +8,32 @@ from crypto_strategy_lab.gui.research_feature_ownership import apply_research_fe
 from crypto_strategy_lab.gui.risk_execution_install import apply_risk_execution_workspace
 
 
+def test_photon_selection_uses_actual_minutes_and_roundtrips_owned_controls():
+    app, window = _window()
+    try:
+        selector=window.rule_builder.direction_mode
+        index=selector.findData('PHOTON_4H_TREND')
+        assert index>=0
+        selector.setCurrentIndex(index);selector.activated.emit(index)
+        app.processEvents()
+        workspace=window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert window.strategy_tf.currentData()=='1m'
+        assert window.intrabar_tf.currentData() is None
+        for name in ('photon_confirmation_minutes','photon_retest_minutes','photon_target_4h'):
+            assert not window.execution_form.widgets[name].isHidden()
+        assert window.execution_form.widgets['sd_swing_strength'].isHidden()
+        window.execution_form.widgets['photon_retest_minutes'].setValue(35)
+        window.execution_form.widgets['photon_target_4h'].setChecked(True)
+        config=window.build_config();config.validate()
+        assert config.execution.photon_retest_minutes==35
+        assert config.execution.photon_target_4h
+        window.apply_config(config)
+        assert window.build_config().execution.photon_retest_minutes==35
+    finally:
+        window.close()
+
+
 def _window():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     widgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)

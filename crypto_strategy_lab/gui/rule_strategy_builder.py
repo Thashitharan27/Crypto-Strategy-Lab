@@ -672,6 +672,7 @@ DIRECTION_LABELS = {
     "FIB_RETRACEMENT": "Fib Retracement — Reaction",
     "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
     "PHOTON_STRUCTURE_MAP": "Photon Market Structure — Parts 1 & 2 (mapping only)",
+    "PHOTON_4H_TREND": "Photon — 4H Trend / 1m Confirmation",
 }
 SR_TIMEFRAME_OPTIONS = (
     (None, "Configured S/R (legacy)"),
@@ -1935,6 +1936,9 @@ class RuleStrategyBuilder(QWidget):
         )
 
     def refresh_summary(self):
+        if self.direction_mode.currentData() == "PHOTON_4H_TREND":
+            self.summary.setText("Photon · 4H trend trades only · Run on actual 1m data. 4H value-zone reaction → aligned 15m structure → 15m discount/premium zone → 1m CHoCH → later origin retest. Strategy-owned structural stop and swing target; daily/weekly are narrative context.")
+            return
         if self.direction_mode.currentData() == "PHOTON_STRUCTURE_MAP":
             self.summary.setText(
                 "Photon Parts 1 & 2 · Mapping only · No entries · Run on 15m, then open Strategy Visualizer. "
