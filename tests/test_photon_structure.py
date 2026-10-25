@@ -21,7 +21,7 @@ def test_prefix_invariance_for_every_candle_including_mtf():
     for n in range(1, len(source)+1):
         prefix = build_mapping(source[:n])
         cutoff = n*900
-        for tf in ("15m", "4h"):
+        for tf in ("15m", "4h", "1d", "1w"):
             assert prefix["timeframes"][tf]["snapshots"] == [s for s in full["timeframes"][tf]["snapshots"] if s["availableAt"] <= cutoff]
             assert prefix["timeframes"][tf]["events"] == [e for e in full["timeframes"][tf]["events"] if e["availableAt"] <= cutoff]
             assert prefix["timeframes"][tf]["trace"] == [e for e in full["timeframes"][tf]["trace"] if e["availableAt"] <= cutoff]
@@ -125,7 +125,7 @@ def test_visualizer_attaches_mapping_from_canonical_15m_source(tmp_path):
     model._market_frame = market
     payload = model._photon_mapping_payload()
     assert payload["mappingOnly"] is True
-    assert set(payload["timeframes"]) == {"4h", "15m"}
+    assert set(payload["timeframes"]) == {"1w", "1d", "4h", "15m"}
     assert seen == ["15m"]
     assert model._photon_mapping_payload() is payload
 
