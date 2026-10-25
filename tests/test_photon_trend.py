@@ -79,6 +79,16 @@ def test_causal_real_context_prefix():
         assert trend_setups(bars[:end],np.ones(end))==(full[0][:end],full[1][:end])
 
 
+def test_optional_4h_target_uses_its_own_saved_anchor():
+    bars,guides=walkthrough()
+    h=guides['4h']['snapshots'][0]
+    h['range'].update(high=150,equilibrium=115)
+    h['high']['time']-=600
+    s=trend_setups(bars,np.ones(len(bars)),guides=guides,target_4h=True)[0][4]
+    assert s['target']==150 and s['targetMode']=='4H_SWING'
+    assert pd.Timestamp(s['opposingZone']['pivotTime']).timestamp()==h['high']['time']
+
+
 @pytest.mark.parametrize('short',[False,True])
 def test_limit_fill_and_gap_safety(short):
     s=dict(side='SHORT' if short else 'LONG',entry=100,stop=110 if short else 90)

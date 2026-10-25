@@ -165,7 +165,8 @@ def trend_setups(bars, atr_values, *, confirmation_minutes=1440,retest_minutes=6
         if not isfinite(av) or av<=0:continue
         boundary=(min if long else max)(campaign["reactionExtreme"],origin["low"] if long else origin["high"])
         stop=boundary-sign*stop_buffer_atr*av
-        target=(h if target_4h else m)["range"]["high" if long else "low"]
+        target_state=h if target_4h else m
+        target=target_state["range"]["high" if long else "low"]
         risk=sign*(entry-stop);reward=sign*(target-entry)
         eq=min(h["range"]["equilibrium"],campaign["leg"]["equilibrium"]) if long else max(h["range"]["equilibrium"],campaign["leg"]["equilibrium"])
         if (stop<=0 or risk<=0 or reward<=0 or reward/risk<minimum_r
@@ -175,7 +176,7 @@ def trend_setups(bars, atr_values, *, confirmation_minutes=1440,retest_minutes=6
         pending=dict(version=1,strategy=MODE,side=side,entry=entry,stop=stop,target=target,
                      signalTime=iso(b["time"]),signalAvailableAt=at,signalIndex=i,
                      expiresAt=at+retest_minutes*60,parentZoneId=campaign["parentZoneId"],
-                     zone=zone,entryZone=deepcopy(zone),opposingZone=dict(bottom=target*.999999,top=target*1.000001,pivotTime=iso(m["high" if long else "low"]["time"]),confirmedTime=iso(m["availableAt"])),
+                     zone=zone,entryZone=deepcopy(zone),opposingZone=dict(bottom=target*.999999,top=target*1.000001,pivotTime=iso(target_state["high" if long else "low"]["time"]),confirmedTime=iso(target_state["availableAt"])),
                      contextZone=campaign["contextZone"],parentZone=campaign["parentZone"],
                      contextTouchAt=campaign["contextAt"],alignmentAt=campaign["alignmentAt"],parentTouchAt=campaign["touchAt"],
                      range4h=deepcopy(h["range"]),range15m=deepcopy(campaign["leg"]),
