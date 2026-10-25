@@ -237,6 +237,12 @@ body.structure-lines #day-layer{display:none}
 #photon-event-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-top:6px}
 #photon-event-select{max-width:100%;min-width:0;flex:1}
 #photon-event-detail{font-size:12px;line-height:1.6;padding:6px 0;color:#c5d4e6;white-space:normal}
+#photon-value-controls,#photon-zone-filters{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+#photon-value-controls{padding-top:7px}
+#photon-value-controls label,#photon-zone-filters label{display:flex;gap:5px;align-items:center}
+#photon-zone-panel{border-top:1px solid #344155;margin-top:4px}
+#photon-zone-select{width:100%;max-width:100%;margin-top:7px}
+#photon-zone-detail,#photon-range-status{font-size:12px;line-height:1.6;color:#c5d4e6;white-space:normal}
 body.mapping-only #replay-controls>strong,body.mapping-only #manual-workflow-state,
 body.mapping-only #replay-controls>[data-replay-decision],body.mapping-only #replay-notes,
 body.mapping-only #replay-controls>.manual-plan,body.mapping-only #replay-report,
@@ -292,6 +298,24 @@ body.mapping-only #replay-export{display:none!important}
     <span id="photon-status" class="muted" role="status" style="display:block;max-width:100%;white-space:normal"></span>
     <section id="photon-context" aria-label="Multi-timeframe market narrative" hidden>
       <div id="photon-context-strip" aria-live="polite"></div>
+      <div id="photon-value-controls">
+        <label><input id="photon-range-show" type="checkbox" checked> Premium / discount</label>
+        <select id="photon-range-timeframe" aria-label="Premium discount range timeframe"><option value="4h">4H range</option><option value="15m">15m range</option><option value="1d">Daily range</option></select>
+        <span id="photon-range-status" role="status"></span>
+        <span id="photon-zone-summary" role="status"></span>
+      </div>
+      <details id="photon-zone-panel"><summary>Supply / demand zones · layers and inspection</summary>
+        <div id="photon-zone-filters">
+          <label><input id="photon-zones-show" type="checkbox" checked> Show zones</label>
+          <label><input id="photon-zone-1d" type="checkbox" checked> Daily</label>
+          <label><input id="photon-zone-4h" type="checkbox" checked> 4H</label>
+          <label><input id="photon-zone-15m" type="checkbox" checked> 15m</label>
+          <label><input id="photon-zone-history" type="checkbox"> Include ended zones</label>
+        </div>
+        <select id="photon-zone-select" aria-label="Supply demand zone to inspect"><option value="">Choose a supply / demand zone</option></select>
+        <button id="photon-zone-focus" disabled>Focus selected zone</button>
+        <div id="photon-zone-detail" role="status"></div>
+      </details>
       <details id="photon-context-details"><summary>Weekly / daily context · shared replay clock</summary>
         <div id="photon-context-chart" aria-label="Weekly and daily structure overview"></div>
       </details>
@@ -488,6 +512,26 @@ body.mapping-only #replay-export{display:none!important}
   });
   $('photon-labels').addEventListener('change',redrawOverlays);
   $('photon-developing').addEventListener('change',redrawOverlays);
+  for(const id of ['photon-range-show','photon-range-timeframe','photon-zones-show','photon-zone-1d','photon-zone-4h','photon-zone-15m','photon-zone-history','photon-zone-select'])$(id).addEventListener('change',redrawOverlays);
+  $('photon-zone-panel').addEventListener('toggle',redrawOverlays);
+  $('photon-zone-focus').addEventListener('click',()=>{
+    const market=replayChartSource || marketPayload || sourcePayload;
+    const cutoff=replayActive?replayCutoff:(market?.candles?.at(-1)?.time || 0)+chartInterval();
+    const selected=Object.values(market?.photonMapping?.timeframes || {}).flatMap(g=>cslPhotonZoneView(g,cutoff)).find(z=>z.id===$('photon-zone-select').value);
+    if(!selected||!chart||!candles)return;
+    if(selected.endedAt&&selected.endedAt>=market.candles[0].time) {
+      const step=market.photonMapping.timeframes[selected.timeframe].interval;
+      chart.timeScale().setVisibleRange({from:Math.max(market.candles[0].time,selected.originTime-2*step),to:Math.min(cutoff,selected.endedAt+2*step)});
+    }
+    const visible=chart.timeScale().getVisibleRange();let low=selected.lower,high=selected.upper;
+    for(const bar of market.candles || [])if(bar.time+chartInterval()<=cutoff&&bar.time>=Number(visible?.from ?? -Infinity)&&bar.time<=Number(visible?.to ?? Infinity)) {
+      low=Math.min(low,bar.low);high=Math.max(high,bar.high);
+    }
+    const pad=Math.max((high-low)*.08,Math.abs(high)*.001);
+    defaultPriceRange={minValue:low-pad,maxValue:high+pad};priceZoomFactor=1;pricePanOffset=0;
+    chart.priceScale('right').applyOptions({autoScale:false});
+    requestAnimationFrame(()=>{chart.priceScale('right').applyOptions({autoScale:true});candles.applyOptions({});redrawOverlays();});
+  });
   $('photon-event-select').addEventListener('change',()=>{
     $('photon-event-select').dataset.pinned='true';
     const market=replayChartSource || marketPayload || sourcePayload,tf=$('photon-event-timeframe').value,guide=market?.photonMapping?.timeframes[tf];

@@ -1939,7 +1939,8 @@ class RuleStrategyBuilder(QWidget):
             self.summary.setText(
                 "Photon Parts 1 & 2 · Mapping only · No entries · Run on 15m, then open Strategy Visualizer. "
                 "Weekly/daily context above the 4H + 15m overlay; swing breaks use closes, internal CHoCH uses wicks. "
-                "Possible swing pullbacks qualify through internal CHoCH; research interpretation, not exact presenter validation."
+                "Premium/discount and daily/4H/15m supply-demand layers are available in the visualizer. "
+                "Possible swing pullbacks qualify through internal CHoCH; protected origins require a close-confirmed swing break."
             )
             return
         markets = []

@@ -1,4 +1,4 @@
-"""Mapping-only research interpretation of Photon Parts 1 and 2.
+"""Mapping-only Photon structure, premium/discount and supply/demand analysis.
 
 The chart uses candle-run CHoCH to qualify possible swing pullbacks, without a
 fixed pivot-bar threshold. Only close-confirmed swing breaks admit solid points.
@@ -276,11 +276,21 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
 
 
 def build_mapping(bars, detail_start=None):
+    from crypto_strategy_lab.photon_zones import attach_ranges, build_zones
+
     frames = {"15m": (900, 0), "4h": (14400, 0), "1d": (86400, 0),
               "1w": (604800, 345600)}  # Monday 00:00 UTC (Unix epoch was Thursday).
     detail = bars if detail_start is None else [b for b in bars if b["time"] >= detail_start]
+    timeframes = {}
+    for tf, (seconds, offset) in frames.items():
+        native = detail if tf == "15m" else aggregate_closed(
+            detail if tf == "4h" else bars, target_seconds=seconds, offset=offset)
+        guide = map_structure(native, seconds, qualification="CHOCH_PULLBACK")
+        attach_ranges(guide)
+        if tf != "1w":
+            guide["supplyDemand"] = build_zones(detail if tf in ("15m", "4h") else bars, native, guide, tf)
+        timeframes[tf] = guide
     return dict(strategy=MODE, mappingOnly=True, schemaVersion=2, contextDays=CONTEXT_DAYS,
+                lessons=["Market structure", "Multi-timeframe structure", "Premium/discount and supply/demand"],
                 qualification="Counter-direction internal CHoCH qualifies a possible swing pullback; only a close-confirmed swing break confirms its origin. Research interpretation; meaningful swing size remains discretionary in the lessons.",
-                timeframes={tf: map_structure(detail if tf == "15m" else aggregate_closed(
-                    detail if tf == "4h" else bars, target_seconds=seconds, offset=offset), seconds,
-                    qualification="CHOCH_PULLBACK") for tf, (seconds, offset) in frames.items()})
+                timeframes=timeframes)
