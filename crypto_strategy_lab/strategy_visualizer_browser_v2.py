@@ -453,6 +453,7 @@ body.mapping-only #replay-export{display:none!important}
     for(const input of indicatorInputs)input.checked=false;
     $('sr-zones').checked=false;
     $('structure-review').textContent='Review structure';
+    $('day-replay').textContent='Structure replay';
     $('structure-review').title='Map completed candles only; no trade entries';
     $('manual-confirm').disabled=true;
     $('manual-confirm').hidden=true;
@@ -502,10 +503,10 @@ body.mapping-only #replay-export{display:none!important}
   $('photon-next-event').addEventListener('click',()=>{
     if(!boot.run.mappingOnly || !replayActive || replayBusy || replayRevealed)return;
     const market=replayChartSource || marketPayload || sourcePayload;
-    const end=dayMode?replayDay+86400:(sourcePayload?.candles?.at(-1)?.time || 0)+replayInterval;
+    const end=replayEnd();
     const next=cslPhotonNextEvent(market?.photonMapping,replayCutoff,end);
     if(!next)return;
-    stopReplay();replayCutoff=next;refreshReplay();
+    stopReplay();replayCutoff=next;replayAdvanced=true;refreshReplay();
   });
   if (boot.run.emaReversal) {
     for (const input of indicatorInputs) input.checked=input.classList.contains('ema-period') && ['100','300'].includes(input.value);
@@ -913,10 +914,14 @@ body.mapping-only #replay-export{display:none!important}
   }
   function updateReplayControls() {
     const record=currentReview();
+    if(boot.run.mappingOnly && dayMode) {
+      replayDay=cslReplayDisplayDay(replayCutoff,replayEntryTime);
+      $('replay-day').value=new Date(replayDay*1000).toISOString().slice(0,10);
+    }
     workspacePanels.setReplay(replayActive);
     $('workspace-clock').textContent=replayActive?fmtTime(replayCutoff)+' UTC'+(boot.run.mappingOnly?' · Structure replay':' · '+cslManualReviewState(record)):'';
-    $('replay-reveal').textContent=dayMode?'Reveal day':'Reveal result';
-    $('replay-restart').textContent=dayMode?'Restart day':'Restart at entry';
+    $('replay-reveal').textContent=boot.run.mappingOnly?'Reveal remaining history':dayMode?'Reveal day':'Reveal result';
+    $('replay-restart').textContent=boot.run.mappingOnly?'Restart replay':dayMode?'Restart day':'Restart at entry';
     $('manual-reset').textContent=dayMode?'Reset starting levels':'Use auto levels';
     const locked=replayRevealed || Boolean(record?.manualEntry);
     $('manual-workflow-state').textContent=cslManualReviewState(record);
@@ -993,13 +998,16 @@ body.mapping-only #replay-export{display:none!important}
     if(!record.revealedAt) { record.revealedAt=new Date().toISOString(); saveReviews(); }
     return true;
   }
+  function replayEnd() {
+    return cslReplayEnd(sourcePayload?.candles || [],replayInterval,dayMode?replayDay:null,Boolean(boot.run.mappingOnly));
+  }
   function stepReplay() {
     if(replayActive && !manualPlanLocked()) {
       refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();
     }
     if(replayBusy || !replayActive || replayRevealed || (!dayMode && !markFutureSeen())) return;
-    const nextCutoff=cslNextReplayCutoff((replayChartSource || sourcePayload).candles || [],replayCutoff,chartInterval(),dayMode?replayDay+86400:null);
-    if(nextCutoff==null) {stopReplay();$('replay-status').textContent=dayMode?'End of this UTC day. Use Next day to continue.':'End of available candles. Export your review to retain it.';return;}
+    const nextCutoff=cslNextReplayCutoff((replayChartSource || sourcePayload).candles || [],replayCutoff,chartInterval(),replayEnd());
+    if(nextCutoff==null) {stopReplay();$('replay-status').textContent=boot.run.mappingOnly?'End of available history.':dayMode?'End of this UTC day. Use Next day to continue.':'End of available candles. Export your review to retain it.';return;}
     replayCutoff=nextCutoff; replayAdvanced=true;
     if(dayMode && currentReview())markFutureSeen();
     refreshReplay(true);
@@ -1169,7 +1177,7 @@ body.mapping-only #replay-export{display:none!important}
   $('replay-reveal').addEventListener('click',()=>{
     if(!manualPlanLocked()) {refreshManualPlan();if(manualPlanDraft.error)return;storeManualPlan();}
     if(replayBusy || (!dayMode && !markFutureSeen())) return;
-    if(dayMode){replayCutoff=replayDay+86400;if(currentReview())markFutureSeen();}
+    if(dayMode){replayCutoff=replayEnd();if(currentReview())markFutureSeen();}
     stopReplay(); replayRevealed=true; refreshReplay();
   });
   $('replay-restart').addEventListener('click',()=>{if(!replayBusy){

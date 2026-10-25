@@ -305,6 +305,15 @@ function cslAdvanceManualPosition(record, bars, cutoff, interval, recordedAt) {
   }
   return record;
 }
+function cslReplayEnd(bars, interval, day=null, continuous=false) {
+  const end=bars.at(-1)?.time;
+  if(!Number.isFinite(end))return null;
+  return day==null || continuous?end+interval:Math.min(end+interval,day+86400);
+}
+function cslReplayDisplayDay(cutoff, start) {
+  // At midnight the last revealed candle still belongs to the preceding day.
+  return Math.floor(Math.max(start,cutoff-1)/86400)*86400;
+}
 function cslNextReplayCutoff(bars, cutoff, interval, dayEnd=null) {
   const next=bars.find(bar=>bar.time+interval>cutoff && (dayEnd==null || bar.time<dayEnd));
   if(!next || dayEnd!=null && cutoff>=dayEnd)return null;
