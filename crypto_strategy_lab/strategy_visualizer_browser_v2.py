@@ -234,6 +234,7 @@ body.structure-lines #day-layer{display:none}
       <option value="LINES">Structure lines</option>
       <option value="BOTH">Candles + structure lines</option>
     </select>
+    <label id="photon-labels-wrap" hidden><input id="photon-labels" type="checkbox"> Break levels</label>
     <button id="indicators-btn" aria-haspopup="dialog">ƒx Indicators <span id="indicator-count"></span></button>
     <button id="open-trade-plan" aria-controls="trade-panel" aria-pressed="false">Trade panel</button>
     <span class="toolbar-spacer"></span>
@@ -421,6 +422,8 @@ body.structure-lines #day-layer{display:none}
     $('manual-confirm').hidden=true;
     $('photon-view').hidden=false;
     $('photon-view-label').hidden=false;
+    $('photon-view').value='LINES';
+    $('photon-labels-wrap').hidden=false;
   }
   function applyPhotonDisplay() {
     if(!boot.run.mappingOnly || !candles || !chart)return;
@@ -442,6 +445,7 @@ body.structure-lines #day-layer{display:none}
     }
     redrawOverlays();
   });
+  $('photon-labels').addEventListener('change',redrawOverlays);
   if (boot.run.emaReversal) {
     for (const input of indicatorInputs) input.checked=input.classList.contains('ema-period') && ['100','300'].includes(input.value);
   }
@@ -2101,6 +2105,7 @@ body.structure-lines #day-layer{display:none}
       chartResizeObserver.observe($('chart-wrap'));
     }
     requestAnimationFrame(() => {
+      if(boot.run.mappingOnly && $('photon-view').value==='LINES')chart.timeScale().fitContent();
       redraw();
       setTimeout(redraw, 40);
     });

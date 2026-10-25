@@ -1073,3 +1073,21 @@ def test_v2_rejects_unavailable_timeframe_before_loading_data(tmp_path):
     with pytest.raises(ValueError, match="not available"):
         model.build_v2_diagnostic_payload(chart_timeframe="7m")
     assert len(service.store.calls) == calls_before
+
+
+def test_photon_overlay_keeps_prior_history_for_both_traces(tmp_path):
+    from dataclasses import asdict
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
+    service, run_dir, manifest, market = _fixture(tmp_path)
+    start = market.period_start.iloc[240]
+    manifest["request"]["start"] = start.isoformat()
+    manifest["research"]["request"]["start"] = start.isoformat()
+    baseline = CompletedRunVisualizer.load(service, run_dir, manifest).build_v2_diagnostic_payload()
+    assert baseline["candles"][0]["time"] == int(start.timestamp())
+    profiles, _ = compile_profiles(direction_mode="PHOTON_STRUCTURE_MAP", market_permissions=MARKET_PERMISSIONS)
+    manifest["config"]["strategy"]["profiles"] = {k: asdict(v) for k, v in profiles.items()}
+    photon = CompletedRunVisualizer.load(service, run_dir, manifest).build_v2_diagnostic_payload()
+    assert photon["candles"][0]["time"] == int(market.period_start.iloc[0].timestamp())
+    assert photon["candles"][0]["time"] < int(start.timestamp())
+    assert set(photon["photonMapping"]["timeframes"]) == {"15m", "4h"}
+    assert all("trace" in guide for guide in photon["photonMapping"]["timeframes"].values())

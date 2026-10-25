@@ -7,12 +7,18 @@ Visualizer**. The structure overlay opens automatically. Use Day replay to
 advance candle by candle; the 4H and 15m states share the replay clock.
 
 The **View** selector offers **Candles**, **Structure lines**, and **Candles +
-structure lines**. The line view connects confirmed swing origins: **white for
-4H**, **blue for 15m**, with horizontal BOS/CHoCH references. It hides the candles
+structure lines**. Photon opens in **Structure lines** with both traces overlaid
+on one price/time chart: **white for 4H**, **blue for 15m**. Both histories stay
+visible together when scrolling or replaying. **Break levels** optionally adds
+BOS/CHoCH and protected-range references; it defaults off for a clean comparison.
+The line view hides the candles
 and grid for a diagram-like display, fitting the loaded period so larger swings
 are visible. Zoom remains available and the replay position is preserved.
-The latest unconfirmed leg and forecast arrows
-are deliberately omitted. Hover a swing dot for its confirmation time.
+Each solid trace connects all confirmed two-bar turning points on its own
+timeframe, including turns inside the protected structural range. These display
+turns do not change the separate BOS/CHoCH rules. A dashed developing leg reaches
+the latest completed candle on that timeframe. It is provisional, not a
+confirmed swing or future forecast. Hover a swing dot for its confirmation time.
 
 Each path uses only events known at the current replay clock. Consecutive same-
 side points simplify to the more extreme point; data gaps split the paths.
@@ -63,6 +69,9 @@ boundaries. Partial, duplicate, invalid and gapped buckets are excluded. A 4H
 snapshot becomes available only at the 4H close. Structure resets after a data
 gap; stale protected levels are not carried across it. The visualizer uses up
 to 60 calendar days of preceding canonical 15m history to establish context.
+That same context is included in the Photon chart so both historical traces
+have a visible timeline, even for a short selected analysis period. Other
+strategies keep their normal selected-period chart bounds.
 
 The display provides per-timeframe direction, internal phase, strong/weak range
 levels, HH/HL/LH/LL (and equal-point) labels, BOS, trend changes and CHoCH.

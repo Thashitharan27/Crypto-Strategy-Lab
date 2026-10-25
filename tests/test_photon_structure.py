@@ -24,6 +24,7 @@ def test_prefix_invariance_for_every_candle_including_mtf():
         for tf in ("15m", "4h"):
             assert prefix["timeframes"][tf]["snapshots"] == [s for s in full["timeframes"][tf]["snapshots"] if s["availableAt"] <= cutoff]
             assert prefix["timeframes"][tf]["events"] == [e for e in full["timeframes"][tf]["events"] if e["availableAt"] <= cutoff]
+            assert prefix["timeframes"][tf]["trace"] == [e for e in full["timeframes"][tf]["trace"] if e["availableAt"] <= cutoff]
 
 
 def test_breaks_require_close_but_internal_choch_can_be_wick_only():
@@ -217,3 +218,36 @@ def test_swing_lines_collapse_same_side_to_more_extreme_price():
     guide = {"events": [dict(kind="PIVOT", direction=d, fromTime=t, price=p, availableAt=t+1)
         for t, d, p in [(10, 1, 12), (20, 1, 11), (30, 1, 14), (40, -1, 8), (50, -1, 9), (60, -1, 7)]]}
     assert [p["price"] for p in _swing_lines(guide, 100)[0]] == [14, 7]
+
+
+def test_historical_trace_records_turns_inside_an_unchanged_swing_range():
+    mapping = map_structure(bars())
+    assert len(mapping["trace"]) > len([e for e in mapping["events"] if e["kind"] in ("PIVOT", "SWING")])
+    lines = _swing_lines(mapping, 160*900)
+    times = {p["time"] for line in lines for p in line}
+    assert len(times) > 15
+    assert min(times) < 20*900 and max(times) > 140*900
+
+
+def test_developing_leg_ends_at_closed_candle_and_does_not_cross_gaps():
+    import json
+    import shutil
+    import subprocess
+    from crypto_strategy_lab.visualizer_photon import PHOTON_HELPERS
+    node = shutil.which("node")
+    if not node:
+        import pytest
+        pytest.skip("Node required for developing-leg geometry")
+    guide = dict(interval=900, events=[], trace=[dict(kind="PIVOT", direction=1, fromTime=0, price=110, availableAt=2700)],
+        snapshots=[dict(availableAt=3600, close=105), dict(availableAt=4500, close=104)])
+    code = PHOTON_HELPERS + "\nconst g=" + json.dumps(guide) + ";" + """
+const a=cslPhotonDevelopingLeg(g,3600,cslPhotonSwingLines(g,3600));
+const before=cslPhotonDevelopingLeg(g,2699,cslPhotonSwingLines(g,2699));
+g.trace.push({kind:'GAP',availableAt:4500});
+const gap=cslPhotonDevelopingLeg(g,4500,cslPhotonSwingLines(g,4500));
+console.log(JSON.stringify([a,before,gap]));
+"""
+    result = subprocess.run([node], input=code, capture_output=True, text=True, check=True)
+    leg, before, gap = json.loads(result.stdout)
+    assert leg[-1] == dict(time=2700, price=105, availableAt=3600)
+    assert before is None and gap is None
