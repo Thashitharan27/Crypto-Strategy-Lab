@@ -11,6 +11,13 @@ from crypto_strategy_lab.photon_trend import MODE, trend_setups, resolve_retest
 from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
 
 
+def test_optional_chart_metadata_does_not_select_a_strategy():
+    from unittest.mock import Mock
+    from crypto_strategy_lab.photon_trend import selected
+    for missing in (None,[],Mock(),{}):
+        assert selected(missing) is False
+
+
 def walkthrough(short=False):
     """Authored causal context: reaction, alignment, pullback, shift, later fill."""
     t=1767225600
