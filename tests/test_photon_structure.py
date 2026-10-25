@@ -161,3 +161,59 @@ def test_mapping_browser_startup_disables_trade_controls():
     assert "$('manual-confirm').disabled=true" in html
     assert "body.mapping-only #trade-panel" in html
     assert "__PHOTON_HELPERS__" not in html
+    assert 'aria-label="Structure display"' in html
+    assert 'value="LINES">Structure lines' in html
+    assert 'value="BOTH">Candles + structure lines' in html
+    assert "applyPhotonDisplay();" in html
+
+
+def _swing_lines(guide, cutoff):
+    import json
+    import shutil
+    import subprocess
+    from crypto_strategy_lab.visualizer_photon import PHOTON_HELPERS
+    node = shutil.which("node")
+    if not node:
+        import pytest
+        pytest.skip("Node required for swing-line geometry")
+    code = PHOTON_HELPERS + "\nconsole.log(JSON.stringify(cslPhotonSwingLines(" + json.dumps(guide) + "," + str(cutoff) + ")));"
+    result = subprocess.run([node], input=code, capture_output=True, text=True, check=True)
+    return json.loads(result.stdout)
+
+
+def test_swing_lines_use_origin_only_after_confirmation_and_ignore_choch():
+    guide = {"events": [
+        dict(kind="PIVOT", direction=1, fromTime=100, price=12, availableAt=300),
+        dict(kind="SWING", direction=1, fromTime=200, price=8, availableAt=500),
+        dict(kind="CHOCH", direction=-1, fromTime=250, price=9, availableAt=550),
+        dict(kind="PIVOT", direction=1, fromTime=400, price=15, availableAt=700),
+    ]}
+    assert _swing_lines(guide, 299) == []
+    assert [p["time"] for p in _swing_lines(guide, 500)[0]] == [100, 200]
+    points = _swing_lines(guide, 700)[0]
+    assert [p["time"] for p in points] == [100, 200, 400]
+    assert [p["side"] for p in points] == [1, -1, 1]
+    assert all(p["availableAt"] <= 700 for p in points)
+
+
+def test_swing_lines_split_gaps_and_ambiguous_same_candle_extremes():
+    def point(time, direction, price):
+        return dict(kind="PIVOT", direction=direction, fromTime=time, price=price, availableAt=time+100)
+    guide = {"events": [point(100, 1, 12), point(200, -1, 8),
+        dict(kind="GAP", availableAt=350), point(400, 1, 16),
+        point(500, 1, 18), point(500, -1, 9), point(600, -1, 10), point(700, 1, 20)]}
+    paths = _swing_lines(guide, 900)
+    assert [[p["time"] for p in line] for line in paths] == [[100, 200], [400], [600, 700]]
+
+
+def test_swing_line_projection_matches_mapping_from_historical_prefix():
+    source = bars(80)
+    full = map_structure(source)
+    prefix = map_structure(source[:40])
+    assert _swing_lines(full, 40*900) == _swing_lines(prefix, 40*900)
+
+
+def test_swing_lines_collapse_same_side_to_more_extreme_price():
+    guide = {"events": [dict(kind="PIVOT", direction=d, fromTime=t, price=p, availableAt=t+1)
+        for t, d, p in [(10, 1, 12), (20, 1, 11), (30, 1, 14), (40, -1, 8), (50, -1, 9), (60, -1, 7)]]}
+    assert [p["price"] for p in _swing_lines(guide, 100)[0]] == [14, 7]

@@ -217,6 +217,7 @@ body.mapping-only #day-trade,body.mapping-only #manual-new-trade,
 body.mapping-only label:has(#day-side),body.mapping-only #replay-toggle{display:none!important}
 body.mapping-only #reviewbar{flex-wrap:wrap}
 body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
+body.structure-lines #day-layer{display:none}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
@@ -227,6 +228,12 @@ body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
     <span id="chart-symbol" class="symbol"></span>
     <label for="chart-timeframe">Chart timeframe</label>
     <select id="chart-timeframe" aria-label="Chart timeframe"></select>
+    <label id="photon-view-label" for="photon-view" hidden>View</label>
+    <select id="photon-view" aria-label="Structure display" hidden>
+      <option value="CANDLES">Candles</option>
+      <option value="LINES">Structure lines</option>
+      <option value="BOTH">Candles + structure lines</option>
+    </select>
     <button id="indicators-btn" aria-haspopup="dialog">ƒx Indicators <span id="indicator-count"></span></button>
     <button id="open-trade-plan" aria-controls="trade-panel" aria-pressed="false">Trade panel</button>
     <span class="toolbar-spacer"></span>
@@ -412,7 +419,29 @@ body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
     $('structure-review').title='Map completed candles only; no trade entries';
     $('manual-confirm').disabled=true;
     $('manual-confirm').hidden=true;
+    $('photon-view').hidden=false;
+    $('photon-view-label').hidden=false;
   }
+  function applyPhotonDisplay() {
+    if(!boot.run.mappingOnly || !candles || !chart)return;
+    const linesOnly=$('photon-view').value==='LINES';
+    document.body.classList.toggle('structure-lines',linesOnly);
+    candles.applyOptions({upColor:linesOnly?'transparent':'#089981',downColor:linesOnly?'transparent':'#f23645',
+      wickUpColor:linesOnly?'transparent':'#089981',wickDownColor:linesOnly?'transparent':'#f23645',
+      priceLineVisible:!linesOnly,lastValueVisible:!linesOnly});
+    chart.applyOptions({layout:{background:{type:'solid',color:linesOnly?'#08090c':'#131722'}},
+      timeScale:{minBarSpacing:linesOnly?.05:.5},
+      grid:{vertLines:{visible:!linesOnly},horzLines:{visible:!linesOnly}}});
+  }
+  $('photon-view').addEventListener('change',()=>{
+    $('structure-guide').checked=true;
+    applyPhotonDisplay();
+    if(chart && $('photon-view').value==='LINES') {
+      defaultPriceRange=null;priceZoomFactor=1;pricePanOffset=0;
+      chart.timeScale().fitContent();chart.priceScale('right').applyOptions({autoScale:true});
+    }
+    redrawOverlays();
+  });
   if (boot.run.emaReversal) {
     for (const input of indicatorInputs) input.checked=input.classList.contains('ema-period') && ['100','300'].includes(input.value);
   }
@@ -1980,6 +2009,7 @@ body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
       },
     });
     candles.setData(payload.candles || []);
+    applyPhotonDisplay();
     replaySeries.push({series:candles,kind:'candles',data:payload.candles || []});
     chart.subscribeClick(event=>{
       if(drawingClick(event))return;
