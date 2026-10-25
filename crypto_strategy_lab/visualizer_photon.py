@@ -102,8 +102,7 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
   select.disabled=!known.length;
   const selected=known[select.selectedIndex];
   $('photon-event-detail').textContent=selected?cslPhotonEventText(selected.tf,selected.e):'Waiting for a completed structure event.';
-  const dayEnd=dayMode?replayDay+86400:(bars.at(-1)?.time || 0)+chartInterval();
-  $('photon-next-event').disabled=!replayActive||replayRevealed||!cslPhotonNextEvent(mapping,cutoff,dayEnd);
+  $('photon-next-event').disabled=!replayActive||replayRevealed||!cslPhotonNextEvent(mapping,cutoff,replayEnd());
   if(!$('photon-context-details').open)return;
   const host=$('photon-context-chart'),width=Math.max(260,host.clientWidth),height=155;
   const series=[];

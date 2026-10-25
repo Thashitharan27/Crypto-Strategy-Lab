@@ -10,7 +10,7 @@ pullback model. Meaningful swing size remains a research interpretation.
 Select **Photon Market Structure — Parts 1 & 2 (mapping only)** in Strategy
 Builder, or load `config/data_lake/Photon_Structure_Parts_1_2.json`. Use a 15m
 dataset, choose a historical period, run the analysis, then open **Strategy
-Visualizer**. The structure overlay opens automatically. Use Day replay to
+Visualizer**. The structure overlay opens automatically. Use Structure replay to
 advance candle by candle; weekly, daily, 4H and 15m share the replay clock.
 
 The context strip sits above the main chart. Each timeframe has its own swing
@@ -26,8 +26,13 @@ period for detailed 4H/15m inspection.
 timeframe. The explanation identifies the wick/close rule, level price, origin
 time and knowledge time. Selecting a 4H/15m event centers and highlights it
 when it lies in loaded chart history. **Next structure event** advances an
-active day replay to the next known-by-then event, bounded by the day end.
+active structure replay to the next known-by-then event across UTC day boundaries.
 It does not preview future event names, directions or prices.
+**Next candle**, **Play**, and event stepping continue until the loaded history
+ends. The date follows the latest revealed candle; previous/next day and the
+date picker remain navigation shortcuts. **Restart replay** returns to the
+chosen starting day, and **Reveal remaining history** reveals through the loaded
+history end. Other strategies retain their day-bounded manual trading review.
 
 The **View** selector offers **Candles**, **Structure lines**, and **Candles +
 structure lines**. Photon opens in **Structure lines** with both traces overlaid
