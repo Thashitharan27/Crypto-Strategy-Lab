@@ -185,21 +185,26 @@ def _swing_lines(guide, cutoff):
 def test_swing_lines_use_origin_only_after_confirmation_and_ignore_choch():
     guide = {"events": [
         dict(kind="PIVOT", direction=1, fromTime=100, price=12, availableAt=300),
-        dict(kind="SWING", direction=1, fromTime=200, price=8, availableAt=500),
+        dict(kind="PIVOT", direction=-1, fromTime=200, price=8, availableAt=500),
         dict(kind="CHOCH", direction=-1, fromTime=250, price=9, availableAt=550),
+        dict(kind="BOS", direction=1, fromTime=100, price=12, availableAt=600),
+        dict(kind="SWING", direction=1, fromTime=200, price=8, availableAt=600),
         dict(kind="PIVOT", direction=1, fromTime=400, price=15, availableAt=700),
+        dict(kind="BOS", direction=1, fromTime=400, price=15, availableAt=800),
+        dict(kind="SWING", direction=1, fromTime=500, price=10, availableAt=800),
     ]}
-    assert _swing_lines(guide, 299) == []
-    assert [p["time"] for p in _swing_lines(guide, 500)[0]] == [100, 200]
-    points = _swing_lines(guide, 700)[0]
-    assert [p["time"] for p in points] == [100, 200, 400]
-    assert [p["side"] for p in points] == [1, -1, 1]
-    assert all(p["availableAt"] <= 700 for p in points)
+    assert _swing_lines(guide, 599) == []
+    assert [p["time"] for p in _swing_lines(guide, 600)[0]] == [100, 200]
+    assert _swing_lines(guide, 700) == _swing_lines(guide, 600)
+    points = _swing_lines(guide, 800)[0]
+    assert [p["time"] for p in points] == [100, 200, 400, 500]
+    assert [p["side"] for p in points] == [1, -1, 1, -1]
+    assert all(p["availableAt"] in (600, 800) for p in points)
 
 
 def test_swing_lines_split_gaps_and_ambiguous_same_candle_extremes():
     def point(time, direction, price):
-        return dict(kind="PIVOT", direction=direction, fromTime=time, price=price, availableAt=time+100)
+        return dict(kind="BOS_SWING", direction=direction, fromTime=time, price=price, availableAt=time+100)
     guide = {"events": [point(100, 1, 12), point(200, -1, 8),
         dict(kind="GAP", availableAt=350), point(400, 1, 16),
         point(500, 1, 18), point(500, -1, 9), point(600, -1, 10), point(700, 1, 20)]}
@@ -215,18 +220,53 @@ def test_swing_line_projection_matches_mapping_from_historical_prefix():
 
 
 def test_swing_lines_collapse_same_side_to_more_extreme_price():
-    guide = {"events": [dict(kind="PIVOT", direction=d, fromTime=t, price=p, availableAt=t+1)
+    guide = {"events": [dict(kind="BOS_SWING", direction=d, fromTime=t, price=p, availableAt=t+1)
         for t, d, p in [(10, 1, 12), (20, 1, 11), (30, 1, 14), (40, -1, 8), (50, -1, 9), (60, -1, 7)]]}
     assert [p["price"] for p in _swing_lines(guide, 100)[0]] == [14, 7]
 
 
-def test_historical_trace_records_turns_inside_an_unchanged_swing_range():
+def test_historical_trace_only_admits_points_at_close_confirmed_swing_breaks():
     mapping = map_structure(bars())
-    assert len(mapping["trace"]) > len([e for e in mapping["events"] if e["kind"] in ("PIVOT", "SWING")])
-    lines = _swing_lines(mapping, 160*900)
-    times = {p["time"] for line in lines for p in line}
-    assert len(times) > 15
-    assert min(times) < 20*900 and max(times) > 140*900
+    breaks = {e["availableAt"] for e in mapping["events"] if e["kind"] in ("BOS", "TREND_CHANGE")}
+    assert breaks and len(mapping["trace"]) == len(breaks)*2
+    assert mapping["traceBasis"] == "BOS_CONFIRMED"
+    assert all(e["kind"] == "BOS_SWING" and e["availableAt"] in breaks for e in mapping["trace"])
+    for i in range(1, len(mapping["snapshots"])):
+        at = mapping["snapshots"][i]["availableAt"]
+        if at not in breaks:
+            # Raw pivots and internal CHoCH cannot change the solid path.
+            before = [e for e in mapping["trace"] if e["availableAt"] <= at-900]
+            after = [e for e in mapping["trace"] if e["availableAt"] <= at]
+            assert before == after
+
+
+def test_legacy_raw_pivot_trace_cannot_reintroduce_noisy_lines():
+    guide = dict(trace=[dict(kind="PIVOT", direction=1, fromTime=100, price=12, availableAt=300)], events=[])
+    assert _swing_lines(guide, 500) == []
+
+
+def test_bullish_bos_confirms_pullback_low_only_when_high_closes_through():
+    values = [(100,98,99),(104,100,102),(110,103,108),(108,101,105),
+              (105,99,102),(103,95,98),(105,98,103),(108,100,106),
+              (113,105,112),(112,108,110),(111,107,109),(110,104,106),
+              (111,106,109),(112,107,110),(116,109,115)]
+    source = [dict(time=i*900, open=c, high=h, low=l, close=c) for i,(h,l,c) in enumerate(values)]
+    result = map_structure(source)
+    assert [e["availableAt"] for e in result["events"] if e["kind"] == "BOS"] == [8100,13500]
+    assert _swing_lines(result, 8099) == []
+    first = _swing_lines(result, 8100)[0]
+    assert [(p["time"],p["price"]) for p in first] == [(1800,110),(4500,95)]
+    # The next two-bar high and internal changes do not extend the solid line.
+    assert _swing_lines(result, 13499)[0] == first
+    second = _swing_lines(result, 13500)[0]
+    assert [(p["time"],p["price"]) for p in second] == [(1800,110),(4500,95),(7200,113),(9900,104)]
+    assert [p["availableAt"] for p in second] == [8100,8100,13500,13500]
+    # Exact inverse rule for bearish structure.
+    mirror = [dict(time=b["time"], open=300-b["open"], close=300-b["close"],
+                   high=300-b["low"], low=300-b["high"]) for b in source]
+    bearish = _swing_lines(map_structure(mirror),13500)[0]
+    assert [p["price"] for p in bearish] == [190,205,187,196]
+    assert [p["side"] for p in bearish] == [-1,1,-1,1]
 
 
 def test_developing_leg_ends_at_closed_candle_and_does_not_cross_gaps():
@@ -238,12 +278,13 @@ def test_developing_leg_ends_at_closed_candle_and_does_not_cross_gaps():
     if not node:
         import pytest
         pytest.skip("Node required for developing-leg geometry")
-    guide = dict(interval=900, events=[], trace=[dict(kind="PIVOT", direction=1, fromTime=0, price=110, availableAt=2700)],
+    guide = dict(interval=900, traceBasis="BOS_CONFIRMED", events=[], trace=[dict(kind="BOS_SWING", direction=1, fromTime=0, price=110, availableAt=2700)],
         snapshots=[dict(availableAt=3600, close=105), dict(availableAt=4500, close=104)])
     code = PHOTON_HELPERS + "\nconst g=" + json.dumps(guide) + ";" + """
 const a=cslPhotonDevelopingLeg(g,3600,cslPhotonSwingLines(g,3600));
 const before=cslPhotonDevelopingLeg(g,2699,cslPhotonSwingLines(g,2699));
 g.trace.push({kind:'GAP',availableAt:4500});
+g.events.push({kind:'GAP',availableAt:4500});
 const gap=cslPhotonDevelopingLeg(g,4500,cslPhotonSwingLines(g,4500));
 console.log(JSON.stringify([a,before,gap]));
 """

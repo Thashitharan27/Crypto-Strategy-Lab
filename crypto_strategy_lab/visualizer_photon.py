@@ -5,17 +5,20 @@ function cslPhotonSwingLines(guide,cutoff) {
   // Use origin times for geometry only after the event is known at the replay
   // clock. Never draw a forecast arrow or join structure across missing data.
   const groups=[[]];
-  for(const e of (guide.trace || guide.events)) {
+  // Older payloads may contain raw pivot traces: never use them as confirmed
+  // swing lines. Legacy BOS + SWING events provide the safe fallback.
+  const source=guide.traceBasis==='BOS_CONFIRMED'?guide.trace:guide.events;
+  for(const e of source) {
     if(e.availableAt>cutoff)continue;
     if(e.kind==='GAP'){groups.push([]);continue;}
-    if(!['PIVOT','SWING'].includes(e.kind))continue;
+    if(!['BOS_SWING','BOS','TREND_CHANGE','SWING'].includes(e.kind))continue;
     groups.at(-1).push({time:e.fromTime,price:e.price,
       side:e.kind==='SWING'?-e.direction:e.direction,availableAt:e.availableAt});
   }
   const segments=[];
   for(const group of groups) {
     group.sort((a,b)=>a.time-b.time || a.availableAt-b.availableAt);
-    const unique=new Map();for(const p of group)unique.set(p.time+':'+p.side,p);
+    const unique=new Map();for(const p of group)if(!unique.has(p.time+':'+p.side))unique.set(p.time+':'+p.side,p);
     const points=[...unique.values()].sort((a,b)=>a.time-b.time),ambiguous=new Set();
     for(let i=1;i<points.length;i++)if(points[i].time===points[i-1].time)ambiguous.add(points[i].time);
     let line=[];
@@ -36,7 +39,7 @@ function cslPhotonDevelopingLeg(guide,cutoff,segments) {
   while(lo<hi){const mid=(lo+hi)>>1;if(guide.snapshots[mid].availableAt<=cutoff)lo=mid+1;else hi=mid;}
   const s=lo?guide.snapshots[lo-1]:null,last=segments.at(-1)?.at(-1);
   if(!s || !last || !Number.isFinite(s.close) || cutoff>=s.availableAt+guide.interval)return null;
-  const gap=(guide.trace || guide.events).filter(e=>e.kind==='GAP'&&e.availableAt<=cutoff).at(-1);
+  const gap=guide.events.filter(e=>e.kind==='GAP'&&e.availableAt<=cutoff).at(-1);
   if(gap && last.availableAt<gap.availableAt)return null;
   const end={time:s.availableAt-guide.interval,price:s.close,availableAt:s.availableAt};
   return end.time>last.time?[last,end]:null;
@@ -90,7 +93,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
         }
         flush();
       }
-      const developing=cslPhotonDevelopingLeg(guide,cutoff,segments);
+      const developing=$('photon-developing')?.checked?cslPhotonDevelopingLeg(guide,cutoff,segments):null;
       if(developing) {
         const [a,b]=developing,ax=x(a.time),bx=x(b.time),ay=candles.priceToCoordinate(a.price),by=candles.priceToCoordinate(b.price);
         if(ax!=null&&bx!=null&&ay!=null&&by!=null)make('line',{x1:ax,x2:bx,y1:ay,y2:by,stroke:color,'stroke-width':tf==='4h'?2.8:1.6,'stroke-dasharray':'6 4','stroke-opacity':.75},tf+' developing leg to latest completed candle; not a confirmed swing');
@@ -131,6 +134,6 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   const h=view['4h']?.state,m=view['15m']?.state;
   let alignment='Waiting for swing confirmation';
   if(h?.trend && m?.trend)alignment=h.trend===m.trend?'15m aligned with 4H; possible continuation':'15m opposes 4H; possible 4H pullback';
-  $('photon-status').textContent='Mapping only · '+(showLines?'White: 4H · Blue: 15m · Solid: confirmed turns · Dashed: developing leg · 60 days of prior context | ':'')+summary.join(' | ')+' | '+alignment+' | Swing qualification: 2 bars each side (interpretation).';
+  $('photon-status').textContent='Mapping only · '+(showLines?'White: 4H · Blue: 15m · Solid lines: BOS-confirmed swings only · 60 days of prior context | ':'')+summary.join(' | ')+' | '+alignment+' | Swing candidates: 2 bars each side; confirmed only by a swing break.';
 }
 """
