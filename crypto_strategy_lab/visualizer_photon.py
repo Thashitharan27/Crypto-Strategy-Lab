@@ -52,6 +52,17 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   const mode=$('photon-view')?.value || 'CANDLES',showLines=mode!=='CANDLES';
   const x=t=>{const snapped=Math.floor(t/interval)*interval,cx=chart.timeScale().timeToCoordinate(snapped);
     return cx==null?null:cx+(showLines?(t-snapped)/interval*chart.timeScale().options().barSpacing:0);};
+  const labelBoxes=[];
+  const placeLabel=(text,cx,cy,color,title)=>{
+    const w=text.length*5.8+6,h=13;if(w>width)return;
+    const left=Math.max(3,Math.min(width-w,cx));
+    for(const offset of [-7,17,-23,33]) {
+      const top=cy+offset-11;
+      if(top<2 || top+h>height-2 || labelBoxes.some(b=>left<b.x+b.w && left+w>b.x && top<b.y+b.h && top+h>b.y))continue;
+      make('text',{x:left,y:top+11,fill:color,'font-size':10,'paint-order':'stroke',stroke:'#08090c','stroke-width':3},title,text);
+      labelBoxes.push({x:left-2,y:top-2,w:w+4,h:h+4});return;
+    }
+  };
   if(showLines) {
     // Draw the fine structure first so the larger 4H swing remains prominent.
     for(const tf of ['15m','4h']) {
@@ -70,7 +81,8 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     }
   }
   const summary=[];
-  for(const [tf,{state:s,events}] of Object.entries(view)) {
+  const layers=Object.entries(view);if(showLines)layers.sort(([a],[b])=>a==='4h'?-1:b==='4h'?1:0);
+  for(const [tf,{state:s,events}] of layers) {
     const name=tf==='4h'?'4H':'15m';
     if(!s){summary.push(name+': waiting for completed candles');continue;}
     const direction=s.trend===1?'Bullish':s.trend===-1?'Bearish':'Unknown';
@@ -80,20 +92,22 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
       const left=x(p.time) ?? 0,right=x(cutoff-interval) ?? width,color=tf==='4h'?'#fbbf24':'#60a5fa';
       const text=name+' '+(p.strong?'Strong ':s.trend?'Weak ':'Initial ')+key+(p.confirmed?'':' (developing)');
       make('line',{x1:left,x2:right,y1:y,y2:y,stroke:color,'stroke-width':tf==='4h'?2:1,'stroke-dasharray':p.strong?'none':'5 4'},text+' '+formatPrice(p.price));
-      make('text',{x:Math.max(5,right-260),y:Math.max(12,y+(key==='high'?-6:15)),fill:color,'font-size':11,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},text,text+' '+formatPrice(p.price));
+      if(showLines)placeLabel(name+' '+(p.strong?'strong ':'weak ')+(key==='high'?'H':'L'),right-100,y,tf==='4h'?'#f8fafc':'#72a7f5',text+' '+formatPrice(p.price));
+      else make('text',{x:Math.max(5,right-260),y:Math.max(12,y+(key==='high'?-6:15)),fill:color,'font-size':11,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},text,text+' '+formatPrice(p.price));
     }
     for(const e of events) {
       if(!['BOS','TREND_CHANGE','CHOCH','SWING','PIVOT'].includes(e.kind))continue;
       const cx=x(e.time),y=candles.priceToCoordinate(e.price);if(cx==null||cx<0||cx>width||y==null||y<0||y>height)continue;
       const color=showLines?(tf==='4h'?'#f8fafc':'#72a7f5'):e.direction===1?'#34d399':'#fb7185';
       if(showLines && ['BOS','TREND_CHANGE','CHOCH'].includes(e.kind)) {
-        const left=x(e.fromTime);if(left!=null)make('line',{x1:left,x2:cx,y1:y,y2:y,stroke:color,'stroke-width':1,'stroke-dasharray':e.kind==='CHOCH'?'3 3':'none','stroke-opacity':.6},tf+' '+e.kind+' '+formatPrice(e.price));
+        const left=x(e.fromTime) ?? (e.fromTime<bars[0].time?0:null);if(left!=null)make('line',{x1:left,x2:cx,y1:y,y2:y,stroke:color,'stroke-width':1,'stroke-dasharray':e.kind==='CHOCH'?'3 3':'none','stroke-opacity':.6},tf+' '+e.kind+' '+formatPrice(e.price));
       }
       if(showLines && ['SWING','PIVOT'].includes(e.kind))continue;
       const label=name+' '+(e.kind==='TREND_CHANGE'?'Trend change':e.kind==='CHOCH'?'CHoCH':e.label);
       const title=label+' · known '+fmtTime(e.availableAt)+' · level origin '+fmtTime(e.fromTime);
       make('circle',{cx,cy:y,r:3,fill:color},title);
-      make('text',{x:cx+4,y:y+(e.direction===1?-8:15),fill:color,'font-size':10,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},title,label);
+      if(showLines)placeLabel(label,cx+4,y,color,title);
+      else make('text',{x:cx+4,y:y+(e.direction===1?-8:15),fill:color,'font-size':10,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},title,label);
     }
   }
   const h=view['4h']?.state,m=view['15m']?.state;

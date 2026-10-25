@@ -217,6 +217,7 @@ body.mapping-only #day-trade,body.mapping-only #manual-new-trade,
 body.mapping-only label:has(#day-side),body.mapping-only #replay-toggle{display:none!important}
 body.mapping-only #reviewbar{flex-wrap:wrap}
 body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
+body.structure-lines #day-layer{display:none}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
@@ -424,6 +425,7 @@ body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
   function applyPhotonDisplay() {
     if(!boot.run.mappingOnly || !candles || !chart)return;
     const linesOnly=$('photon-view').value==='LINES';
+    document.body.classList.toggle('structure-lines',linesOnly);
     candles.applyOptions({upColor:linesOnly?'transparent':'#089981',downColor:linesOnly?'transparent':'#f23645',
       wickUpColor:linesOnly?'transparent':'#089981',wickDownColor:linesOnly?'transparent':'#f23645',
       priceLineVisible:!linesOnly,lastValueVisible:!linesOnly});
