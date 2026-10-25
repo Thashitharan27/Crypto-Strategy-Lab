@@ -14,11 +14,18 @@ BOS/CHoCH and protected-range references; it defaults off for a clean comparison
 The line view hides the candles
 and grid for a diagram-like display, fitting the loaded period so larger swings
 are visible. Zoom remains available and the replay position is preserved.
-Each solid trace connects all confirmed two-bar turning points on its own
-timeframe, including turns inside the protected structural range. These display
-turns do not change the separate BOS/CHoCH rules. A dashed developing leg reaches
-the latest completed candle on that timeframe. It is provisional, not a
-confirmed swing or future forecast. Hover a swing dot for its confirmation time.
+Each solid line connects **BOS-confirmed swing points only**, independently on
+its own timeframe. A two-bar pivot is only a candidate and cannot add a solid
+point. On an upward swing break, the broken high and the lowest pullback point
+that produced the break become confirmed anchors. On a downward break, the
+broken low and the highest pullback point become confirmed anchors. Opposite
+swing breaks confirm a trend change under the same close rule. Internal CHoCH
+does not add solid swing anchors.
+
+**Unconfirmed leg (dashed)** is optional and defaults off. When enabled, it
+reaches the latest completed candle on that timeframe and remains provisional.
+Hover a solid swing dot to see the BOS confirmation time, not the earlier date
+at which its candidate pivot formed. Historical raw-pivot traces are ignored.
 
 Each path uses only events known at the current replay clock. Consecutive same-
 side points simplify to the more extreme point; data gaps split the paths.

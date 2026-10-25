@@ -1,7 +1,8 @@
 """Mapping-only interpretation of Photon market structure Parts 1 and 2.
 
-No order, entry, stop or target is produced. Swing qualification is explicitly
-our two-sided pivot interpretation, not a rule specified by the videos.
+No order, entry, stop or target is produced. Candidate qualification uses our
+two-sided pivot interpretation; only close-confirmed swing breaks admit solid
+structural points. The videos do not specify a mechanical candidate threshold.
 """
 from __future__ import annotations
 
@@ -148,6 +149,14 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH):
             else:
                 label = "HH" if protected["price"] > prior["price"] else "LH" if protected["price"] < prior["price"] else "EH"
             emit("SWING", direction, protected, at, label)
+            # Only a close-confirmed swing break admits points to the solid
+            # structural zigzag: the level broken, then the origin that broke it.
+            trace.extend([
+                dict(kind="BOS_SWING", direction=direction, fromTime=broken["time"],
+                     price=broken["price"], availableAt=at, confirmedBy=kind),
+                dict(kind="BOS_SWING", direction=-direction, fromTime=protected["time"],
+                     price=protected["price"], availableAt=at, confirmedBy=kind),
+            ])
             if up:
                 previous_high = broken["price"]
                 low, low_ready = protected, True
@@ -172,11 +181,6 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH):
                 if not qualifies:
                     continue
                 p = point(j, key)
-                # Display trace includes every qualified turning point, even
-                # when the protected swing range has not changed. BOS logic
-                # below remains separate from this historical geometry.
-                trace.append(dict(kind="PIVOT", direction=1 if key == "high" else -1,
-                                  fromTime=p["time"], price=p["price"], availableAt=at))
                 if key == "high" and (trend == 0 or (trend == 1 and not high_ready and j >= last_break and price == high["price"])):
                     previous = previous_high if trend else high["price"] if high else None
                     high, high_ready = p, True
@@ -211,10 +215,10 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH):
         snapshots.append(dict(availableAt=at, close=b["close"], trend=trend, internal=internal,
                               high=dict(high, strong=trend == -1, confirmed=high_ready) if high else None,
                               low=dict(low, strong=trend == 1, confirmed=low_ready) if low else None, phase=phase))
-    return dict(events=events, trace=trace, snapshots=snapshots, interval=interval)
+    return dict(events=events, trace=trace, traceBasis="BOS_CONFIRMED", snapshots=snapshots, interval=interval)
 
 
 def build_mapping(bars):
     return dict(strategy=MODE, mappingOnly=True, swingStrength=SWING_STRENGTH,
-                qualification="Two bars on each side qualify swing pivots; implementation interpretation, not specified in the videos.",
+                qualification="Two-bar swing candidates; solid structural points require a candle-close swing break.",
                 timeframes={"15m": map_structure(bars), "4h": map_structure(aggregate_closed(bars), 14400)})
