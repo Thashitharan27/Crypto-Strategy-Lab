@@ -1938,8 +1938,8 @@ class RuleStrategyBuilder(QWidget):
         if self.direction_mode.currentData() == "PHOTON_STRUCTURE_MAP":
             self.summary.setText(
                 "Photon Parts 1 & 2 · Mapping only · No entries · Run on 15m, then open Strategy Visualizer. "
-                "4H + 15m; swing breaks use closes, internal CHoCH uses wicks. "
-                "Swing qualification: 2 bars each side (implementation interpretation)."
+                "Weekly/daily context above the 4H + 15m overlay; swing breaks use closes, internal CHoCH uses wicks. "
+                "Possible swing pullbacks qualify through internal CHoCH; research interpretation, not exact presenter validation."
             )
             return
         markets = []

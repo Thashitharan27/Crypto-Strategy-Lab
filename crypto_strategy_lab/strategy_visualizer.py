@@ -2224,7 +2224,7 @@ class CompletedRunVisualizer:
 
     def _photon_mapping_payload(self):
         """Independent chart analysis, never replay future HTF closes early."""
-        from crypto_strategy_lab.photon_structure import build_mapping, selected
+        from crypto_strategy_lab.photon_structure import CONTEXT_DAYS, build_mapping, selected
         config = getattr(self.seed, "config", None)
         strategy = getattr(config, "strategy", None)
         profiles = getattr(strategy, "profiles", {})
@@ -2232,7 +2232,7 @@ class CompletedRunVisualizer:
             return None
         if hasattr(self, "_photon_mapping_cache"):
             return self._photon_mapping_cache
-        start = _utc(self.seed.request.period_start) - pd.Timedelta(days=60)
+        start = _utc(self.seed.request.period_start) - pd.Timedelta(days=CONTEXT_DAYS)
         end = _utc(self.seed.request.period_end)
         frame = self._market_frame(start, end, chart_timeframe="15m")
         if frame.empty:
@@ -2240,7 +2240,8 @@ class CompletedRunVisualizer:
         bars = [dict(time=_unix_seconds(row["period_start"]), **{
             key: float(row[key]) for key in ("open", "high", "low", "close")
         }) for _, row in frame.iterrows()]
-        self._photon_mapping_cache = build_mapping(bars)
+        detail_start = _unix_seconds(_utc(self.seed.request.period_start) - pd.Timedelta(days=60))
+        self._photon_mapping_cache = build_mapping(bars, detail_start=detail_start)
         return self._photon_mapping_cache
 
     def build_v2_diagnostic_payload(

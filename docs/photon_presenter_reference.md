@@ -51,10 +51,10 @@ The broader narrated context is a bearish weekly/daily swing with a bullish 4H
 movement facilitating the daily pullback. These selected events do not establish
 new weekly or daily breaks.
 
-## Audit of the current implementation
+## Baseline audit before the context / pullback revision
 
 Reviewed `crypto_strategy_lab/photon_structure.py` and
-`crypto_strategy_lab/visualizer_photon.py`.
+`crypto_strategy_lab/visualizer_photon.py` before the revision described below.
 
 | Requirement | Current implementation | Assessment |
 | --- | --- | --- |
@@ -104,3 +104,23 @@ match, trading advantage, or BTC validation is claimed by this reference.
 The next implementation should first expose manually reviewable candidate
 selection and those unresolved choices, rather than replace one arbitrary
 pivot threshold with another and describe it as the presenter's method.
+
+## Implemented research revision
+
+The chart now uses internal CHoCH to qualify possible swing pullbacks instead
+of a fixed number of pivot bars. A qualifying CHoCH does not itself confirm a
+swing origin; the subsequent swing close-break does that. Candidate extremes
+and their reactions are shown with dashed lines. Active internal references
+and historical CHoCH/BOS markers remain separate from confirmed swing lines.
+
+Weekly/daily states and an expandable overview now accompany the 4H/15m
+overlay. All four states use the same replay cutoff. The event inspector
+shows the broken reference, wick/close meaning, origin and knowledge time.
+Narrative relationships retain "possible" wording and allow disagreement.
+
+The normalized fixtures in `tests/test_photon_presenter_sequences.py` reproduce
+the reference event ordering and confirmation distinctions, including the
+failed continuation. They are deliberately identified as authored examples,
+not source-video OHLC. Exact EURUSD reproduction, discretionary swing size,
+and the origin-candle exclusion convention remain unresolved. Passing these
+tests is evidence of semantic alignment, not proof of exact presenter fidelity.

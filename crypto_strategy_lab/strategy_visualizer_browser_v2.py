@@ -217,7 +217,31 @@ body.mapping-only #day-trade,body.mapping-only #manual-new-trade,
 body.mapping-only label:has(#day-side),body.mapping-only #replay-toggle{display:none!important}
 body.mapping-only #reviewbar{flex-wrap:wrap}
 body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
+body.mapping-only{overflow:auto}
+body.mapping-only #app{grid-template-rows:auto auto minmax(300px,1fr) auto auto;grid-template-areas:'top' 'context' 'chart' 'playback' 'diagnostics';min-height:100%}
+body.mapping-only #workspace{min-height:300px}
+body.mapping-only #reviewbar{overflow:visible;white-space:normal}
+body.mapping-only #reviewbar>*{max-width:100%;flex-shrink:1}
+body.mapping-only #toolbar{flex-wrap:wrap}
 body.structure-lines #day-layer{display:none}
+#photon-context[hidden]{display:none}
+#photon-context{flex-basis:100%;min-width:0}
+#photon-context-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:#344155}
+.photon-context-state{padding:9px 12px;background:#111e2c;min-width:0;line-height:1.5}
+.photon-context-state strong,.photon-context-state small{display:block}
+.photon-context-state small{color:#b3c3d5}
+#photon-context details{padding:6px 0}
+#photon-context summary{cursor:pointer}
+#photon-context-chart{height:155px;min-width:0;cursor:crosshair}
+#photon-context-chart svg{display:block;width:100%;height:155px}
+#photon-event-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-top:6px}
+#photon-event-select{max-width:100%;min-width:0;flex:1}
+#photon-event-detail{font-size:12px;line-height:1.6;padding:6px 0;color:#c5d4e6;white-space:normal}
+body.mapping-only #replay-controls>strong,body.mapping-only #manual-workflow-state,
+body.mapping-only #replay-controls>[data-replay-decision],body.mapping-only #replay-notes,
+body.mapping-only #replay-controls>.manual-plan,body.mapping-only #replay-report,
+body.mapping-only #replay-export{display:none!important}
+@media(max-width:650px){#photon-context-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
@@ -266,6 +290,17 @@ body.structure-lines #day-layer{display:none}
     <div id="active-indicators" aria-label="Active indicators"></div>
     <span id="timeframe-note" class="muted" role="status"></span>
     <span id="photon-status" class="muted" role="status" style="display:block;max-width:100%;white-space:normal"></span>
+    <section id="photon-context" aria-label="Multi-timeframe market narrative" hidden>
+      <div id="photon-context-strip" aria-live="polite"></div>
+      <details id="photon-context-details"><summary>Weekly / daily context · shared replay clock</summary>
+        <div id="photon-context-chart" aria-label="Weekly and daily structure overview"></div>
+      </details>
+      <div id="photon-event-row"><label for="photon-event-select">Inspect event</label>
+        <select id="photon-event-timeframe" aria-label="Event timeframe"><option value="15m">15m</option><option value="4h">4H</option><option value="1d">Daily</option><option value="1w">Weekly</option></select>
+        <select id="photon-event-select" aria-label="Known structure events"></select>
+        <button id="photon-next-event" disabled>Next structure event</button></div>
+      <div id="photon-event-detail" role="status"></div>
+    </section>
     <div id="replay-controls" hidden>
       <strong>Your judgement:</strong>
       <span id="manual-workflow-state" role="status"></span><button data-replay-decision="Wait">Wait</button><button data-replay-decision="Skip">Skip</button><button data-replay-decision="Unsure">Unsure</button>
@@ -426,6 +461,9 @@ body.structure-lines #day-layer{display:none}
     $('photon-view').value='LINES';
     $('photon-labels-wrap').hidden=false;
     $('photon-developing-wrap').hidden=false;
+    $('photon-context').hidden=false;
+    $('photon-labels').checked=true;
+    $('photon-developing').checked=true;
   }
   function applyPhotonDisplay() {
     if(!boot.run.mappingOnly || !candles || !chart)return;
@@ -449,6 +487,26 @@ body.structure-lines #day-layer{display:none}
   });
   $('photon-labels').addEventListener('change',redrawOverlays);
   $('photon-developing').addEventListener('change',redrawOverlays);
+  $('photon-event-select').addEventListener('change',()=>{
+    $('photon-event-select').dataset.pinned='true';
+    const market=replayChartSource || marketPayload || sourcePayload,tf=$('photon-event-timeframe').value,guide=market?.photonMapping?.timeframes[tf];
+    const event=guide?.events.find(e=>tf+':'+e.availableAt+':'+e.kind===$('photon-event-select').value);
+    const cutoff=replayActive?replayCutoff:(market?.candles?.at(-1)?.time || 0)+chartInterval();
+    if(event&&['4h','15m'].includes(tf)&&event.time>=market.candles[0].time&&event.availableAt<=cutoff) {
+      chart.timeScale().setVisibleRange({from:Math.max(market.candles[0].time,event.time-12*guide.interval),to:Math.min(cutoff,event.time+12*guide.interval)});
+    }
+    redrawOverlays();
+  });
+  $('photon-event-timeframe').addEventListener('change',()=>{$('photon-event-select').dataset.pinned='false';redrawOverlays();});
+  $('photon-context-details').addEventListener('toggle',redrawOverlays);
+  $('photon-next-event').addEventListener('click',()=>{
+    if(!boot.run.mappingOnly || !replayActive || replayBusy || replayRevealed)return;
+    const market=replayChartSource || marketPayload || sourcePayload;
+    const end=dayMode?replayDay+86400:(sourcePayload?.candles?.at(-1)?.time || 0)+replayInterval;
+    const next=cslPhotonNextEvent(market?.photonMapping,replayCutoff,end);
+    if(!next)return;
+    stopReplay();replayCutoff=next;refreshReplay();
+  });
   if (boot.run.emaReversal) {
     for (const input of indicatorInputs) input.checked=input.classList.contains('ema-period') && ['100','300'].includes(input.value);
   }
@@ -720,7 +778,7 @@ body.structure-lines #day-layer{display:none}
     return {entry:Number(trade.Entry),stop:Number(trade.Stop),target:Number(trade.Target),entryTime:bar?.time ?? time,interval:replayInterval,timeframe:boot.run.timeframe};
   }
   function manualPlanLocked() {
-    return replayBusy || replayRevealed || Boolean(currentReview()?.manualEntry);
+    return boot.run.mappingOnly || replayBusy || replayRevealed || Boolean(currentReview()?.manualEntry);
   }
   function manualMarket(record=currentReview()) {
     const entry=record?.manualEntry || manualPlanDraft;
@@ -856,7 +914,7 @@ body.structure-lines #day-layer{display:none}
   function updateReplayControls() {
     const record=currentReview();
     workspacePanels.setReplay(replayActive);
-    $('workspace-clock').textContent=replayActive?fmtTime(replayCutoff)+' UTC · '+cslManualReviewState(record):'';
+    $('workspace-clock').textContent=replayActive?fmtTime(replayCutoff)+' UTC'+(boot.run.mappingOnly?' · Structure replay':' · '+cslManualReviewState(record)):'';
     $('replay-reveal').textContent=dayMode?'Reveal day':'Reveal result';
     $('replay-restart').textContent=dayMode?'Restart day':'Restart at entry';
     $('manual-reset').textContent=dayMode?'Reset starting levels':'Use auto levels';
@@ -1074,6 +1132,7 @@ body.structure-lines #day-layer{display:none}
     $('manual-entry').value=bar.close;manualEntryMessage='Current closed candle selected. Check SL/TP, then confirm entry.';refreshManualPlan();showManualBox();
   });
   $('manual-confirm').addEventListener('click',()=>{
+    if(boot.run.mappingOnly)return;
     if(manualPlanLocked()) return;
     stopReplay();refreshManualPlan();if(manualPlanDraft.error)return;
     ensureReview();storeManualPlan();const record=currentReview();
@@ -1901,6 +1960,7 @@ body.structure-lines #day-layer{display:none}
   }
   function drawTradeBox() {
     tradeBoxLayer.replaceChildren();
+    if(boot.run.mappingOnly){$('trade-card').hidden=true;return;}
     $('trade-card').hidden=!(payload && chart && candles && replayActive && manualPlanDraft);
     if (!payload || !chart || !candles) return;
     const manual=Boolean(replayActive && manualPlanDraft);

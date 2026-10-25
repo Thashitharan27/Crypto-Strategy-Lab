@@ -1089,5 +1089,5 @@ def test_photon_overlay_keeps_prior_history_for_both_traces(tmp_path):
     photon = CompletedRunVisualizer.load(service, run_dir, manifest).build_v2_diagnostic_payload()
     assert photon["candles"][0]["time"] == int(market.period_start.iloc[0].timestamp())
     assert photon["candles"][0]["time"] < int(start.timestamp())
-    assert set(photon["photonMapping"]["timeframes"]) == {"15m", "4h"}
+    assert set(photon["photonMapping"]["timeframes"]) == {"1w", "1d", "15m", "4h"}
     assert all("trace" in guide for guide in photon["photonMapping"]["timeframes"].values())
