@@ -66,6 +66,13 @@ zone touch, 1m CHoCH, origin limit, stop and target. The overlay includes the
 saved 4H/15m range bounds and 50% midpoints. Evidence is frozen at the decision;
 later candles cannot rewrite it.
 
+The same chart also includes the full 4H/15m structure overlay, BOS/CHoCH levels,
+developing legs, weekly/daily narrative and zone inspector, even for zero-trade
+runs. It defaults to candles plus structure lines; the View selector also offers
+lines alone. Trading charts derive structure from the engine's actual 1m source
+and identical warmup boundary, rather than independently seeding a longer 15m
+history. The mapping-only strategy retains its own analysis history and controls.
+
 The sequence follows the supplied walkthroughs, adapted to crypto data. The
 last-opposing-candle zone selection, strict simultaneous value filters, expiry
 times, ATR buffer, minimum R and single-target execution are explicit mechanical

@@ -230,7 +230,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   const h=view['4h']?.state,m=view['15m']?.state;
   let alignment='Waiting for swing confirmation';
   if(h?.trend && m?.trend)alignment=h.trend===m.trend?'15m aligned with 4H; possible continuation':'15m opposes 4H; possible 4H pullback';
-  $('photon-status').textContent='Mapping only · '+(showLines?'4H: white · 15m: blue · Solid: confirmed · Dashed: developing':'Swing and internal structure at completed candles');
+  $('photon-status').textContent=(mapping.mappingOnly?'Mapping only':'4H trend trades + structure')+' · '+(showLines?'4H: white · 15m: blue · Solid: confirmed · Dashed: developing':'Swing and internal structure at completed candles');
   $('photon-status').title=alignment+' · '+(mapping.schemaVersion===2?'CHoCH-qualified pullbacks; rules-based crypto mapping.':'Legacy two-bar swing qualification.');
   drawPhotonContext(mapping,cutoff,view,bars);
   const tf=$('photon-event-timeframe')?.value,guide=mapping.timeframes[tf];
