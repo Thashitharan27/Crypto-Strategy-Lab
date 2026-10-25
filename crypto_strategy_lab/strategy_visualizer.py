@@ -2225,23 +2225,37 @@ class CompletedRunVisualizer:
     def _photon_mapping_payload(self):
         """Independent chart analysis, never replay future HTF closes early."""
         from crypto_strategy_lab.photon_structure import CONTEXT_DAYS, build_mapping, selected
+        from crypto_strategy_lab.photon_trend import selected as trading_selected, prepare_context, MODE
         config = getattr(self.seed, "config", None)
         strategy = getattr(config, "strategy", None)
         profiles = getattr(strategy, "profiles", {})
-        if not selected(profiles):
+        trading = trading_selected(profiles)
+        if not selected(profiles) and not trading:
             return None
         if hasattr(self, "_photon_mapping_cache"):
             return self._photon_mapping_cache
-        start = _utc(self.seed.request.period_start) - pd.Timedelta(days=CONTEXT_DAYS)
+        start = _utc(self.seed.request.period_start) - (
+            strategy_warmup_period(config) if trading else pd.Timedelta(days=CONTEXT_DAYS)
+        )
         end = _utc(self.seed.request.period_end)
-        frame = self._market_frame(start, end, chart_timeframe="15m")
+        frame = self._market_frame(start, end, chart_timeframe="1m" if trading else "15m")
         if frame.empty:
-            raise ValueError("Photon mapping requires canonical 15m candles; select a 15m dataset")
+            raise ValueError("Photon mapping requires canonical candles on its source timeframe")
         bars = [dict(time=_unix_seconds(row["period_start"]), **{
             key: float(row[key]) for key in ("open", "high", "low", "close")
         }) for _, row in frame.iterrows()]
-        detail_start = _unix_seconds(_utc(self.seed.request.period_start) - pd.Timedelta(days=60))
-        self._photon_mapping_cache = build_mapping(bars, detail_start=detail_start)
+        if trading:
+            # Match the trading engine's minute source and exact warmup boundary.
+            # A separately seeded 15m history can choose different swing anchors.
+            guides = prepare_context(bars)
+            self._photon_mapping_cache = dict(
+                strategy=MODE, mappingOnly=False, schemaVersion=2,
+                contextDays=int(strategy_warmup_period(config) / pd.Timedelta(days=1)),
+                timeframes={tf:g for tf,g in guides.items() if tf!="1m"},
+            )
+        else:
+            detail_start = _unix_seconds(_utc(self.seed.request.period_start) - pd.Timedelta(days=60))
+            self._photon_mapping_cache = build_mapping(bars, detail_start=detail_start)
         return self._photon_mapping_cache
 
     def build_v2_diagnostic_payload(
@@ -2278,9 +2292,11 @@ class CompletedRunVisualizer:
             if strategy_timeframe == chart_timeframe else interval * 2240
         )
         from crypto_strategy_lab.photon_structure import selected as photon_selected
+        from crypto_strategy_lab.photon_trend import selected as photon_trading_selected
         mapping_only = photon_selected(self.seed.config.strategy.profiles)
-        display_start = run_start - pd.Timedelta(days=60) if mapping_only else run_start
-        if mapping_only:
+        photon_structure = mapping_only or photon_trading_selected(self.seed.config.strategy.profiles)
+        display_start = run_start - pd.Timedelta(days=60) if photon_structure else run_start
+        if photon_structure:
             calculation_start = min(calculation_start, display_start)
         market = self._market_frame(
             calculation_start,

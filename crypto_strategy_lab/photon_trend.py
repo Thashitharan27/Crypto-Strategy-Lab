@@ -4,6 +4,7 @@ Numerical defaults and the last-opposing-candle zone rule are explicit research
 choices. No counter-4H orders, same-confirmation-candle fills or FX pip stops.
 """
 from collections import defaultdict
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -20,6 +21,7 @@ LABEL = "Photon — 4H Trend / 1m Confirmation"
 
 
 def selected(profiles):
+    if not isinstance(profiles,Mapping):return False
     return any(r.get("_strategy_direction_mode")==MODE for p in profiles.values()
                for r in getattr(p,"entry_rules",()))
 

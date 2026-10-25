@@ -23,6 +23,7 @@ from crypto_strategy_lab.visualizer_drawings import DRAWING_HELPERS
 from crypto_strategy_lab.visualizer_structure import STRUCTURE_HELPERS
 from crypto_strategy_lab.visualizer_photon import PHOTON_HELPERS
 from crypto_strategy_lab.photon_structure import selected as photon_selected
+from crypto_strategy_lab.photon_trend import selected as photon_trading_selected
 from crypto_strategy_lab.visualizer_workspace import WORKSPACE_HELPERS, WORKSPACE_STYLES
 from crypto_strategy_lab.visualizer_review_report import build_review_report_html
 
@@ -62,6 +63,8 @@ def build_browser_visualizer_v2_html(
             "manualCosts": manual_costs,
             "emaReversal": getattr(model, "_ema_source", lambda period: "close")(300) == "high",
             "mappingOnly": photon_selected(getattr(getattr(getattr(model.seed, "config", None), "strategy", None), "profiles", {})),
+            "photonStructure": any(select(getattr(getattr(getattr(model.seed,"config",None),"strategy",None),"profiles",{})) for select in (photon_selected,photon_trading_selected)),
+            "photonTrading": photon_trading_selected(getattr(getattr(getattr(model.seed,"config",None),"strategy",None),"profiles",{})),
         },
     }
     encoded = json.dumps(bootstrap, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
@@ -481,9 +484,11 @@ body.mapping-only #replay-export{display:none!important}
     $('structure-review').title='Map completed candles only; no trade entries';
     $('manual-confirm').disabled=true;
     $('manual-confirm').hidden=true;
+  }
+  if(boot.run.photonStructure) {
     $('photon-view').hidden=false;
     $('photon-view-label').hidden=false;
-    $('photon-view').value='LINES';
+    $('photon-view').value=boot.run.mappingOnly?'LINES':'BOTH';
     $('photon-labels-wrap').hidden=false;
     $('photon-developing-wrap').hidden=false;
     $('photon-context').hidden=false;
@@ -491,7 +496,7 @@ body.mapping-only #replay-export{display:none!important}
     $('photon-developing').checked=true;
   }
   function applyPhotonDisplay() {
-    if(!boot.run.mappingOnly || !candles || !chart)return;
+    if(!boot.run.photonStructure || !candles || !chart)return;
     const linesOnly=$('photon-view').value==='LINES';
     document.body.classList.toggle('structure-lines',linesOnly);
     candles.applyOptions({upColor:linesOnly?'transparent':'#089981',downColor:linesOnly?'transparent':'#f23645',
@@ -545,7 +550,7 @@ body.mapping-only #replay-export{display:none!important}
   $('photon-event-timeframe').addEventListener('change',()=>{$('photon-event-select').dataset.pinned='false';redrawOverlays();});
   $('photon-context-details').addEventListener('toggle',redrawOverlays);
   $('photon-next-event').addEventListener('click',()=>{
-    if(!boot.run.mappingOnly || !replayActive || replayBusy || replayRevealed)return;
+    if(!boot.run.photonStructure || !replayActive || replayBusy || replayRevealed)return;
     const market=replayChartSource || marketPayload || sourcePayload;
     const end=replayEnd();
     const next=cslPhotonNextEvent(market?.photonMapping,replayCutoff,end);
@@ -1500,13 +1505,13 @@ body.mapping-only #replay-export{display:none!important}
     const market=replayChartSource || marketPayload || sourcePayload,bars=market?.candles || [];
     if(!bars.length)return;
     const interval=chartInterval(),strength=boot.run.swingStrength || 2;
+    const end=bars.at(-1).time+interval,range=chart.timeScale().getVisibleRange();
+    const cutoff=replayActive?Math.min(replayCutoff,end):Math.min(end,Number.isFinite(range?.to)?range.to+interval:end);
+    if(market.photonMapping){drawPhotonMapping(market.photonMapping,cutoff,bars,interval,layer);return;}
     let cached=structureCache.get(bars);
     if(!cached || cached.interval!==interval || cached.strength!==strength) {
       cached=cslBuildStructureGuide(bars,interval,strength,64);structureCache.set(bars,cached);
     }
-    const end=bars.at(-1).time+interval,range=chart.timeScale().getVisibleRange();
-    const cutoff=replayActive?Math.min(replayCutoff,end):Math.min(end,Number.isFinite(range?.to)?range.to+interval:end);
-    if(market.photonMapping){drawPhotonMapping(market.photonMapping,cutoff,bars,interval,layer);return;}
     const view=cslStructureGuideView(cached,cutoff),height=chart.panes()[0].getHeight(),width=chartWrap.clientWidth-76;
     layer.style.height=height+'px';
     const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
@@ -1651,7 +1656,7 @@ body.mapping-only #replay-export{display:none!important}
 
   function drawFvgOverlay() {
     fvgLayer.replaceChildren();
-    if($('structure-guide').checked)return;
+    if($('structure-guide').checked && !boot.run.photonTrading)return;
     if(dayMode && payload?.dayContext && chart && candles) {
       const height=chart.panes()[0].getHeight(),right=chartWrap.clientWidth-76;
       fvgLayer.style.height=height+'px';

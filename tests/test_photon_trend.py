@@ -11,6 +11,13 @@ from crypto_strategy_lab.photon_trend import MODE, trend_setups, resolve_retest
 from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
 
 
+def test_optional_chart_metadata_does_not_select_a_strategy():
+    from unittest.mock import Mock
+    from crypto_strategy_lab.photon_trend import selected
+    for missing in (None,[],Mock(),{}):
+        assert selected(missing) is False
+
+
 def walkthrough(short=False):
     """Authored causal context: reaction, alignment, pullback, shift, later fill."""
     t=1767225600
@@ -87,6 +94,57 @@ def test_optional_4h_target_uses_its_own_saved_anchor():
     s=trend_setups(bars,np.ones(len(bars)),guides=guides,target_4h=True)[0][4]
     assert s['target']==150 and s['targetMode']=='4H_SWING'
     assert pd.Timestamp(s['opposingZone']['pivotTime']).timestamp()==h['high']['time']
+
+
+def test_trade_chart_uses_the_engine_minute_mapping_and_warmup():
+    from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
+    from crypto_strategy_lab.data_lake_config import load_data_lake_config
+    from crypto_strategy_lab.research_warmup import strategy_warmup_period
+    from crypto_strategy_lab.photon_trend import prepare_context
+    c=load_data_lake_config('config/data_lake/Photon_4H_Trend_1m.json')
+    bars,_=walkthrough()
+    frame=pd.DataFrame(bars)
+    frame['period_start']=pd.to_datetime(frame.time,unit='s',utc=True)
+    model=object.__new__(CompletedRunVisualizer)
+    start=pd.Timestamp('2026-01-01',tz='UTC');end=start+pd.Timedelta(days=1)
+    model.seed=SimpleNamespace(config=c,request=SimpleNamespace(period_start=start,period_end=end))
+    seen=[]
+    def market(a,b,*,chart_timeframe):
+        seen.append((a,b,chart_timeframe))
+        return frame
+    model._market_frame=market
+    mapping=model._photon_mapping_payload()
+    assert seen==[(start-strategy_warmup_period(c),end,'1m')]
+    assert mapping['mappingOnly'] is False and mapping['strategy']==MODE
+    expected=prepare_context(bars)
+    for tf in ('15m','4h','1d','1w'):
+        assert mapping['timeframes'][tf]==expected[tf]
+    assert model._photon_mapping_payload() is mapping and len(seen)==1
+
+
+@pytest.mark.parametrize('mode',[MODE,'PHOTON_STRUCTURE_MAP'])
+def test_chart_controls_show_structure_without_disabling_trades(mode):
+    import re, shutil, subprocess
+    from crypto_strategy_lab.strategy_visualizer_browser_v2 import build_browser_visualizer_v2_html
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for browser control projection')
+    profiles,_=compile_profiles(direction_mode=mode,market_permissions=MARKET_PERMISSIONS)
+    model=SimpleNamespace(seed=SimpleNamespace(request=SimpleNamespace(symbol='BTCUSDT',strategy_timeframe='1m'),config=SimpleNamespace(strategy=SimpleNamespace(profiles=profiles))),
+        run_dir=SimpleNamespace(name='test'),manifest={},trade_count=0)
+    html=build_browser_visualizer_v2_html(model,'photon')
+    boot=json.loads(re.search(r'const boot = (.*?);',html).group(1))
+    init=html[html.index('  if(boot.run.mappingOnly) {'):html.index('  function applyPhotonDisplay()')]
+    js="const boot="+json.dumps(boot)+";const nodes={};const $=id=>nodes[id]??(nodes[id]={hidden:true,disabled:false});const indicatorInputs=[];const document={body:{classList:{add(){}}}};"+init+";console.log(JSON.stringify(nodes));"
+    nodes=json.loads(subprocess.run([node],input=js,text=True,capture_output=True,check=True).stdout)
+    assert nodes['photon-view']['hidden'] is False
+    assert nodes['photon-context']['hidden'] is False
+    if mode==MODE:
+        assert not boot['run']['mappingOnly'] and boot['run']['photonTrading']
+        assert nodes['photon-view']['value']=='BOTH'
+        assert 'manual-confirm' not in nodes  # trading controls never disabled
+    else:
+        assert nodes['photon-view']['value']=='LINES'
+        assert nodes['manual-confirm']['disabled'] is True
 
 
 @pytest.mark.parametrize('short',[False,True])
