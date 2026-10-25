@@ -6,6 +6,20 @@ dataset, choose a historical period, run the analysis, then open **Strategy
 Visualizer**. The structure overlay opens automatically. Use Day replay to
 advance candle by candle; the 4H and 15m states share the replay clock.
 
+The **View** selector offers **Candles**, **Structure lines**, and **Candles +
+structure lines**. The line view connects confirmed swing origins: **white for
+4H**, **blue for 15m**, with horizontal BOS/CHoCH references. It hides the candles
+and grid for a diagram-like display, fitting the loaded period so larger swings
+are visible. Zoom remains available and the replay position is preserved.
+The latest unconfirmed leg and forecast arrows
+are deliberately omitted. Hover a swing dot for its confirmation time.
+
+Each path uses only events known at the current replay clock. Consecutive same-
+side points simplify to the more extreme point; data gaps split the paths.
+Two opposing swing origins sharing a candle have unknown intrabar order, so
+the path splits there rather than inventing a high/low sequence. This display
+does not change the strategy's mapping calculations or its no-entry gate.
+
 This is structure analysis, not an entry strategy. The engine refuses entries
 and direct pair opening in this mode, regardless of Entry/Veto/Flip rules or
 market permissions. No M1 execution, supply/demand entry zones, stops, targets,
