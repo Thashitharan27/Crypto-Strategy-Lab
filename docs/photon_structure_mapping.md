@@ -1,11 +1,85 @@
-# Photon Market Structure — Parts 1 & 2
+# Photon Market Structure — Structure, Premium/Discount and Supply/Demand
 
-**Fidelity status:** this implementation has not been validated candle by candle
-against the presenter's walkthrough. See
-[the reference sequences and rule audit](photon_presenter_reference.md) before
-interpreting the plotted swings as a reproduction of his method. The chart now
-implements the approved weekly/daily context layout and a CHoCH-qualified
-pullback model. Meaningful swing size remains a research interpretation.
+**Rule basis:** the chart uses weekly/daily context, CHoCH-qualified possible
+swing pullbacks and close-confirmed swing breaks. See
+[the reference sequences and rule audit](photon_presenter_reference.md) for the
+source lesson relationships. Meaningful swing size and zone boundaries use the
+explicit mechanical interpretations documented below.
+
+The saved strategy retains its **Parts 1 & 2** name for compatibility. It now
+also includes the rules-based mapping tools from the supplied **Premium vs
+Discount** lesson. The purpose is applying these rules to crypto; matching the
+presenter's exact FX feed or chart markings is not a prerequisite.
+
+## Premium / discount and supply / demand
+
+Each known swing range has a midpoint **EQ = (high + low) / 2**. The context
+strip reports the latest known 15m close relative to each timeframe's own
+range: discount below EQ, premium above EQ, and EQ at equality. Prices outside
+an endpoint are explicitly labelled above/below range. Initial unknown ranges
+and stale/missing states remain unknown. These relative locations are not
+fundamental valuation or entry signals.
+
+**Premium / discount** shades the selected **4H**, **15m** or **daily** current
+range and draws its EQ. Only one range is shaded at a time to keep the chart
+readable; the strip keeps the other timeframe locations visible. The shaded
+range is a current replay-time reference, not a claim that its final endpoint
+was already known throughout its history. Developing run endpoints and
+pullback candidates are labelled separately. Range snapshots retain their
+knowledge times, so future highs/lows cannot affect earlier replay cutoffs.
+
+**Supply / demand zones** provides independent daily, 4H and 15m switches. The
+default overlay shows up to two nearby supply and two nearby demand zones per
+enabled timeframe, ordered by distance from the current known price. Daily
+zones retain their source identity on the 15m chart. Boxes do not change the
+main chart's price scale. Expand the panel and choose a zone to inspect its
+origin, structural confirmation, full price bounds, creation/current EQ
+location, visits and invalidation. Selecting an older ended zone also allows
+explicit inspection; **Include ended zones** adds ended references to the
+nearby display. The summary distinguishes nearby zones from those actually in
+the visible price/time window. **Focus selected zone** explicitly fits the
+zone and visible candles; ordinary zone rendering leaves the price scale
+unchanged. Ended zones can also center their historical lifetime, when it is
+inside loaded main-chart history. **Reset price** restores normal scaling.
+Weekly remains narrative/range context; M1 execution is absent.
+
+### Explicit zone rules
+
+- Only a **close-confirmed BOS or swing change** creates a candidate zone.
+  CHoCH alone does not manufacture a supply/demand box.
+- Search the originating swing leg from its newly confirmed protected point
+  up to, but excluding, the breaking candle. Use the last candle whose **body
+  opposes the break direction**: bearish for demand, bullish for supply.
+  This candle-colour choice defines zone origins only; structure breaks still
+  ignore candle colour. Dojis are not opposing candles.
+- Bound the box by that candle's **full low/high wicks**. The breaking close
+  must have departed beyond the far side of the origin candle in its break
+  direction. Missing origins, zero-width boxes and non-departures create no
+  zone. Reusing the same origin for another BOS does not create a fresh copy.
+- The box becomes known at the structural breaking candle's close, even
+  though its left anchor is the earlier origin. Its creation candle cannot
+  retrospectively count as a return visit.
+- **Fresh** means no return since creation. A completed canonical **15m**
+  candle overlapping either edge or the interior records a **touch**, even for
+  a daily/4H zone. Consecutive overlapping candles are one visit; a later
+  return after leaving records another. A touch is not an automatic entry or
+  a guarantee that all orders in a zone were filled.
+- Demand invalidates only on its **own timeframe close below its lower wick**;
+  supply invalidates on an own-timeframe close above its upper wick. Equality
+  is not invalidation. A lower-timeframe close through a daily zone is not a
+  daily invalidation. Wick sweeps alone do not invalidate it.
+- A canonical data gap **retires** existing zones with a distinct reason;
+  retirement is not a claim that price invalidated them. Ended zones do not
+  resurrect on later reactions.
+
+The last-opposing-candle definition is the agreed initial mechanical
+interpretation, not a complete supply/demand methodology. It does not infer
+every decision zone, opposing-zone failure or liquidity sweep discussed in the
+lesson. Premium/discount is descriptive context: valid structural events are
+retained in either half, and no premium/discount condition opens or vetoes a
+trade. A pullback touching discount is distinct from a later bullish CHoCH
+confirmation occurring above EQ. FX pip stops and advertised reward multiples
+are not transferred into crypto settings.
 
 Select **Photon Market Structure — Parts 1 & 2 (mapping only)** in Strategy
 Builder, or load `config/data_lake/Photon_Structure_Parts_1_2.json`. Use a 15m
@@ -147,3 +221,9 @@ scenarios for the reference event relationships: inside-bar reaction versus
 CHoCH, wick-only CHoCH before swing change, failed continuation, causal replay,
 developing extremes, independent narrative and complete daily/weekly buckets.
 These are **not extracted video candles** and cannot prove source-feed matches.
+
+`tests/test_photon_value_areas.py` checks independent range math, snapshot
+knowledge times, origin selection, birth visibility, return-visit counting,
+own-timeframe invalidation versus 15m touches, wick/equality cases, data-gap
+retirement, price symmetry, nearby selection and complete prefix equivalence
+of the added zone/lifecycle payloads. Tests do not measure trading performance.

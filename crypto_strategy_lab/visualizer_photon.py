@@ -1,6 +1,8 @@
 """Replay-safe presentation of the Python Photon mapping snapshots."""
 
-PHOTON_HELPERS = r"""
+from crypto_strategy_lab.visualizer_photon_zones import PHOTON_ZONE_HELPERS
+
+PHOTON_HELPERS = PHOTON_ZONE_HELPERS + r"""
 function cslPhotonSwingLines(guide,cutoff) {
   // Use origin times for geometry only after the event is known at the replay
   // clock. Never draw a forecast arrow or join structure across missing data.
@@ -87,6 +89,8 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
     const box=document.createElement('div');box.className='photon-context-state';
     const title=document.createElement('strong');title.textContent=row.name+' · '+row.direction;box.appendChild(title);
     for(const text of [row.phase,row.relation]){const small=document.createElement('small');small.textContent=text;box.appendChild(small);}
+    const range=view[row.tf]?.state?.range;
+    if(range){const small=document.createElement('small');small.textContent=cslPhotonRangePosition(view['15m']?.state?.close,range).toLowerCase().replaceAll('_',' ')+' · EQ '+formatPrice(range.equilibrium);box.appendChild(small);}
     box.title=row.availableAt?'Last completed candle: '+fmtTime(row.availableAt):'Insufficient completed structure in available history';strip.appendChild(box);
   }
   const select=$('photon-event-select'),previous=select.value;
@@ -155,6 +159,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
       labelBoxes.push({x:left-2,y:top-2,w:w+4,h:h+4});return;
     }
   };
+  drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,height,placeLabel);
   if(showLines) {
     // Coarse white stroke stays visible as an outline where the thinner blue
     // trace follows exactly the same historical prices.
@@ -226,7 +231,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   let alignment='Waiting for swing confirmation';
   if(h?.trend && m?.trend)alignment=h.trend===m.trend?'15m aligned with 4H; possible continuation':'15m opposes 4H; possible 4H pullback';
   $('photon-status').textContent='Mapping only · '+(showLines?'4H: white · 15m: blue · Solid: confirmed · Dashed: developing':'Swing and internal structure at completed candles');
-  $('photon-status').title=alignment+' · '+(mapping.schemaVersion===2?'CHoCH-qualified pullbacks; research interpretation, not exact presenter validation.':'Legacy two-bar swing qualification.');
+  $('photon-status').title=alignment+' · '+(mapping.schemaVersion===2?'CHoCH-qualified pullbacks; rules-based crypto mapping.':'Legacy two-bar swing qualification.');
   drawPhotonContext(mapping,cutoff,view,bars);
   const tf=$('photon-event-timeframe')?.value,guide=mapping.timeframes[tf];
   const selected=guide?.events.find(e=>e.availableAt<=cutoff&&tf+':'+e.availableAt+':'+e.kind===$('photon-event-select')?.value);
