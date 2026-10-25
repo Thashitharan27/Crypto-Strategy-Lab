@@ -18,6 +18,24 @@ def test_optional_chart_metadata_does_not_select_a_strategy():
         assert selected(missing) is False
 
 
+@pytest.mark.parametrize('coverage,expected',[('full','15m'),('partial','1m'),('missing','1m')])
+def test_photon_defaults_to_15m_review_without_changing_execution(coverage,expected):
+    import re
+    from crypto_strategy_lab.strategy_visualizer_browser_v2 import build_browser_visualizer_v2_html
+    profiles,_=compile_profiles(direction_mode=MODE,market_permissions=MARKET_PERMISSIONS)
+    model=SimpleNamespace(seed=SimpleNamespace(request=SimpleNamespace(symbol='BTCUSDT',strategy_timeframe='1m'),config=SimpleNamespace(strategy=SimpleNamespace(profiles=profiles))),
+        run_dir=SimpleNamespace(name='test'),manifest={},trade_count=0,
+        available_chart_timeframes=lambda:[] if coverage=='missing' else [dict(interval='15m',coverage=coverage)])
+    html=build_browser_visualizer_v2_html(model,'photon')
+    boot=json.loads(re.search(r'const boot = (.*?);',html).group(1))
+    assert boot['run']['defaultChartTimeframe']==expected
+    assert boot['run']['timeframe']=='1m'
+    assert 'boot.run.defaultChartTimeframe || boot.run.timeframe' in html
+    assert 'if(boot.run.photonTrading){load();return;}' in html
+    # The existing loader keeps 1m replay facts separate from the review chart.
+    assert "chart_timeframe:boot.run.timeframe,full_run:'1'" in html
+
+
 def walkthrough(short=False):
     """Authored causal context: reaction, alignment, pullback, shift, later fill."""
     t=1767225600

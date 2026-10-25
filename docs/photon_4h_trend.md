@@ -110,6 +110,12 @@ lines alone. Trading charts derive structure from the engine's actual 1m source
 and identical warmup boundary, rather than independently seeding a longer 15m
 history. The mapping-only strategy retains its own analysis history and controls.
 
+Photon trade charts open on **15m** when full 15m chart coverage is available.
+Trade replay also retains that review chart while reading its underlying **1m**
+execution candles separately. Select 1m when inspecting the final CHoCH and
+fill; this display choice never changes the strategy's source data, stop/target
+processing or saved results. Without full 15m coverage, the chart opens on 1m.
+
 The sequence follows the supplied walkthroughs, adapted to crypto data. The
 last-opposing-candle zone selection, strict simultaneous value filters, expiry
 times, ATR buffer, minimum R and single-target execution are explicit mechanical
