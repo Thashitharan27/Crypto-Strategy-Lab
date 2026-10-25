@@ -157,6 +157,8 @@ class RiskExecutionWorkspace(QWidget):
             self.account[name].setRange(1,10080)
         self.account["photon_target_4h"].setText("Target 4H swing instead of the first 15m swing objective")
         self.sd_card.add_control("photon_target_4h",self.account["photon_target_4h"])
+        self.account["photon_flexible_entries"].setText("Flexible candidates — show value and structure mismatches for manual review")
+        self.sd_card.add_control("photon_flexible_entries",self.account["photon_flexible_entries"])
         self.sd_card.add_field("ny_range_target_r", "New York range target (R)", self.account["ny_range_target_r"])
         self.account["ny_range_target_r"].setRange(2.,100.)
         self.sd_card.add_field("ny_range_overshoot_policy", "When target extends too far", self.account["ny_range_overshoot_policy"])
@@ -1004,7 +1006,7 @@ class RiskExecutionWorkspace(QWidget):
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
         photon = self._signal_strategy_mode() == "PHOTON_4H_TREND"
         supply_demand = photon or self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
-        for name in ("photon_confirmation_minutes","photon_retest_minutes","photon_target_4h"):
+        for name in ("photon_confirmation_minutes","photon_retest_minutes","photon_target_4h","photon_flexible_entries"):
             self.sd_card.set_row_visible(name,photon)
         self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
@@ -1103,7 +1105,8 @@ class RiskExecutionWorkspace(QWidget):
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "PHOTON_4H_TREND":
             target="4H" if execution.photon_target_4h else "15m"
-            self.summary_label.setText(f"Photon: actual 1m candles; trade only with the completed 4H swing. Value-zone reaction → aligned 15m structure → later 15m-zone discount/premium pullback → later 1m CHoCH → proximal origin limit from the following minute. SL beyond the reaction extreme + {execution.sd_stop_buffer_atr:g} entry ATR; frozen {target} swing target; minimum {execution.sd_minimum_r:g}R. Context expires after {execution.photon_confirmation_minutes} minutes; retest after {execution.photon_retest_minutes}. One order per 15m zone; no partials, trailing or counter-4H trades. Same-minute stop is allowed; profit is deferred on the entry minute. Daily/weekly are narrative context.")
+            mode=("Flexible candidates: existing 15m swing alignment or aligned internal structure is accepted; value mismatches are saved for manual review. A later 1m CHoCH and origin retest remain required." if execution.photon_flexible_entries else "Strict: 4H value reaction, fresh aligned 15m confirmation, later pullback within both value halves, then 1m CHoCH and origin retest.")
+            self.summary_label.setText(f"Photon: actual 1m candles; only with the 4H swing. {mode} SL beyond reaction + {execution.sd_stop_buffer_atr:g} ATR; frozen {target} swing target; minimum {execution.sd_minimum_r:g}R. Context expiry {execution.photon_confirmation_minutes} minutes; retest {execution.photon_retest_minutes}. Backtest fills are simulated; use replay to confirm or skip manually. No partials, trailing or counter-4H trades.")
             return
         if self._signal_strategy_mode() == "NY_OPENING_RANGE_REVERSAL":
             policy=execution.ny_range_overshoot_policy

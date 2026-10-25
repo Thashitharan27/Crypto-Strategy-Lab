@@ -76,6 +76,93 @@ def test_required_stages_and_invalidations(missing):
     assert not any(trend_setups(bars,np.ones(len(bars)),guides=guides,**kwargs)[0])
 
 
+@pytest.mark.parametrize('short',[False,True])
+@pytest.mark.parametrize('deviation',['existing_alignment','4h_value','15m_value','internal_only'])
+def test_flexible_candidates_keep_frozen_mismatches_and_are_prefix_safe(short,deviation):
+    bars,guides=walkthrough(short);sign=-1 if short else 1
+    codes={'existing_alignment':'FRESH_15M_CONFIRMATION','4h_value':'4H_ENTRY_VALUE',
+           '15m_value':'15M_ENTRY_VALUE','internal_only':'15M_SWING_ALIGNMENT'}
+    if deviation=='existing_alignment':guides['15m']['events']=[]
+    if deviation=='4h_value':guides['4h']['snapshots'][0]['range']['equilibrium']=130 if short else 90
+    if deviation=='15m_value':guides['15m']['snapshots'][0]['range']['equilibrium']=130 if short else 90
+    if deviation=='internal_only':guides['15m']['snapshots'][0]['trend']=-sign
+    assert not any(trend_setups(bars,np.ones(len(bars)),guides=guides)[0])
+    signals,live=trend_setups(bars,np.ones(len(bars)),guides=guides,flexible=True)
+    s=signals[4]
+    assert s and s['side']==('SHORT' if short else 'LONG')
+    assert s['review']['status']=='REVIEW_REQUIRED'
+    assert codes[deviation] in {c['code'] for c in s['review']['mismatches']}
+    assert s['entryModel']=='FLEXIBLE_REVIEW' and live[4]==4 and live[5] is None
+    for end in range(1,len(bars)+1):
+        assert trend_setups(bars[:end],np.ones(end),guides=guides,flexible=True)==(signals[:end],live[:end])
+    saved=deepcopy(s['review']);guides['15m']['snapshots'][0]['trend']=0
+    assert s['review']==saved
+
+
+def test_flexible_accepts_a_later_internal_shift_without_a_swing_reversal():
+    bars,guides=walkthrough();t=bars[0]['time']
+    m=guides['15m']['snapshots'][0];m.update(trend=-1,internal=-1)
+    aligned=deepcopy(m);aligned.update(availableAt=t+180,internal=1)
+    guides['15m']['snapshots'].append(aligned)
+    guides['15m']['events'][0]['kind']='CHOCH'
+    s=trend_setups(bars,np.ones(len(bars)),guides=guides,flexible=True)[0][4]
+    assert s['alignmentAt']==t+180
+    codes={c['code'] for c in s['review']['mismatches']}
+    assert '15M_SWING_ALIGNMENT' in codes and 'FRESH_15M_CONFIRMATION' not in codes
+
+
+@pytest.mark.parametrize('missing',['shift','zone','alignment','4h','stop','reward','gap'])
+def test_flexible_keeps_structural_and_execution_requirements(missing):
+    bars,guides=walkthrough()
+    if missing=='shift':guides['1m']['events']=[]
+    if missing=='zone':guides['15m']['supplyDemand']['zones']=[]
+    if missing=='alignment':guides['15m']['snapshots'][0].update(trend=-1,internal=-1)
+    if missing=='4h':guides['4h']['snapshots'][0]['trend']=0
+    if missing=='stop':bars[3]['low']=79
+    if missing=='reward':guides['15m']['snapshots'][0]['range']['high']=98
+    if missing=='gap':bars[3]['time']+=1
+    assert not any(trend_setups(bars,np.ones(len(bars)),guides=guides,flexible=True)[0])
+
+
+def test_preferred_setup_and_opposing_or_missing_narrative_are_explicit():
+    bars,guides=walkthrough()
+    s=trend_setups(bars,np.ones(len(bars)),guides=guides)[0][4]
+    assert s['review']['status']=='PREFERRED_ALIGNMENT' and not s['review']['mismatches']
+    guides['1d']['snapshots'][0]['trend']=-1;guides['1w']['snapshots'][0]['trend']=0
+    s=trend_setups(bars,np.ones(len(bars)),guides=guides)[0][4]
+    warnings={c['code']:c['detail'] for c in s['review']['mismatches']}
+    assert 'opposes' in warnings['1D_CONTEXT'] and 'unknown' in warnings['1W_CONTEXT']
+
+
+def test_browser_review_warns_before_manual_decision_without_future_evidence():
+    import shutil,subprocess
+    from crypto_strategy_lab.visualizer_photon import PHOTON_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required for review projection')
+    bars,guides=walkthrough()
+    s=trend_setups(bars,np.ones(len(bars)),guides=guides,flexible=True)[0][4]
+    s['status']='AVAILABLE';at=s['signalAvailableAt']
+    legacy={k:v for k,v in s.items() if k!='review'}
+    script=PHOTON_HELPERS+'\nconst sd='+json.dumps(s)+';const legacy='+json.dumps(legacy)+f';console.log(JSON.stringify([cslPhotonReviewView(sd,{at-1}),cslPhotonReviewView(sd,{at}),cslPhotonReviewView(legacy)]));'
+    before,now,old=json.loads(subprocess.run([node],input=script,text=True,capture_output=True,check=True).stdout)
+    assert before is None
+    assert 'Manual review' in now['label']
+    assert now['mismatches']==s['review']['mismatches']
+    assert old['legacy'] and 'not saved' in old['label']
+    dom="const nodes={};const $=id=>nodes[id]??(nodes[id]={children:[],replaceChildren(){this.children=[]},appendChild(c){this.children.push(c)}});const document={createElement:()=>({style:{}})};"
+    script=PHOTON_HELPERS+'\n'+dom+'const sd='+json.dumps(s)+f';renderPhotonEntryReview(sd,{at});console.log(JSON.stringify(nodes));renderPhotonEntryReview(sd,{at-1});console.log(JSON.stringify(nodes));'
+    visible,hidden=[json.loads(line) for line in subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout.splitlines()]
+    assert visible['photon-entry-review']['hidden'] is False
+    assert 'Manual review' in visible['photon-entry-review-label']['textContent']
+    rows=visible['photon-entry-checks']['children']
+    assert len(rows)==len(s['review']['checks'])+1
+    assert any(row.get('style',{}).get('color')=='#fbbf24' for row in rows)
+    assert 'Confirm manual entry' in rows[-1]['textContent']
+    assert hidden['photon-entry-review']['hidden'] is True
+    assert hidden['photon-entry-checks']['children']==[]
+
+
+
 def test_causal_real_context_prefix():
     # Real aggregation, structure and zone computation, independent of authored guide.
     rng=np.random.default_rng(24);n=700
@@ -177,11 +264,13 @@ def test_unfilled_order_is_cancelled_before_next_minute(reason):
 
 
 def test_config_requires_actual_minutes_and_roundtrip():
-    from crypto_strategy_lab.data_lake_config import load_data_lake_config
+    from crypto_strategy_lab.data_lake_config import load_data_lake_config, ResearchRunConfig
+    assert ResearchRunConfig().execution.photon_flexible_entries is False
     from crypto_strategy_lab.research_adapters import native_simulator_config
     c=load_data_lake_config('config/data_lake/Photon_4H_Trend_1m.json')
     native=native_simulator_config(c.data,c.features,c.strategy,c.execution)
     assert native.strategy_timeframe_minutes==1
+    assert native.photon_flexible_entries is True
     assert native.photon_confirmation_minutes==1440 and native.photon_retest_minutes==60
     with pytest.raises(ValueError,match='actual 1m'):
         replace(native,strategy_timeframe_minutes=15)
@@ -190,20 +279,20 @@ def test_config_requires_actual_minutes_and_roundtrip():
 
 
 @pytest.mark.parametrize('short',[False,True])
-@pytest.mark.parametrize('collision',['normal','stop_and_target','target_only','flip','minimum_r','window'])
+@pytest.mark.parametrize('collision',['normal','stop_and_target','target_only','flip','minimum_r','window','flexible','prepared','prepared_window'])
 def test_production_engine_limit_geometry_costs_and_saved_evidence(monkeypatch,short,collision):
     from crypto_strategy_lab.config import BacktestConfig
     from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
     from crypto_strategy_lab.strategy_profiles import StrategyProfile
     from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
     bars,guides=walkthrough(short)
-    signals,live=trend_setups(bars,np.ones(len(bars)),guides=guides)
+    signals,live=trend_setups(bars,np.ones(len(bars)),guides=guides,flexible=collision=="flexible")
     # Keep ATR/regime warmup separate from the authored market-structure evidence.
     pad=[dict(time=bars[0]['time']-(150-i)*60,open=110,high=111,low=109,close=110) for i in range(150)]
     source=pad+bars
     if collision=='stop_and_target':
         source[155].update(high=145,low=75)
-    if collision=='window':
+    if collision in ('window','prepared_window'):
         source[155].update(open=115 if short else 105,high=119 if short else 108,low=112 if short else 101,close=115 if short else 105)
         live[5]=4
     if collision=='target_only':
@@ -215,23 +304,37 @@ def test_production_engine_limit_geometry_costs_and_saved_evidence(monkeypatch,s
     config=BacktestConfig(strategy_timeframe_minutes=1,telemetry_interval_minutes=1,strategy_profiles=native,use_intrabar_data=False,enable_support_resistance_analysis=False,market_regime_method='ASSET_RETURN',enable_trade_telemetry=False)
     if collision=='flip':config=replace(config,strategy_profiles={k:replace(p,flip_direction=True) for k,p in native.items()})
     if collision=='minimum_r':config=replace(config,sd_minimum_r=100.)
-    if collision=='window':config=replace(config,trading_end_date=pd.Timestamp(bars[4]['time']+60,unit='s',tz='UTC').isoformat())
+    if collision in ('window','prepared_window'):config=replace(config,trading_end_date=pd.Timestamp(bars[4]['time']+60,unit='s',tz='UTC').isoformat())
     frame=pd.DataFrame(source).rename(columns={'time':'timestamp'})
     frame['timestamp']=pd.to_datetime(frame.timestamp,unit='s',utc=True);frame['volume']=1.
-    engine=RuleAwareDataLakeProductionBacktestEngine(frame,config);engine.market_regime_values[:]='SIDEWAYS'
+    if collision in ('prepared','prepared_window'):
+        from test_prepared_backtest import valid_kwargs
+        from crypto_strategy_lab.prepared_backtest import PreparedBacktestFrame
+        kwargs=valid_kwargs(len(frame))
+        times=frame.timestamp.to_numpy(dtype='datetime64[ns]')
+        kwargs.update(timestamp=times,strategy_interval=pd.Timedelta(minutes=1),decision_available_at=times+np.timedelta64(1,'m'),atr=np.ones(len(frame)))
+        kwargs.update({key:frame[key].to_numpy(float) for key in ('open','high','low','close','volume')})
+        config=replace(config,trading_start_date=frame.timestamp.iloc[0].tz_localize(None).isoformat())
+        engine=RuleAwareDataLakeProductionBacktestEngine.from_prepared(PreparedBacktestFrame(**kwargs),None,config)
+        assert engine.trading_start.tzinfo is None
+    else:
+        engine=RuleAwareDataLakeProductionBacktestEngine(frame,config);engine.market_regime_values[:]='SIDEWAYS'
     trades=engine.run()
-    if collision in ('flip','minimum_r','window'):
+    if collision in ('flip','minimum_r','window','prepared_window'):
         assert len(trades)==0
         return
     assert len(trades)==1
     row=trades.iloc[0];s=json.loads(row.supply_demand_setup)
-    assert pd.Timestamp(row.entry_time)==frame.timestamp.iloc[155]
+    assert pd.to_datetime(row.entry_time,utc=True)==frame.timestamp.iloc[155]
     assert row.side==s['side']
     if collision=='stop_and_target':
         assert row[row.side.lower()+'_final_exit_reason']=='SL'
         assert pd.Timestamp(row.exit_time)==pd.Timestamp(row.entry_time)
     assert row.actual_entry_price==pytest.approx(s['entry']*(1-config.slippage if short else 1+config.slippage))
     assert row.pair_total_fees>0
+    assert row.photon_review_status==s['review']['status']
+    assert row.photon_entry_model==s['entryModel']
+    assert row.photon_mismatches=='; '.join(c['label']+': '+c['detail'] for c in s['review']['mismatches'])
     if collision=='target_only':
         assert pd.Timestamp(row.exit_time)>pd.Timestamp(row.entry_time)
     assert row[row.side.lower()+'_tp']==s['target']
@@ -239,3 +342,9 @@ def test_production_engine_limit_geometry_costs_and_saved_evidence(monkeypatch,s
     fake=SimpleNamespace(trade_count=1,_trade_row=lambda i:row.to_dict())
     evidence=CompletedRunVisualizer.supply_demand_derivation(fake,0)
     assert evidence['status']=='AVAILABLE' and evidence['strategy']==MODE
+    if collision=='flexible':
+        assert evidence['review']['status']=='REVIEW_REQUIRED'
+        assert 'existing 15m alignment' in row.photon_mismatches
+        model=object.__new__(CompletedRunVisualizer);model.trades=trades
+        assert 'REVIEW' in model.trade_label(0)
+        assert model.selected_trade_summary(0)['Photon Review']=='REVIEW_REQUIRED'

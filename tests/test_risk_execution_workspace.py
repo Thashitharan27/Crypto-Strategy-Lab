@@ -20,7 +20,7 @@ def test_photon_selection_uses_actual_minutes_and_roundtrips_owned_controls():
         workspace.refresh_visibility()
         assert window.strategy_tf.currentData()=='1m'
         assert window.intrabar_tf.currentData() is None
-        for name in ('photon_confirmation_minutes','photon_retest_minutes','photon_target_4h'):
+        for name in ('photon_confirmation_minutes','photon_retest_minutes','photon_target_4h','photon_flexible_entries'):
             assert not window.execution_form.widgets[name].isHidden()
         assert window.execution_form.widgets['sd_swing_strength'].isHidden()
         window.execution_form.widgets['photon_retest_minutes'].setValue(35)
@@ -28,6 +28,7 @@ def test_photon_selection_uses_actual_minutes_and_roundtrips_owned_controls():
         config=window.build_config();config.validate()
         assert config.execution.photon_retest_minutes==35
         assert config.execution.photon_target_4h
+        assert config.execution.photon_flexible_entries
         window.apply_config(config)
         assert window.build_config().execution.photon_retest_minutes==35
     finally:

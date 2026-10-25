@@ -41,6 +41,8 @@ button:disabled{opacity:.35}
 .user-drawing.selected{filter:drop-shadow(0 0 2px #b7ceff)}
 .selected-position{outline:1px solid #82aaff;outline-offset:1px}
 #reviewbar{grid-area:context;flex-wrap:nowrap;gap:7px;padding:7px 12px;background:#131722;border-top:1px solid #2a2e39;border-bottom:0;min-width:0;overflow-x:auto;white-space:nowrap}
+body.photon-structure #reviewbar{flex-wrap:wrap;overflow-x:hidden;overflow-y:auto;white-space:normal;max-height:44vh}
+body.photon-structure #reviewbar>*{max-width:100%;flex-shrink:1}
 #reviewbar>*{flex-shrink:0}#trade{width:195px;max-width:230px;min-width:120px}
 #reviewbar{scrollbar-width:thin;scrollbar-color:#434957 #131722}#reviewbar::-webkit-scrollbar{height:4px}#reviewbar::-webkit-scrollbar-thumb{background:#434957;border-radius:4px}
 #day-navigation:not([hidden]){display:flex;align-items:center;gap:6px}

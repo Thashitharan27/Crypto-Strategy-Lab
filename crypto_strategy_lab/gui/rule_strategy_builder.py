@@ -1937,7 +1937,7 @@ class RuleStrategyBuilder(QWidget):
 
     def refresh_summary(self):
         if self.direction_mode.currentData() == "PHOTON_4H_TREND":
-            self.summary.setText("Photon · 4H trend trades only · Run on actual 1m data. 4H value-zone reaction → aligned 15m structure → 15m discount/premium zone → 1m CHoCH → later origin retest. Strategy-owned structural stop and swing target; daily/weekly are narrative context.")
+            self.summary.setText("Photon · 4H trend trades only · Run on actual 1m data. 15m zone reaction → 1m CHoCH → later origin retest. Flexible candidates can use existing/internal 15m alignment; value and structure mismatches are shown for manual review. Strict confirmation remains selectable. Strategy-owned structural stop and swing target; daily/weekly are narrative context.")
             return
         if self.direction_mode.currentData() == "PHOTON_STRUCTURE_MAP":
             self.summary.setText(

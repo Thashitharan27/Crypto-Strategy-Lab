@@ -135,7 +135,8 @@
     "photon_retest_minutes": 60,
     "photon_target_4h": false,
     "sd_stop_buffer_atr": 0.05,
-    "sd_minimum_r": 1.0
+    "sd_minimum_r": 1.0,
+    "photon_flexible_entries": true
   },
   "reporting": {
     "run_name": "Photon_4H_Trend_1m"

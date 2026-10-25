@@ -917,6 +917,7 @@ class CompletedRunVisualizer:
         return (
             f"{index + 1}/{self.trade_count} · #{pair_id} · {_trade_side(row)} · "
             f"{_trade_result_label(row)} · {entry:%Y-%m-%d %H:%M}"
+            + (" · REVIEW" if row.get("photon_review_status")=="REVIEW_REQUIRED" else "")
         )
 
     def _trade_row(self, index: int) -> dict[str, Any]:
@@ -958,6 +959,8 @@ class CompletedRunVisualizer:
             "Net P&L": _finite(row.get("pair_net_pnl")),
             "Entry Filter": _json_value(row.get("entry_filter_reason")),
             "Regime": _json_value(row.get("market_regime")),
+            "Photon Review": _json_value(row.get("photon_review_status")),
+            "Photon Mismatches": _json_value(row.get("photon_mismatches")),
             "ADX": _finite(row.get("adx")),
             "+DI": _finite(row.get("plus_di")),
             "-DI": _finite(row.get("minus_di")),
@@ -1953,6 +1956,7 @@ class CompletedRunVisualizer:
                             "shape": "arrowUp" if side == "LONG" else "arrowDown",
                             "text": f"OPEN · {entry_price:,.2f}",
                             "kind": "selected-open",
+                            "reviewStatus": _json_value(row.get("photon_review_status")),
                         }
                     )
             exit_time = row.get("exit_time")
@@ -2388,8 +2392,9 @@ class CompletedRunVisualizer:
                                 f"OPEN · {entry_price:,.2f}"
                                 if entry_price is not None
                                 else "OPEN"
-                            ),
+                            ) + (" · REVIEW" if row.get("photon_review_status")=="REVIEW_REQUIRED" else ""),
                             "kind": "selected-open",
+                            "reviewStatus": _json_value(row.get("photon_review_status")),
                         }
                     )
 

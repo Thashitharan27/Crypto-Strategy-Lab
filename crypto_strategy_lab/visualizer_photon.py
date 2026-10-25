@@ -3,6 +3,25 @@
 from crypto_strategy_lab.visualizer_photon_zones import PHOTON_ZONE_HELPERS
 
 PHOTON_HELPERS = PHOTON_ZONE_HELPERS + r"""
+function cslPhotonReviewView(sd,cutoff=Infinity) {
+  if(sd?.strategy!=='PHOTON_4H_TREND' || sd.status!=='AVAILABLE' || sd.signalAvailableAt>cutoff)return null;
+  const review=sd.review;
+  if(!review || !Array.isArray(review.checks))return {legacy:true,label:'Legacy setup — mismatch checks were not saved',checks:[]};
+  const mismatches=review.checks.filter(c=>c.passed!==true);
+  return {legacy:false,label:mismatches.length?'Manual review · '+mismatches.length+' mismatch'+(mismatches.length===1?'':'es'):'Preferred alignment · manual decision',
+    checks:review.checks,mismatches,entryModel:sd.entryModel};
+}
+function renderPhotonEntryReview(sd,cutoff=Infinity) {
+  const panel=$('photon-entry-review');if(!panel)return;
+  const view=cslPhotonReviewView(sd,cutoff);panel.hidden=!view;
+  const body=$('photon-entry-checks');body.replaceChildren();if(!view)return;
+  $('photon-entry-review-label').textContent=view.label;
+  for(const check of view.checks) {
+    const row=document.createElement('p');row.textContent=(check.passed?'\u2713 ':'\u26a0 ')+check.label+' — '+check.detail;
+    row.style.color=check.passed?'#86efac':'#fbbf24';body.appendChild(row);
+  }
+  const note=document.createElement('p');note.textContent=view.legacy?'Rerun to capture decision-time checks.':'Checks were frozen when the 1m CHoCH armed this simulated candidate. Confirm manual entry, Skip or Unsure in replay to record your own decision. These checks do not place live orders.';body.appendChild(note);
+}
 function cslPhotonSwingLines(guide,cutoff) {
   // Use origin times for geometry only after the event is known at the replay
   // clock. Never draw a forecast arrow or join structure across missing data.
