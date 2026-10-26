@@ -99,7 +99,8 @@ function cslPhotonNarrative(view) {
 function cslPhotonEventText(tf,e) {
   const direction=e.direction===1?'bullish':'bearish',name={'1w':'Weekly','1d':'Daily','4h':'4H','15m':'15m'}[tf] || tf;
   const meaning=e.kind==='CHOCH'?'Internal '+direction+' wick break. Possible phase change; this alone does not change the swing direction.':e.kind==='TREND_CHANGE'?'Close beyond the protected swing level confirms a '+direction+' swing change.':'Close beyond the swing level confirms '+direction+' continuation and its originating protected point.';
-  return name+' · '+meaning+' Level '+formatPrice(e.price)+' · origin '+fmtTime(e.fromTime)+' · known '+fmtTime(e.availableAt);
+  const order=e.orderBasis==='LOWER_TIMEFRAME'?' Break order resolved from '+(e.sourceInterval/60)+'m candles at the parent candle close.':'';
+  return name+' · '+meaning+order+' Level '+formatPrice(e.price)+' · origin '+fmtTime(e.fromTime)+' · known '+fmtTime(e.availableAt);
 }
 function drawPhotonContext(mapping,cutoff,view,bars) {
   const strip=$('photon-context-strip');if(!strip)return;
@@ -118,10 +119,10 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
     .sort((a,b)=>b.e.availableAt-a.e.availableAt || a.tf.localeCompare(b.tf)).slice(0,80);
   select.replaceChildren();
   for(const {tf,e} of known) {
-    const key=tf+':'+e.availableAt+':'+e.kind;
+    const key=tf+':'+e.availableAt+':'+e.kind+':'+e.direction;
     select.add(new Option(tf.toUpperCase()+' '+(e.kind==='CHOCH'?'CHoCH':e.kind==='TREND_CHANGE'?'Swing change':'BOS')+' · '+fmtTime(e.availableAt),key));
   }
-  if(select.dataset.pinned==='true'&&known.some(({tf,e})=>tf+':'+e.availableAt+':'+e.kind===previous))select.value=previous;
+  if(select.dataset.pinned==='true'&&known.some(({tf,e})=>tf+':'+e.availableAt+':'+e.kind+':'+e.direction===previous))select.value=previous;
   select.disabled=!known.length;
   const selected=known[select.selectedIndex];
   $('photon-event-detail').textContent=selected?cslPhotonEventText(selected.tf,selected.e):'Waiting for a completed structure event.';
