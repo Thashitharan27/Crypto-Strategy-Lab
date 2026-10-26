@@ -96,6 +96,12 @@ at the latest closed candle. Replay manages the simulated SL/TP; manual close,
 break-even, review reports and export use the existing manual-review workflow.
 Positions remain selected when continuous structure replay crosses UTC midnight.
 These actions record local replay reviews and do not place live orders.
+Before confirmation, position-box width is an adjustable preview. After entry,
+the box extends to the latest closed chart candle and stops at the TP, SL or
+manual-exit candle once that exit is known in replay. Later candles do not widen
+a closed box. Faint reward/risk backgrounds remain visible, with a stronger tint
+only between entry and the current price (or the known exit price after close).
+The shading follows long/short direction and is clipped to the trade bounds.
 
 Switching the chart to **1m** lazily calculates independent structure from the
 actual minute candles. A teal 1m swing/developing path, CHoCH/BOS/trend-change

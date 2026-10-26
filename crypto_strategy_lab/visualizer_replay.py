@@ -107,6 +107,19 @@ function cslPositionBoxWidth(spacing,bars=null) {
   const step=Number.isFinite(spacing) && spacing>0?spacing:6;
   return Number.isFinite(bars) && bars>0?Math.max(48,Math.min(720,bars*step)):Math.max(96,Math.min(180,12*step));
 }
+function cslPositionBoxProgress(plan,side,price) {
+  const entry=Number(plan?.entry),stop=Number(plan?.stop),target=Number(plan?.target),current=Number(price);
+  if([entry,stop,target,current].some(v=>!Number.isFinite(v)) || price==null)return null;
+  const sign=String(side).toUpperCase()==='SHORT'?-1:1;
+  const move=sign*(current-entry);if(move===0)return null;
+  const bound=move>0?target:stop;
+  const reached=Math.max(Math.min(entry,bound),Math.min(Math.max(entry,bound),current));
+  return reached===entry?null:{from:entry,to:reached,kind:move>0?'current-profit':'current-loss'};
+}
+function cslPositionBoxEnd(record,cutoff,latestTime,interval) {
+  const exit=record?.manualExit;
+  return exit && (exit.availableAt ?? exit.candleTime+interval)<=cutoff?exit.candleTime:latestTime;
+}
 function cslTargetR(plan, side, originalEntry=null) {
   if(!['LONG','SHORT'].includes(String(side).toUpperCase()))return null;
   const base=originalEntry || plan,sign=String(side).toUpperCase()==='SHORT'?-1:1;

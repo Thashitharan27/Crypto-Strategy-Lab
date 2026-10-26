@@ -154,10 +154,11 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 .fib-level-label{position:absolute;transform:translateY(-50%);padding:2px 5px;border-radius:3px;font:10px/1.2 Segoe UI,Arial,sans-serif;font-weight:700;white-space:nowrap;color:#f8fafc;background:rgba(15,23,32,.90);border:1px solid rgba(148,163,184,.44);box-shadow:0 1px 3px rgba(0,0,0,.32)}
 .fib-anchor{position:absolute;height:1px;transform-origin:0 50%;background:rgba(148,163,184,.65)}
 .trade-rect{position:absolute;box-sizing:border-box;border-radius:2px}
-.trade-rect.risk{background:rgba(219,68,68,.22);border:1px solid rgba(255,105,105,.9)}
-.trade-rect.reward{background:rgba(38,166,91,.23);border:1px solid rgba(83,220,141,.9)}
-.trade-rect.reward.current-profit{background:rgba(12,145,80,.48);border-color:#34d399}
-.trade-rect.risk.current-loss{background:rgba(180,36,52,.48);border-color:#fb7185}
+.trade-rect.risk{background:rgba(219,68,68,.10);border:1px solid rgba(255,105,105,.75)}
+.trade-rect.reward{background:rgba(38,166,91,.10);border:1px solid rgba(83,220,141,.75)}
+.trade-rect.position-progress{border:0;pointer-events:none!important}
+.trade-rect.position-progress.current-profit{background:rgba(52,211,153,.24)}
+.trade-rect.position-progress.current-loss{background:rgba(251,113,133,.24)}
 .trade-label{position:absolute;padding:2px 5px;border-radius:3px;font:11px/1.2 Segoe UI,Arial,sans-serif;white-space:nowrap}
 .position-handle{position:absolute;pointer-events:auto;cursor:ns-resize;height:12px;z-index:9;border-top:2px dashed #fff;touch-action:none;background:rgba(255,255,255,.08)}
 #manual-workflow-state{border:1px solid #456078;border-radius:4px;padding:3px 6px;color:#c5e5ff}
@@ -2076,7 +2077,11 @@ body.structure-lines #day-layer{display:none}
     const visibleManualExit=manualExit && (manualExit.availableAt ?? manualExit.candleTime+manualInterval())<=replayCutoff;
     const lastVisible=(payload.candles || []).at(-1);
     const boxBars=positionResize?.key==='width'?positionResize.bars:currentReview()?.manualBoxBars;
-    const x2=manual?Number(x1)+cslPositionBoxWidth(chart.timeScale().options().barSpacing,boxBars):(replayActive && !replayOutcomeVisible)?Number(x1)+100:chart.timeScale().timeToCoordinate(endTime);
+    const confirmed=manual && Boolean(currentReview()?.manualEntry),spacing=chart.timeScale().options().barSpacing;
+    const liveEnd=confirmed?cslPositionBoxEnd(currentReview(),replayCutoff,lastVisible?.time,manualInterval()):null;
+    const endX=confirmed && liveEnd!=null?chart.timeScale().timeToCoordinate(displayCandleTime(liveEnd)):null;
+    const fallbackEndX=confirmed && lastVisible?chart.timeScale().timeToCoordinate(lastVisible.time):null;
+    const x2=confirmed?(endX ?? fallbackEndX ?? x1)+spacing/2:manual?Number(x1)+cslPositionBoxWidth(spacing,boxBars):(replayActive && !replayOutcomeVisible)?Number(x1)+100:chart.timeScale().timeToCoordinate(endTime);
     const entryY=candles.priceToCoordinate(entry);
     const stopY=candles.priceToCoordinate(stop);
     const targetY=candles.priceToCoordinate(target);
@@ -2087,7 +2092,7 @@ body.structure-lines #day-layer{display:none}
 
     const left=Math.min(Number(x1),Number(x2));
     const right=Math.max(Number(x1),Number(x2));
-    const width=Math.max(manual?72:48,right-left);
+    const width=Math.max(confirmed?spacing:manual?72:48,right-left);
 
     function rect(a,b,className){
       if ([a,b].some(v => v == null || !Number.isFinite(Number(v)))) return;
@@ -2113,13 +2118,16 @@ body.structure-lines #day-layer{display:none}
     if(manual) {
       const label=document.createElement('span');label.className='position-side-label';label.textContent=String(trade.Side).toUpperCase();
       Object.assign(label.style,{left:(left+8)+'px',top:(entryY-19)+'px',color:String(trade.Side).toUpperCase()==='SHORT'?'#fda4af':'#6ee7b7'});tradeBoxLayer.appendChild(label);
-      const handle=document.createElement('div');handle.className='position-handle position-width-handle';handle.dataset.positionLevel='width';handle.dataset.boxLeft=String(left);handle.title='Drag to resize the position box width';handle.setAttribute('aria-label',handle.title);
-      Object.assign(handle.style,{left:(right-5)+'px',top:(entryY-5)+'px',width:'10px'});tradeBoxLayer.appendChild(handle);
+      if(!confirmed) {
+        const handle=document.createElement('div');handle.className='position-handle position-width-handle';handle.dataset.positionLevel='width';handle.dataset.boxLeft=String(left);handle.title='Drag to resize the position box width';handle.setAttribute('aria-label',handle.title);
+        Object.assign(handle.style,{left:(right-5)+'px',top:(entryY-5)+'px',width:'10px'});tradeBoxLayer.appendChild(handle);
+      }
     }
     const currentPrice=visibleManualExit?manualExit.price:lastVisible?.close;
-    const signedMove=(String(trade.Side).toUpperCase()==='SHORT'?-1:1)*(Number(currentPrice)-entry);
-    rect(entryY,stopY,'risk'+(manual && signedMove<0?' current-loss':''));
-    rect(entryY,targetY,'reward'+(manual && signedMove>0?' current-profit':''));
+    rect(entryY,stopY,'risk');
+    rect(entryY,targetY,'reward');
+    const progress=manual?cslPositionBoxProgress({entry,stop,target},trade.Side,currentPrice):null;
+    if(progress)rect(entryY,candles.priceToCoordinate(progress.to),'position-progress '+progress.kind);
     if(!manual)addTradeLabel(left+4,entryY,'entry','Entry '+formatPrice(trade.Entry ?? trade.entry));
     if (!manual && !visibleManualExit && exit && Number.isFinite(exitPrice))
       addTradeLabel(Math.max(left+4,right-90),exitY,'exit',(manual?'Auto exit (':'Exit (')+String(trade['Exit Reason'] || 'closed')+') '+formatPrice(trade.Exit ?? trade.exit));
