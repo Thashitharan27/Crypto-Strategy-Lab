@@ -113,6 +113,9 @@ structure lines**. Photon opens in **Structure lines** with both traces overlaid
 on one price/time chart: **white for 4H**, **blue for 15m**. Both histories stay
 visible together when scrolling or replaying. **Break levels** optionally adds
 BOS/CHoCH, protected-range and internal references; it defaults on for study.
+Confirmed trend changes use larger directional triangles, bold green bullish
+or pink bearish badges, and thicker broken-level lines. Their labels reserve
+space before ordinary BOS/CHoCH labels and are painted above the overlays.
 The line view hides the candles
 and grid for a diagram-like display, fitting the loaded period so larger swings
 are visible. Zoom remains available and the replay position is preserved.
