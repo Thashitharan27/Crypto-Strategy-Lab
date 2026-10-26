@@ -193,6 +193,27 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
             prior = low if up else high
             kind = "TREND_CHANGE" if trend and direction != trend else "BOS"
             emit(kind, direction, broken, at)
+            continuation = (qualification == "CHOCH_PULLBACK" and trend == direction
+                            and broken["index"] == i - 1)
+            both_sides = b["high"] > high["price"] and b["low"] < low["price"]
+            ordered = False
+            if qualification == "CHOCH_PULLBACK" and trend == direction and both_sides:
+                # A close still proves the break, but a two-sided parent wick
+                # cannot prove a low-to-high (or high-to-low) turn by itself.
+                # Only matching child evidence can order the parent extremes.
+                children = source_groups.get(b["time"], [])
+                aggregate = source_parents.get(b["time"])
+                matching = aggregate is not None and all(
+                    aggregate[k] == b[k] for k in ("open", "high", "low", "close"))
+                lower_at = next((c["time"] for c in children if c["low"] == b["low"]), None) if matching else None
+                upper_at = next((c["time"] for c in children if c["high"] == b["high"]), None) if matching else None
+                ordered = lower_at is not None and upper_at is not None and lower_at != upper_at
+                if not ordered:
+                    emit("AMBIGUOUS", 0, broken, at,
+                         "Both swing boundaries crossed; parent extreme order unknown; protected origin retained")
+                # Promote the opposite wick only if it preceded the new run
+                # extreme. Otherwise retain the existing protected origin.
+                continuation = not (ordered and (lower_at < upper_at if up else upper_at < lower_at))
             # The pullback begins AFTER the candle that set the broken level.
             # Its opposite wick may predate that extreme and is not evidence
             # of the following pullback. Including it creates false protected
@@ -200,30 +221,38 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
             start = max(segment, broken["index"] + 1)
             key = "low" if up else "high"
             origin = min(range(start, i+1), key=lambda k: bars[k]["low"]) if up else max(range(start, i+1), key=lambda k: bars[k]["high"])
-            protected = point(origin, key)
+            protected = dict(prior) if continuation else point(origin, key)
+            if ordered and not continuation:
+                protected["time"] = lower_at if up else upper_at
             if prior is None:
                 label = "L" if up else "H"
             elif up:
                 label = "HL" if protected["price"] > prior["price"] else "LL" if protected["price"] < prior["price"] else "EL"
             else:
                 label = "HH" if protected["price"] > prior["price"] else "LH" if protected["price"] < prior["price"] else "EH"
-            emit("SWING", direction, protected, at, label)
-            # Only a close-confirmed swing break admits points to the solid
-            # structural zigzag: the level broken, then the origin that broke it.
-            trace.extend([
+            if not continuation:
+                emit("SWING", direction, protected, at, label)
+            # Continuation adds only its extending run-side anchor; a genuine
+            # pullback or ordered two-sided candle can add a protected origin.
+            trace.append(
                 dict(kind="BOS_SWING", direction=direction, fromTime=broken["time"],
-                     price=broken["price"], availableAt=at, confirmedBy=kind),
+                     price=broken["price"], availableAt=at, confirmedBy=kind))
+            if not continuation:
+                trace.append(
                 dict(kind="BOS_SWING", direction=-direction, fromTime=protected["time"],
-                     price=protected["price"], availableAt=at, confirmedBy=kind),
-            ])
+                     price=protected["price"], availableAt=at, confirmedBy=kind))
             if up:
                 previous_high = broken["price"]
                 low, low_ready = protected, True
                 high, high_ready = point(i, "high"), False
+                if ordered:
+                    high["time"] = upper_at
             else:
                 previous_low = broken["price"]
                 high, high_ready = protected, True
                 low, low_ready = point(i, "low"), False
+                if ordered:
+                    low["time"] = lower_at
             trend, last_break = direction, i
 
         # Track the developing weak extreme without calling it confirmed.
