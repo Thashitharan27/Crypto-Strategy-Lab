@@ -27,6 +27,7 @@ def test_minute_guide_is_lazy_cached_and_does_not_mutate_parent_mapping():
     minute = load("1m", bars)
     expected = map_structure(bars, 60, qualification="CHOCH_PULLBACK")
     attach_ranges(expected)
+    expected["historyStart"] = bars[0]["time"]
     assert minute["timeframes"]["1m"] == expected
     assert load("1m", bars)["timeframes"]["1m"] is minute["timeframes"]["1m"]
     assert load("4h", bars) is base and "1m" not in base["timeframes"]
@@ -35,6 +36,59 @@ def test_minute_guide_is_lazy_cached_and_does_not_mutate_parent_mapping():
         for key in ("events", "trace", "snapshots"):
             assert prefix[key] == [e for e in expected[key] if e["availableAt"] <= n*60]
     assert load("1m", bars)["timeframes"]["1m"] == expected
+
+
+def test_minute_structure_uses_full_warmup_not_trimmed_display():
+    base = dict(timeframes={"15m": {"interval": 900}})
+    model = SimpleNamespace(_photon_mapping_payload=lambda: base)
+    bars = minute_bars()
+    load = lambda visible, history: CompletedRunVisualizer._photon_chart_mapping_payload(
+        model, "1m", visible, history)["timeframes"]["1m"]
+    result = load(bars[-4:], bars)
+    expected = map_structure(bars, 60, qualification="CHOCH_PULLBACK")
+    attach_ranges(expected)
+    assert result["snapshots"] == expected["snapshots"]
+    assert result["trace"] == expected["trace"]
+    assert result["historyStart"] == bars[0]["time"]
+    assert result["snapshots"] != map_structure(bars[-4:], 60, qualification="CHOCH_PULLBACK")["snapshots"]
+    assert load(bars[-2:], bars) is result  # Changing visible candles does not reseed history.
+    shorter = load(bars[-2:], bars[3:])
+    assert shorter is not result and shorter["historyStart"] == bars[3]["time"]
+
+
+def test_chart_payload_loads_configured_warmup_before_display_trim(tmp_path, monkeypatch):
+    from dataclasses import asdict
+    import pandas as pd
+    from test_strategy_visualizer import _fixture
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
+
+    service, run_dir, manifest, _ = _fixture(tmp_path)
+    profiles, _ = compile_profiles(direction_mode="PHOTON_STRUCTURE_MAP", market_permissions=MARKET_PERMISSIONS)
+    manifest["config"]["strategy"]["profiles"] = {k: asdict(v) for k, v in profiles.items()}
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    run_start = pd.Timestamp(model.seed.request.period_start)
+    display_start = run_start - pd.Timedelta(days=60)
+    values = minute_bars()
+    times = pd.date_range(display_start - pd.Timedelta(minutes=5), periods=len(values), freq="min")
+    frame = pd.DataFrame([dict(period_start=t, volume=1, **{k:v for k,v in b.items() if k!="time"})
+                          for t, b in zip(times, values)])
+    calls = []
+    def market(start, end, *, chart_timeframe):
+        calls.append((start, end, chart_timeframe))
+        return frame.copy()
+    monkeypatch.setattr(model, "_market_frame", market)
+    monkeypatch.setattr(model, "available_chart_timeframes", lambda: [{"interval":"1m"}])
+    monkeypatch.setattr(model, "_photon_mapping_payload", lambda: {"timeframes":{}})
+    monkeypatch.setattr("crypto_strategy_lab.strategy_visualizer.strategy_warmup_period",
+                        lambda config: pd.Timedelta(days=61))
+    payload = model.build_v2_diagnostic_payload(chart_timeframe="1m")
+    guide = payload["photonMapping"]["timeframes"]["1m"]
+    assert calls[0][0] == run_start - pd.Timedelta(days=61)
+    assert calls[0][2] == "1m"
+    assert payload["candles"][0]["time"] == int(display_start.timestamp())
+    assert guide["historyStart"] == int(times[0].timestamp())
+    assert len(guide["snapshots"]) == len(values)
+    assert len(payload["candles"]) == len(values)-5
 
 
 def test_minute_renderer_switches_labels_inspector_and_hides_future_events():

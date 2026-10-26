@@ -104,6 +104,11 @@ switches to 1m. Switching away removes the minute overlay and context state,
 hides the 1m inspector choice and returns it to 15m. No minute calculations or
 payload are added to other chart timeframes. Minute events are available only
 after their own candle close; switching timeframes preserves the replay clock.
+Minute structure is seeded from the full configured strategy warmup (or the
+60-day display context if that is longer), using available canonical minute
+candles before trimming the chart. The display boundary does not reset its
+state. Hover the 1m context box to inspect the actual structure-history start;
+missing earlier archive data is not fabricated.
 
 The context strip sits above the main chart. Each timeframe has its own swing
 direction, internal phase and qualified relationship to its parent. Opposing
