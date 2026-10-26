@@ -222,12 +222,9 @@ input[type=checkbox]{accent-color:#3976ff;width:16px;height:16px;flex-shrink:0}
 #day-replay[aria-pressed=true]{background:#255b91;border-color:#60a5fa}
 button:disabled{opacity:.45;cursor:default}
 __WORKSPACE_STYLES__
-body.mapping-only #trade-panel,body.mapping-only #open-trade-plan,
-body.mapping-only #trade-panel-toggle,body.mapping-only #journal-panel-toggle,
-body.mapping-only #position-tools-button,body.mapping-only #trade,
+body.mapping-only #trade,
 body.mapping-only label[for="trade"],body.mapping-only #center,
-body.mapping-only #day-trade,body.mapping-only #manual-new-trade,
-body.mapping-only label:has(#day-side),body.mapping-only #replay-toggle{display:none!important}
+body.mapping-only #replay-toggle{display:none!important}
 body.mapping-only #reviewbar{flex-wrap:wrap}
 body.mapping-only #photon-status{flex-basis:100%;line-height:1.6;padding:6px 0}
 body.mapping-only{overflow:auto}
@@ -256,10 +253,6 @@ body.structure-lines #day-layer{display:none}
 #photon-zone-panel{border-top:1px solid #344155;margin-top:4px}
 #photon-zone-select{width:100%;max-width:100%;margin-top:7px}
 #photon-zone-detail,#photon-range-status{font-size:12px;line-height:1.6;color:#c5d4e6;white-space:normal}
-body.mapping-only #replay-controls>strong,body.mapping-only #manual-workflow-state,
-body.mapping-only #replay-controls>[data-replay-decision],body.mapping-only #replay-notes,
-body.mapping-only #replay-controls>.manual-plan,body.mapping-only #replay-report,
-body.mapping-only #replay-export{display:none!important}
 @media(max-width:650px){#photon-context-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
@@ -495,9 +488,7 @@ body.mapping-only #replay-export{display:none!important}
     $('sr-zones').checked=false;
     $('structure-review').textContent='Review structure';
     $('day-replay').textContent='Structure replay';
-    $('structure-review').title='Map completed candles only; no trade entries';
-    $('manual-confirm').disabled=true;
-    $('manual-confirm').hidden=true;
+    $('structure-review').title='Review structure and confirm simulated manual trades; no automatic entries';
   }
   if(boot.run.photonStructure) {
     document.body.classList.add('photon-structure');
@@ -824,12 +815,13 @@ body.mapping-only #replay-export{display:none!important}
     return JSON.stringify([boot.run.runId,boot.run.symbol,trade.Pair ?? currentTrade,trade['Entry Time']]);
   }
   function currentReview() { return reviewRecords.find(record=>record?.key===replayKey()); }
-  function dayTradeReviews() {return reviewRecords.filter(r=>r.runId===boot.run.runId && r.symbol===boot.run.symbol && r.reviewType==='manual-day' && r.day===replayDay);}
+  function dayTradeReviews() {return reviewRecords.filter(r=>r.runId===boot.run.runId && r.symbol===boot.run.symbol && r.reviewType==='manual-day' && (r.day===replayDay || r.key===manualDayTradeKey));}
   function reportOutcomesSeen(){try{return Boolean(localStorage.getItem('csl-replay-report-seen:'+boot.run.runId));}catch{return false;}}
   function ensureReview() {
-    let record=currentReview();if(record)return record;
+    let record=currentReview();if(record){if(boot.run.mappingOnly && dayMode)manualDayTradeKey=record.key;return record;}
     const trade=sourcePayload.selectedTrade;
     record={key:replayKey(),runId:boot.run.runId,symbol:boot.run.symbol,reviewType:dayMode?'manual-day':'automatic-trade',day:dayMode?replayDay:null,positionBoxPlaced:!dayMode,tradeIndex:dayMode?null:currentTrade,pair:trade.Pair,entryTime:trade['Entry Time'],side:trade.Side,recordedAt:new Date().toISOString(),outcomePreviouslyShown:normalViewsSeen.has(replayKey()) || reportOutcomesSeen(),notes:'',decision:'Wait',initialDecision:'Wait',initialDecisionReplayTime:replayCutoff,workflowVersion:1};
+    if(boot.run.mappingOnly && dayMode)manualDayTradeKey=record.key;
     reviewRecords.push(record);saveReviews();return record;
   }
   function saveReviews() {
@@ -843,7 +835,7 @@ body.mapping-only #replay-export{display:none!important}
     return {entry:Number(trade.Entry),stop:Number(trade.Stop),target:Number(trade.Target),entryTime:bar?.time ?? time,interval:replayInterval,timeframe:boot.run.timeframe};
   }
   function manualPlanLocked() {
-    return boot.run.mappingOnly || replayBusy || replayRevealed || Boolean(currentReview()?.manualEntry);
+    return replayBusy || replayRevealed || Boolean(currentReview()?.manualEntry);
   }
   function manualMarket(record=currentReview()) {
     const entry=record?.manualEntry || manualPlanDraft;
@@ -892,7 +884,7 @@ body.mapping-only #replay-export{display:none!important}
   }
   function closedPositionHint() {
     const record=currentReview();
-    if(record?.manualExit)return dayMode?'This position is closed. Use New trade to add another trade on this day.':'This manual position is already closed.';
+    if(record?.manualExit)return dayMode?'This position is closed. Use New trade to add another simulated position.':'This manual position is already closed.';
     if(replayRevealed)return 'Replay is fully revealed. Restart to review the position.';
     if(!manualMarket())return 'Loading the position entry-timeframe candles.';
     return 'Manage the confirmed manual position.';
@@ -1117,6 +1109,7 @@ body.mapping-only #replay-export{display:none!important}
     const next=cslNextDayTrade(reviewRecords,boot.run.runId,boot.run.symbol,replayDay,replayCutoff,replayInterval);
     if(next.error){manualEntryMessage=next.error;refreshManualPlan();return;}
     if(next.existingKey){selectDayTrade(next.existingKey);return;}
+    if(boot.run.mappingOnly)next.notBefore=Math.max(next.notBefore,currentReview().manualExit.availableAt ?? currentReview().manualExit.candleTime+manualInterval());
     stopReplay();manualDayTradeKey=next.key;workspacePanels.show('plan');
     const record=ensureReview();record.tradeNotBefore=next.notBefore;record.startedReplayTime=replayCutoff;
     const bar=(marketPayload.candles || []).filter(b=>b.time>=next.notBefore && b.time>=replayDay && b.time<replayDay+86400 && b.time+replayInterval<=replayCutoff).at(-1);
@@ -1207,7 +1200,6 @@ body.mapping-only #replay-export{display:none!important}
     $('manual-entry').value=bar.close;manualEntryMessage='Current closed candle selected. Check SL/TP, then confirm entry.';refreshManualPlan();showManualBox();
   });
   $('manual-confirm').addEventListener('click',()=>{
-    if(boot.run.mappingOnly)return;
     if(manualPlanLocked()) return;
     stopReplay();refreshManualPlan();if(manualPlanDraft.error)return;
     ensureReview();storeManualPlan();const record=currentReview();
@@ -2062,7 +2054,6 @@ body.mapping-only #replay-export{display:none!important}
   }
   function drawTradeBox() {
     tradeBoxLayer.replaceChildren();
-    if(boot.run.mappingOnly){$('trade-card').hidden=true;return;}
     $('trade-card').hidden=!(payload && chart && candles && replayActive && manualPlanDraft);
     if (!payload || !chart || !candles) return;
     const manual=Boolean(replayActive && manualPlanDraft);

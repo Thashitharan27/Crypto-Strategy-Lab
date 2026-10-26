@@ -249,7 +249,7 @@ def test_chart_controls_show_structure_without_disabling_trades(mode):
         assert 'manual-confirm' not in nodes  # trading controls never disabled
     else:
         assert nodes['photon-view']['value']=='LINES'
-        assert nodes['manual-confirm']['disabled'] is True
+        assert 'manual-confirm' not in nodes  # manual simulation is enabled in mapping mode too
 
 
 @pytest.mark.parametrize('short',[False,True])

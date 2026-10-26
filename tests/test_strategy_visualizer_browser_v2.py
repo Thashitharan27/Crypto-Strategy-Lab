@@ -731,6 +731,48 @@ console.log(JSON.stringify({count:reviewRecords.length,unchanged:original===JSON
     assert result['selected']=='first' and result['cutoff']==240 and result['draws']==2
 
 
+def test_mapping_manual_entry_requires_closed_candle_and_survives_midnight():
+    import json, shutil, subprocess, pytest
+    from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node required for manual replay workflow')
+    html = build_browser_visualizer_v2_html(_Model(), 'mapping-manual')
+    reviews = html[html.index('  function replayKey()'):html.index('  function saveReviews()')]
+    lock = html[html.index('  function manualPlanLocked()'):html.index('  function manualMarket(')]
+    confirm = html[html.index("  $('manual-confirm').addEventListener"):html.index("  $('manual-close').addEventListener")]
+    script = REPLAY_HELPERS + '''
+const boot={run:{mappingOnly:true,runId:'r',symbol:'BTCUSDT'}};
+let dayMode=true,replayDay=0,replayCutoff=0,replayInterval=900,manualDayTradeKey=null;
+let replayBusy=false,replayRevealed=false,reviewRecords=[],manualEntryMessage='';
+const normalViewsSeen=new Set(),localStorage={getItem:()=>null};
+const sourcePayload={selectedTrade:{Pair:'BTCUSDT',Side:'LONG','Entry Time':'1970-01-01T00:00:00Z'}};
+const elements={},$=id=>elements[id] || (elements[id]={handlers:{},addEventListener(type,fn){this.handlers[type]=fn;}});
+const bars=Array.from({length:97},(_,i)=>({time:i*900,open:100,high:i===96?105:101,low:99,close:100}));
+const manualPlanDraft={entry:100,stop:98,target:104,entryTime:0,timeframe:'15m',interval:900};
+const saveReviews=()=>{},stopReplay=()=>{},refreshManualPlan=()=>{},advanceManualPosition=()=>{},updateReplayControls=()=>{},redrawOverlays=()=>{};
+const manualMarket=()=>({candles:bars}),manualInterval=()=>900;
+const storeManualPlan=()=>currentReview().manualPlan={...manualPlanDraft};
+''' + reviews + lock + confirm + '''
+$('manual-confirm').handlers.click();
+const premature=Boolean(currentReview().manualEntry);
+replayCutoff=900;$('manual-confirm').handlers.click();
+const entered=currentReview(),key=entered.key;
+replayDay=86400;replayCutoff=86400;
+const stable=currentReview()===entered && ensureReview()===entered;
+const before=cslAdvanceManualPosition(entered,bars,replayCutoff,900,'now');
+const after=cslAdvanceManualPosition(entered,bars,87300,900,'now');
+console.log(JSON.stringify({premature,confirmed:Boolean(entered.manualEntry),stable,count:reviewRecords.length,
+  locked:manualPlanLocked(),listed:dayTradeReviews().some(r=>r.key===key),
+  beforeExit:Boolean(before.manualExit),afterExit:after.manualExit}));
+'''
+    result = json.loads(subprocess.run([node], input=script, text=True, encoding='utf-8',
+                                      capture_output=True, check=True).stdout)
+    assert not result['premature'] and result['confirmed']
+    assert result['stable'] and result['count'] == 1 and result['locked'] and result['listed']
+    assert not result['beforeExit'] and result['afterExit']['price'] == 104
+
+
 def test_structure_renderer_fades_filled_fvgs_and_starts_ifvg_at_inversion():
     import json,shutil,subprocess,pytest
     node=shutil.which('node')

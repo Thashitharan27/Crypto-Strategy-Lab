@@ -87,6 +87,16 @@ dataset, choose a historical period, run the analysis, then open **Strategy
 Visualizer**. The structure overlay opens automatically. Use Structure replay to
 advance candle by candle; weekly, daily, 4H and 15m share the replay clock.
 
+The strategy's saved "mapping only" name means no automatic strategy entries.
+Manual simulated trades are available in the visualizer without a settings
+switch: start **Structure replay**, open **Trade panel** (or choose a Long/Short
+position tool), select the side and a closed entry candle, set Entry/SL/TP, then
+click **Confirm manual entry**. Use **Enter at current candle** to place the plan
+at the latest closed candle. Replay manages the simulated SL/TP; manual close,
+break-even, review reports and export use the existing manual-review workflow.
+Positions remain selected when continuous structure replay crosses UTC midnight.
+These actions record local replay reviews and do not place live orders.
+
 The context strip sits above the main chart. Each timeframe has its own swing
 direction, internal phase and qualified relationship to its parent. Opposing
 directions mean a **possible** parent pullback, never a forced trend reversal.
