@@ -253,7 +253,8 @@ class PhotonTrendMixin:
             self.photon_setups, self.photon_order_live = zone_reversal_setups(
                 bars, self.atr_values, guides,
                 confirmation_minutes=self.config.photon_confirmation_minutes,
-                stop_buffer_atr=self.config.sd_stop_buffer_atr, minimum_r=self.config.sd_minimum_r)
+                stop_buffer_atr=self.config.sd_stop_buffer_atr, minimum_r=self.config.sd_minimum_r,
+                retest_minutes=self.config.photon_retest_minutes)
             self.photon_trend_exits = {e['availableAt']: e['direction'] for e in guides['15m']['events']
                                        if e['kind'] == 'TREND_CHANGE'}
             return
@@ -276,7 +277,8 @@ class PhotonTrendMixin:
     def _entry_decision(self,i,active_at_candle_start=False):
         if getattr(self,"signal_strategy_mode",None)!=MODE:return super()._entry_decision(i,active_at_candle_start)
         if active_at_candle_start or self.active_pairs or self.pending_next_open_entry or i+1>=len(self.times) or not self._should_enter(i):return None
-        return dict(execution_index=i+1,indicator_index=i,defer_to_next_open=True,photon_limit=True,photon_market=self.config.photon_zone_reversal,fill_price_source="PHOTON_ZONE_REVERSAL_OPEN" if self.config.photon_zone_reversal else "PHOTON_ORIGIN_RETEST",scheduled_timestamp=pd.Timestamp(self.times[i])+pd.Timedelta(minutes=1),actual_entry_timestamp=None)
+        market = self.config.photon_zone_reversal and self.photon_setups[i].get("entryExecution") != "LIMIT_RETEST"
+        return dict(execution_index=i+1,indicator_index=i,defer_to_next_open=True,photon_limit=True,photon_market=market,fill_price_source="PHOTON_ZONE_REVERSAL_OPEN" if market else "PHOTON_ORIGIN_RETEST",scheduled_timestamp=pd.Timestamp(self.times[i])+pd.Timedelta(minutes=1),actual_entry_timestamp=None)
 
     def _execute_pending_next_open_entry(self,i,active_at_candle_start=False):
         order=getattr(self,"pending_next_open_entry",None)

@@ -293,10 +293,18 @@ Previously saved configurations keep their legacy entry model unless enabled.
 A completed 1m candle must touch a previously known Daily or 4H demand/supply
 zone in the appropriate 4H value half. Demand arms a long; supply arms a short.
 The 4H swing direction is context, not an additional alignment requirement.
-Wait for a fresh close-confirmed 15m TREND_CHANGE after that touch; CHoCH and BOS
-alone do not qualify. Once the 15m swing agrees, the 1m swing must agree too;
-existing 1m alignment is sufficient. The confirmation close must move away from
-the touch candle close. Simulated entry is at the next 1m open, with slippage.
+Wait for a fresh close-confirmed 15m TREND_CHANGE after that touch. Then wait for
+its pullback into 15m discount for longs / premium for shorts, with opposing 1m
+internal structure. A fresh 1m internal CHoCH (or a swing change in that direction)
+after the pullback confirms the internal reversal; a full 1m swing trend change
+is not required. Freeze the last opposing-body 1m candle between the pullback and
+that change as the entry origin. Buy its high / sell its low only on a later
+1m retest, with opening-gap improvement when valid. No immediate alignment entry.
+The configured retest timeout cancels unfilled orders. Pending orders also cancel
+on context/stop-zone invalidation, opposing 15m swing or 1m internal direction,
+missing data or a target reached before the retest. An unfilled order cancelled
+by an opposing 1m internal shift or expiry can retry after another value pullback
+and fresh internal change, while the original 15m confirmation remains valid.
 
 Use the latest relevant known 15m zone fully inside the touched higher-timeframe
 zone, which was touched during the reaction or contains its extreme. SL sits
@@ -304,8 +312,9 @@ beyond its far edge plus the configured ATR buffer. If absent, use the reaction'
 lowest low for longs / highest high for shorts plus that buffer. TP is the known
 4H midpoint frozen at the entry decision. Entry must remain inside the 4H range
 and on the correct side of EQ; minimum R is checked at confirmation and again
-using the actual slipped fill. A gap that violates stop, target or minimum R
-skips that order instead of turning it into a delayed limit order.
+using the actual slipped fill. A gap beyond the stop/target invalidates the limit order; minimum R is checked
+again at its actual slipped fill. On the fill minute, stops are eligible but
+profits are conservatively deferred because OHLC cannot establish the retest path.
 
 One setup is emitted per continuous zone visit. A later departure and revisit
 can arm another setup. Invalidated/retired context, expired confirmation or a
