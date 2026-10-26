@@ -9,9 +9,9 @@ from .photon_structure import valid_bar
 
 
 def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
-                        stop_buffer_atr=.05, minimum_r=1.):
-    from .photon_trend import MODE, validate_settings
-    validate_settings(confirmation_minutes, 1)
+                        stop_buffer_atr=.05, minimum_r=1., retest_minutes=60):
+    from .photon_trend import MODE, validate_settings, resolve_retest
+    validate_settings(confirmation_minutes, retest_minutes)
     if len(bars) != len(atr_values):
         raise ValueError("Photon ATR must align with 1m candles")
     if not isfinite(minimum_r) or minimum_r <= 0 or not isfinite(stop_buffer_atr) or stop_buffer_atr < 0:
@@ -27,12 +27,12 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
             updates[z['availableAt']].append(('CREATE', z))
         for e in guide.get('supplyDemand', {}).get('events', ()):
             updates[e['availableAt']].append(('UPDATE', e))
-        if tf == '15m':
+        if tf in ('15m', '1m'):
             for e in guide.get('events', ()):
-                if e['kind'] == 'TREND_CHANGE':
-                    changes[e['availableAt']].append(e)
+                if e['kind'] == 'TREND_CHANGE' or tf == '1m' and e['kind'] == 'CHOCH':
+                    changes[(tf, e['availableAt'])].append(e)
     signals, live = [None]*len(bars), [None]*len(bars)
-    campaign = None
+    campaign = pending = None
     # One campaign per continuous visit, not repeated entries while inside a zone.
     inside = set()
     iso = lambda t: pd.Timestamp(t, unit='s', tz='UTC').isoformat()
@@ -40,11 +40,13 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
         at = b['time']+60
         gap = not valid_bar(b) or i > 0 and b['time']-bars[i-1]['time'] != 60
         if gap:
-            campaign = None
+            campaign = pending = None
             zones.clear()
             inside.clear()
         if not valid_bar(b):
             continue
+        if pending and resolve_retest(pending, b)[0] != 'WAITING':
+            pending = campaign = None
         # A candle can only touch zones already known when it opened.
         touches = {k for k, z in zones.items() if b['high'] >= z['lower'] and b['low'] <= z['upper']}
         new_visits = touches-inside
@@ -62,8 +64,24 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
         h, m, minute = current.get('4h'), current.get('15m'), current.get('1m')
         bounds = h.get('range') if h else None
         if not bounds:
-            campaign = None
+            campaign = pending = None
             continue
+        if pending:
+            sign = 1 if pending['side'] == 'LONG' else -1
+            if (pending['contextZone']['id'] not in zones
+                    or pending['parentZone'] and pending['parentZone']['id'] not in zones
+                    or not m or m['trend'] != sign
+                    or at-campaign['contextAt'] > confirmation_minutes*60
+                    or (b['high'] >= pending['target'] if sign == 1 else b['low'] <= pending['target'])):
+                pending = campaign = None
+            elif at >= pending['expiresAt'] or not minute or minute.get('internal') != sign:
+                # The 15m thesis survives a failed internal attempt. A new
+                # pullback and fresh internal change must precede another order.
+                pending = None
+                campaign['pullbackAt'] = None
+            else:
+                live[i] = pending['signalIndex']
+                continue
         if campaign and (campaign['contextZone']['id'] not in zones
                          or at-campaign['contextAt'] > confirmation_minutes*60):
             campaign = None
@@ -77,27 +95,44 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
                 sign = 1 if z['kind'] == 'DEMAND' else -1
                 campaign = dict(contextZone=deepcopy(z), contextAt=at, direction=sign,
                                 extreme=b['low'] if sign == 1 else b['high'], touchClose=b['close'],
-                                alignmentAt=None, touchTime=b['time'], stopZoneIds=set(touches))
+                                alignmentAt=None, pullbackAt=None, touchTime=b['time'], stopZoneIds=set(touches))
             continue
         campaign['stopZoneIds'].update(touches)
         sign = campaign['direction']
         long = sign == 1
         campaign['extreme'] = (min if long else max)(campaign['extreme'], b['low'] if long else b['high'])
-        for event in changes[at]:
+        for event in changes[('15m', at)]:
             if at > campaign['contextAt']:
                 if event['direction'] == sign:
-                    campaign['alignmentAt'] = at
+                    campaign.update(alignmentAt=at, pullbackAt=None)
                 elif campaign['alignmentAt'] is not None:
                     campaign = None
                     break
         if campaign is None:
             continue
-        if not campaign['alignmentAt'] or not m or m['trend'] != sign or not minute or minute['trend'] != sign:
+        if not campaign['alignmentAt'] or not m or m['trend'] != sign or not minute:
             continue
-        # The structural reversal must also have moved away from the touch close.
-        if sign*(b['close']-campaign['touchClose']) <= 0:
+        if campaign['pullbackAt'] is None:
+            leg = m.get('range')
+            if (at > campaign['alignmentAt'] and minute.get('internal') == -sign and leg
+                    and leg['low'] <= b['close'] <= leg['high']
+                    and sign*(leg['equilibrium']-b['close']) > 0):
+                campaign.update(pullbackAt=at, pullbackIndex=i, leg=deepcopy(leg))
             continue
-        entry, target = b['close'], bounds['equilibrium']
+        shift = next((e for e in changes[('1m', at)] if e['direction'] == sign), None)
+        if at <= campaign['pullbackAt'] or not shift or minute.get('internal') != sign:
+            continue
+        # Freeze the last opposing 1m candle left behind by this fresh shift.
+        # Its near edge is a limit, eligible only on subsequent 1m candles.
+        origins = [j for j in range(campaign['pullbackIndex'], i)
+                   if sign*(bars[j]['close']-bars[j]['open']) < 0]
+        if not origins:
+            continue
+        origin = bars[origins[-1]]
+        entry = origin['high'] if long else origin['low']
+        if sign*(b['close']-entry) <= 0 or sign*(campaign['leg']['equilibrium']-entry) <= 0:
+            continue
+        target = bounds['equilibrium']
         if not bounds['low'] <= entry <= bounds['high'] or sign*(target-entry) <= 0:
             continue
         context = campaign['contextZone']
@@ -123,26 +158,32 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
         checks = [dict(code=code, label=label, passed=True, detail=detail) for code, label, detail in (
             ('HTF_ZONE', 'Daily / 4H zone touched', context['timeframe']+' '+context['kind']+'; touch '+iso(campaign['contextAt'])),
             ('15M_CHANGE', 'Fresh 15m trend change', 'Confirmed '+iso(campaign['alignmentAt'])),
-            ('1M_ALIGNMENT', '1m swing aligned', 'Confirmed '+iso(at)+'; existing alignment accepted'),
+            ('15M_PULLBACK', '15m pullback in value', 'Confirmed '+iso(campaign['pullbackAt'])+' with opposing 1m internal structure'),
+            ('1M_ALIGNMENT', 'Fresh 1m internal change after pullback', 'Confirmed '+iso(at)),
+            ('1M_RETEST', 'Wait for 1m origin pullback', f'Limit {entry:g}; only later candles qualify'),
             ('4H_VALUE', 'Entry in 4H '+('discount' if long else 'premium'), f'Planned entry {entry:g}; midpoint {target:g}'),
             ('STOP_SOURCE', 'Stop beyond '+('15m zone' if parent else 'touch extreme'), f'Boundary {boundary:g}; buffered stop {stop:g}'),
             ('MINIMUM_R', 'Minimum reward / risk to 4H midpoint', f'{reward/risk:g}R at confirmation; minimum {minimum_r:g}R; rechecked at fill'),
         )]
-        signals[i] = dict(version=1, strategy=MODE, entryModel='HTF_ZONE_REVERSAL',
+        signals[i] = dict(version=1, strategy=MODE, entryModel='HTF_ZONE_PULLBACK', entryExecution='LIMIT_RETEST',
                           side='LONG' if long else 'SHORT', entry=entry, stop=stop, target=target,
                           signalTime=iso(b['time']), signalAvailableAt=at, signalIndex=i,
                           contextZone=deepcopy(context), parentZone=deepcopy(parent), zone=zone,
-                          entryZone=deepcopy(zone),
+                          entryZone=dict(bottom=origin['low'], top=origin['high'], pivotTime=iso(origin['time']),
+                                         confirmedTime=iso(at), touchTime=None, bounceTime=iso(b['time'])),
+                          pullbackAt=campaign['pullbackAt'], minuteChangeAt=at,
+                          expiresAt=at+retest_minutes*60,
                           opposingZone=dict(bottom=target*.999999, top=target*1.000001,
                                             pivotTime=iso(bounds.get('knownAt', h['availableAt'])),
                                             confirmedTime=iso(h['availableAt'])), contextTouchAt=campaign['contextAt'],
                           alignmentAt=campaign['alignmentAt'], stopSource='15M_ZONE' if parent else 'TOUCH_EXTREME',
                           stopBoundary=boundary, touchExtreme=campaign['extreme'],
-                          range4h=deepcopy(bounds), range15m=deepcopy(m.get('range')),
+                          range4h=deepcopy(bounds), range15m=deepcopy(campaign['leg']),
                           targetMode='4H_MIDPOINT', target4h=target,
                           review=dict(status='PREFERRED_ALIGNMENT', checks=checks, mismatches=[]),
                           narrative={tf: dict(trend=s['trend'], internal=s.get('internal', 0), availableAt=s['availableAt'])
                                      for tf, s in current.items()})
+        pending = deepcopy(signals[i])
         live[i] = i
-        campaign = None
+        campaign['pullbackAt'] = None
     return signals, live
