@@ -35,23 +35,21 @@ def js(expression):
     return json.loads(result.stdout)
 
 
-def test_part1_event_relationships_include_failed_continuation():
+def test_internal_failed_continuation_events_remain_without_swing_gate():
     result = mapping(reference_bars())
-    events = [(e["time"]//900, e["kind"], e["direction"]) for e in result["events"]
-              if e["kind"] in ("BOS", "TREND_CHANGE", "CHOCH")]
-    assert events == [(5,"BOS",-1),(13,"CHOCH",1),(17,"CHOCH",-1),
-                      (21,"CHOCH",1),(24,"TREND_CHANGE",1)]
-    snapshots = result["snapshots"]
-    assert snapshots[13]["phase"] == "POSSIBLE_PULLBACK"
-    assert snapshots[17]["phase"] == "POSSIBLE_CONTINUATION"
-    assert snapshots[21]["phase"] == "POSSIBLE_PULLBACK"
-    assert all(s["trend"] == -1 for s in snapshots[5:24])
-    assert snapshots[24]["trend"] == 1
-    assert snapshots[21]["high"]["strong"]
-    # A CHoCH qualifies a possible endpoint, not a confirmed lower swing low.
-    assert snapshots[13]["low"]["eligible"]
-    assert not snapshots[13]["low"]["confirmed"]
-    assert [e["availableAt"] for e in result["trace"]] == [5400,5400,22500,22500]
+    assert [(e["time"]//900, e["direction"]) for e in result["events"]
+            if e["kind"] == "CHOCH"] == [(13, 1), (17, -1), (21, 1)]
+    # The requested close-only experiment now admits continuation before CHoCH.
+    assert any(e["kind"] == "BOS" and e["time"] == 6*900 for e in result["events"])
+    for e in result["events"]:
+        if e["kind"] not in ("BOS", "TREND_CHANGE"):
+            continue
+        i = e["time"] // 900
+        previous = result["snapshots"][i-1]
+        key = "high" if e["direction"] == 1 else "low"
+        assert e["price"] == previous[key]["price"]
+        close = reference_bars()[i]["close"]
+        assert close > e["price"] if e["direction"] == 1 else close < e["price"]
 
 
 def test_part2_wick_choch_precedes_close_confirmed_swing_change():
@@ -67,8 +65,8 @@ def test_part2_wick_choch_precedes_close_confirmed_swing_change():
     assert e["time"] == 13*900 and e["direction"] == -1
     assert mirror[13]["close"] == e["price"]
     assert mirror[13]["low"] < e["price"]
-    assert result["snapshots"][13]["trend"] == 1
-    assert result["snapshots"][24]["trend"] == -1
+    assert not any(event["kind"] in ("BOS", "TREND_CHANGE") and event["time"] == 13*900
+                   for event in result["events"])
 
 
 def test_inside_bar_alone_is_not_choch_but_later_minor_high_break_is():
@@ -82,11 +80,20 @@ def test_inside_bar_alone_is_not_choch_but_later_minor_high_break_is():
 
 
 def test_weak_swing_wick_sweep_does_not_change_swing_direction():
-    source = reference_bars()
-    source[23] = dict(source[23], high=109, close=108)
+    source = reference_bars()[:14]
+    previous = mapping(source)["snapshots"][-1]
+    level = previous["high"]["price"]
+    source.append(dict(time=14*900, open=previous["close"], close=level,
+                       high=level+2, low=min(previous["close"], level)-.1))
     result = mapping(source)
-    assert result["snapshots"][23]["trend"] == -1
-    assert result["snapshots"][24]["trend"] == 1
+    assert result["snapshots"][-1]["trend"] == previous["trend"]
+    assert not any(e["kind"] in ("BOS", "TREND_CHANGE") and e["time"] == 14*900
+                   for e in result["events"])
+    next_level = result["snapshots"][-1]["high"]["price"]
+    source.append(dict(time=15*900, open=level, close=next_level+1,
+                       high=next_level+2, low=level-.1))
+    assert any(e["kind"] in ("BOS", "TREND_CHANGE") and e["time"] == 15*900
+               for e in mapping(source)["events"])
 
 
 def test_event_qualified_mapping_is_prefix_safe_and_strength_independent():
@@ -142,11 +149,19 @@ def test_next_event_is_bounded_by_day_and_never_selects_pivot_noise():
 
 
 def test_developing_path_preserves_run_extreme_before_current_reaction():
-    result = mapping(reference_bars()[:19])
-    segments = js('cslPhotonSwingLines('+json.dumps(result)+',17100)')
-    path = js('cslPhotonDevelopingLeg('+json.dumps(result)+',17100,'+json.dumps(segments)+')')
-    assert [(p["time"],p["price"]) for p in path] == [(2700,108.4),(9900,96.6),(16200,100)]
-    assert all(p["availableAt"]<=17100 for p in path)
+    source = reference_bars()[:14]
+    previous = mapping(source)["snapshots"][-1]
+    close = (previous["high"]["price"] + previous["low"]["price"]) / 2
+    source.append(dict(time=14*900, open=close, close=close,
+                       high=previous["high"]["price"]+2, low=previous["low"]["price"]+.1))
+    source.append(dict(time=15*900, open=close, close=close,
+                       high=previous["high"]["price"]+1, low=previous["low"]["price"]+.1))
+    result = mapping(source)
+    segments = js('cslPhotonSwingLines('+json.dumps(result)+',14400)')
+    path = js('cslPhotonDevelopingLeg('+json.dumps(result)+',14400,'+json.dumps(segments)+')')
+    expected = [segments[-1][-1], *result["snapshots"][-1]["developing"]]
+    assert [(p["time"],p["price"]) for p in path] == [(p["time"],p["price"]) for p in expected]
+    assert all(p["availableAt"]<=14400 for p in path)
 
 
 def test_context_history_can_be_longer_than_detail_history_without_new_orders():

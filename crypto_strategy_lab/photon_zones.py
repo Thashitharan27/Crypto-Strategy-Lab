@@ -40,7 +40,8 @@ def attach_ranges(guide):
         bounds = dict(low=low["price"], high=high["price"],
                       equilibrium=(low["price"]+high["price"])/2,
                       lowTime=low["time"], highTime=high["time"], knownAt=known_at,
-                      status="PULLBACK_CANDIDATE" if weak.get("eligible") else "DEVELOPING")
+                      status="CLOSE_BREAK_PENDING" if guide.get("swingBreakRule") == "CLOSE_ONLY"
+                      else "PULLBACK_CANDIDATE" if weak.get("eligible") else "DEVELOPING")
         bounds["position"] = range_position(state.get("close"), bounds)
         state["range"] = bounds
 

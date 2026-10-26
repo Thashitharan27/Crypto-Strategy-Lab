@@ -1944,7 +1944,7 @@ class RuleStrategyBuilder(QWidget):
                 "Photon Parts 1 & 2 · Mapping only · No entries · Run on 15m, then open Strategy Visualizer. "
                 "Weekly/daily context above the 4H + 15m overlay; swing breaks use closes, internal CHoCH uses wicks. "
                 "Premium/discount and daily/4H/15m supply-demand layers are available in the visualizer. "
-                "Possible swing pullbacks qualify through internal CHoCH; protected origins require a close-confirmed swing break."
+                "Swing breaks require a candle close beyond the mapped high/low; no preceding CHoCH is required."
             )
             return
         markets = []
