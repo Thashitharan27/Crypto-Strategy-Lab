@@ -1937,7 +1937,7 @@ class RuleStrategyBuilder(QWidget):
 
     def refresh_summary(self):
         if self.direction_mode.currentData() == "PHOTON_4H_TREND":
-            self.summary.setText("Photon · Run on actual 1m data. Daily / 4H zone reversal: touch in 4H premium/discount → fresh 15m trend change → 15m pullback → 1m internal CHoCH → 1m pullback entry. Stop beyond a nested 15m zone or the touch extreme; target the frozen 4H midpoint. Configure minimum reward/risk and optional 15m trend exit in Risk Execution. Legacy confirmation remains available by turning off zone reversal.")
+            self.summary.setText("Photon · Run on actual 1m data. Daily / 4H zone reversal: touch in 4H premium/discount → fresh 15m trend change → 15m pullback → 1m internal CHoCH → 1m pullback entry. Stop beyond a relevant 15m zone or the touch extreme; target the frozen 4H midpoint. Configure minimum reward/risk and optional 15m trend exit in Risk Execution. Legacy confirmation remains available by turning off zone reversal.")
             return
         if self.direction_mode.currentData() == "PHOTON_STRUCTURE_MAP":
             self.summary.setText(

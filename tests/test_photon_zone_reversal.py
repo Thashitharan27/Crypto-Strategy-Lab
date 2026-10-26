@@ -240,3 +240,44 @@ def test_pending_limit_cancels_before_a_later_retest(reason):
     if reason=='gap':bars[6]['time']+=1
     signals,live=zone_reversal_setups(bars,np.ones(len(bars)),guides,**kwargs)
     assert signals[5] and live[5]==5 and live[6] is None
+
+@pytest.mark.parametrize('short',[False,True])
+@pytest.mark.parametrize('tf',['4h','1d'])
+def test_reversal_zone_outside_initial_context_replaces_old_nested_stop(short,tf):
+    bars,guides=scenario(short,tf);t=bars[0]['time']
+    context=guides[tf]['supplyDemand']['zones'][0]
+    context['lower' if short else 'upper']=122 if short else 98
+    reversal=dict(id='reversal',timeframe='15m',kind='SUPPLY' if short else 'DEMAND',
+                  lower=120.5 if short else 98.5,upper=121.5 if short else 99.5,
+                  originTime=t+120,availableAt=t+180)
+    guides['15m']['supplyDemand']['zones'].append(reversal)
+    signals,live=zone_reversal_setups(bars,np.ones(len(bars)),guides)
+    s=signals[5]
+    assert s['parentZone']['id']=='reversal' and s['stopSource']=='15M_ZONE'
+    assert s['stopBoundary']==(121.5 if short else 98.5)
+    assert s['stop']==pytest.approx(121.55 if short else 98.45)
+    assert s['target']==110 and live[6]==5
+    for end in range(1,len(bars)+1):
+        assert zone_reversal_setups(bars[:end],np.ones(end),guides)==(signals[:end],live[:end])
+
+
+@pytest.mark.parametrize('rejection',['future','invalidated','retired','wrong_side','wrong_kind','before_alignment','old_origin'])
+@pytest.mark.parametrize('short',[False,True])
+def test_unqualified_reversal_zone_keeps_valid_context_stop(rejection,short):
+    bars,guides=scenario(short);t=bars[0]['time']
+    context=guides['4h']['supplyDemand']['zones'][0]
+    context['lower' if short else 'upper']=122 if short else 98
+    z=dict(id='reversal',timeframe='15m',kind='SUPPLY' if short else 'DEMAND',
+           lower=120.5 if short else 98.5,upper=121.5 if short else 99.5,
+           originTime=t+120,availableAt=t+180)
+    if rejection=='future':z['availableAt']=t+420
+    if rejection in ('invalidated','retired'):
+        guides['15m']['supplyDemand']['events']=[dict(zoneId='reversal',kind=rejection.upper(),availableAt=t+300)]
+    if rejection=='wrong_side':z.update(lower=118 if short else 101,upper=119 if short else 102)
+    if rejection=='wrong_kind':z['kind']='DEMAND' if short else 'SUPPLY'
+    if rejection=='before_alignment':z['availableAt']=t+120
+    if rejection=='old_origin':z['originTime']=t-1000
+    guides['15m']['supplyDemand']['zones'].append(z)
+    s=zone_reversal_setups(bars,np.ones(len(bars)),guides)[0][5]
+    assert s['parentZone']['id']=='nested'
+    assert s['stop']==pytest.approx(126.05 if short else 93.95)
