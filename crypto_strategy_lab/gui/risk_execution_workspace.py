@@ -155,6 +155,10 @@ class RiskExecutionWorkspace(QWidget):
         for name,label in (("photon_confirmation_minutes","Photon context / confirmation expiry (minutes)"),("photon_retest_minutes","Photon origin retest expiry (minutes)")):
             self.sd_card.add_field(name,label,self.account[name])
             self.account[name].setRange(1,10080)
+        self.account["photon_zone_reversal"].setText("Daily / 4H zone reversal → 15m trend change → aligned 1m entry")
+        self.sd_card.add_control("photon_zone_reversal", self.account["photon_zone_reversal"])
+        self.account["photon_exit_on_15m_change"].setText("Close when the 15m trend changes against the trade")
+        self.sd_card.add_control("photon_exit_on_15m_change", self.account["photon_exit_on_15m_change"])
         self.account["photon_target_4h"].setText("Target 4H swing instead of the first 15m swing objective")
         self.sd_card.add_control("photon_target_4h",self.account["photon_target_4h"])
         self.account["photon_flexible_entries"].setText("Flexible candidates — show value and structure mismatches for manual review")
@@ -1006,9 +1010,13 @@ class RiskExecutionWorkspace(QWidget):
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
         photon = self._signal_strategy_mode() == "PHOTON_4H_TREND"
         supply_demand = photon or self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
-        for name in ("photon_confirmation_minutes","photon_retest_minutes","photon_target_4h","photon_flexible_entries"):
-            self.sd_card.set_row_visible(name,photon)
-        self.sd_card.setTitle("Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
+        zone_reversal = photon and self.account["photon_zone_reversal"].isChecked()
+        for name in ("photon_confirmation_minutes", "photon_zone_reversal"):
+            self.sd_card.set_row_visible(name, photon)
+        self.sd_card.set_row_visible("photon_exit_on_15m_change", zone_reversal)
+        for name in ("photon_retest_minutes", "photon_target_4h", "photon_flexible_entries"):
+            self.sd_card.set_row_visible(name, photon and not zone_reversal)
+        self.sd_card.setTitle("Photon — Daily / 4H zone reversal" if zone_reversal else "Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
             self.sd_card.set_row_visible(name,liquidity or (imbalance and name in {"ls_displacement_atr","ls_max_wait_bars"}))
         self.sd_card.set_row_visible("sp_cost_cover_close_pct", sp_cost)
@@ -1104,6 +1112,10 @@ class RiskExecutionWorkspace(QWidget):
 
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "PHOTON_4H_TREND":
+            if execution.photon_zone_reversal:
+                exit_note = "Close at the next 1m open after an opposing 15m trend change." if execution.photon_exit_on_15m_change else "Exit at SL or TP."
+                self.summary_label.setText(f"Photon zone reversal: actual 1m candles. Touch Daily / 4H demand in 4H discount or supply in premium; wait for a fresh 15m trend change, then enter at the next 1m open once 1m agrees (existing alignment accepted). SL beyond the nested 15m zone, or the touch excursion extreme, plus {execution.sd_stop_buffer_atr:g} ATR. Freeze TP at the 4H midpoint; minimum {execution.sd_minimum_r:g}R is checked again at the fill. {exit_note} Context expires after {execution.photon_confirmation_minutes} minutes. Simulated backtest trades.")
+                return
             target="4H" if execution.photon_target_4h else "15m"
             mode=("Flexible candidates: existing 15m swing alignment or aligned internal structure is accepted; value mismatches are saved for manual review. A later 1m CHoCH and origin retest remain required." if execution.photon_flexible_entries else "Strict: 4H value reaction, fresh aligned 15m confirmation, later pullback within both value halves, then 1m CHoCH and origin retest.")
             self.summary_label.setText(f"Photon: actual 1m candles; only with the 4H swing. {mode} SL beyond reaction + {execution.sd_stop_buffer_atr:g} ATR; frozen {target} swing target; minimum {execution.sd_minimum_r:g}R. Context expiry {execution.photon_confirmation_minutes} minutes; retest {execution.photon_retest_minutes}. Backtest fills are simulated; use replay to confirm or skip manually. No partials, trailing or counter-4H trades.")

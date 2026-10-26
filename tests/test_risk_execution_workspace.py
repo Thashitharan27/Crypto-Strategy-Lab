@@ -20,9 +20,18 @@ def test_photon_selection_uses_actual_minutes_and_roundtrips_owned_controls():
         workspace.refresh_visibility()
         assert window.strategy_tf.currentData()=='1m'
         assert window.intrabar_tf.currentData() is None
-        for name in ('photon_confirmation_minutes','photon_retest_minutes','photon_target_4h','photon_flexible_entries'):
+        for name in ('photon_confirmation_minutes','photon_zone_reversal','photon_exit_on_15m_change'):
             assert not window.execution_form.widgets[name].isHidden()
         assert window.execution_form.widgets['sd_swing_strength'].isHidden()
+        assert window.execution_form.widgets['photon_zone_reversal'].isChecked()
+        window.execution_form.widgets['photon_exit_on_15m_change'].setChecked(True)
+        assert window.build_config().execution.photon_exit_on_15m_change
+        for name in ('photon_retest_minutes', 'photon_target_4h', 'photon_flexible_entries'):
+            assert window.execution_form.widgets[name].isHidden()
+        window.execution_form.widgets['photon_zone_reversal'].setChecked(False)
+        app.processEvents(); workspace.refresh_visibility()
+        for name in ('photon_retest_minutes', 'photon_target_4h', 'photon_flexible_entries'):
+            assert not window.execution_form.widgets[name].isHidden()
         window.execution_form.widgets['photon_retest_minutes'].setValue(35)
         window.execution_form.widgets['photon_target_4h'].setChecked(True)
         config=window.build_config();config.validate()

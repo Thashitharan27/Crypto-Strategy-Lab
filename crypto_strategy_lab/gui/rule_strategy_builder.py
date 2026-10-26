@@ -672,7 +672,7 @@ DIRECTION_LABELS = {
     "FIB_RETRACEMENT": "Fib Retracement — Reaction",
     "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
     "PHOTON_STRUCTURE_MAP": "Photon Market Structure — Parts 1 & 2 (mapping only)",
-    "PHOTON_4H_TREND": "Photon — 4H Trend / 1m Confirmation",
+    "PHOTON_4H_TREND": "Photon — Automated Trades / 1m Confirmation",
 }
 SR_TIMEFRAME_OPTIONS = (
     (None, "Configured S/R (legacy)"),
@@ -1937,7 +1937,7 @@ class RuleStrategyBuilder(QWidget):
 
     def refresh_summary(self):
         if self.direction_mode.currentData() == "PHOTON_4H_TREND":
-            self.summary.setText("Photon · 4H trend trades only · Run on actual 1m data. 15m zone reaction → 1m CHoCH → later origin retest. Flexible candidates can use existing/internal 15m alignment; value and structure mismatches are shown for manual review. Strict confirmation remains selectable. Strategy-owned structural stop and swing target; daily/weekly are narrative context.")
+            self.summary.setText("Photon · Run on actual 1m data. Daily / 4H zone reversal: touch in 4H premium/discount → fresh 15m trend change → aligned 1m entry. Stop beyond a nested 15m zone or the touch extreme; target the frozen 4H midpoint. Configure minimum reward/risk and optional 15m trend exit in Risk Execution. Legacy confirmation remains available by turning off zone reversal.")
             return
         if self.direction_mode.currentData() == "PHOTON_STRUCTURE_MAP":
             self.summary.setText(

@@ -104,6 +104,7 @@ class MainWindow(LegacyMainWindow):
         strategy = self.rule_builder.direction_mode.currentData()
         if strategy == "PHOTON_4H_TREND":
             self.execution_form.widgets["photon_flexible_entries"].setChecked(True)
+            self.execution_form.widgets["photon_zone_reversal"].setChecked(True)
             self.strategy_tf.setCurrentIndex(self.strategy_tf.findData("1m"))
             self.intrabar_tf.setCurrentIndex(self.intrabar_tf.findData(None))
         if strategy != "DI":
