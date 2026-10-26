@@ -22,14 +22,20 @@ function renderPhotonEntryReview(sd,cutoff=Infinity) {
   }
   const note=document.createElement('p');note.textContent=view.legacy?'Rerun to capture decision-time checks.':'Checks were frozen when the 1m CHoCH armed this simulated candidate. Confirm manual entry, Skip or Unsure in replay to record your own decision. These checks do not place live orders.';body.appendChild(note);
 }
-function cslPhotonSwingLines(guide,cutoff) {
+function cslPhotonEventBound(events,time,inclusive=false) {
+  let lo=0,hi=events.length;while(lo<hi){const mid=(lo+hi)>>1;if(inclusive?events[mid].availableAt<=time:events[mid].availableAt<time)lo=mid+1;else hi=mid;}return lo;
+}
+function cslPhotonSwingLines(guide,cutoff,eventStart=-Infinity) {
   // Use origin times for geometry only after the event is known at the replay
   // clock. Never draw a forecast arrow or join structure across missing data.
   const groups=[[]];
   // Older payloads may contain raw pivot traces: never use them as confirmed
   // swing lines. Legacy BOS + SWING events provide the safe fallback.
   const source=guide.traceBasis==='BOS_CONFIRMED'?guide.trace:guide.events;
-  for(const e of source) {
+  const first=guide.traceBasis==='BOS_CONFIRMED'&&Number.isFinite(eventStart)?Math.max(0,cslPhotonEventBound(source,eventStart)-4):0;
+  const end=guide.traceBasis==='BOS_CONFIRMED'?cslPhotonEventBound(source,cutoff,true):source.length;
+  for(let i=first;i<end;i++) {
+    const e=source[i];
     if(e.availableAt>cutoff)continue;
     if(e.kind==='GAP'){groups.push([]);continue;}
     if(!['BOS_SWING','BOS','TREND_CHANGE','SWING'].includes(e.kind))continue;
@@ -55,12 +61,18 @@ function cslPhotonSwingLines(guide,cutoff) {
   }
   return segments;
 }
+const cslPhotonGapCache=new WeakMap();
 function cslPhotonDevelopingLeg(guide,cutoff,segments) {
   let lo=0,hi=guide.snapshots.length;
   while(lo<hi){const mid=(lo+hi)>>1;if(guide.snapshots[mid].availableAt<=cutoff)lo=mid+1;else hi=mid;}
   const s=lo?guide.snapshots[lo-1]:null,last=segments.at(-1)?.at(-1);
   if(!s || !last || !Number.isFinite(s.close) || cutoff>=s.availableAt+guide.interval)return null;
-  const gap=guide.events.filter(e=>e.kind==='GAP'&&e.availableAt<=cutoff).at(-1);
+  let cachedGaps=cslPhotonGapCache.get(guide);
+  if(!cachedGaps || cachedGaps.source!==guide.events || cachedGaps.length!==guide.events.length) {
+    cachedGaps={source:guide.events,length:guide.events.length,gaps:guide.events.filter(e=>e.kind==='GAP')};cslPhotonGapCache.set(guide,cachedGaps);
+  }
+  const gaps=cachedGaps.gaps;
+  const gap=gaps[cslPhotonEventBound(gaps,cutoff,true)-1];
   if(gap && last.availableAt<gap.availableAt)return null;
   if(s.developing?.length) {
     const points=[last,...s.developing.filter(p=>p.time>last.time).map(p=>({...p,availableAt:s.availableAt}))];
@@ -75,16 +87,29 @@ function cslPhotonView(mapping,cutoff,eventStart=-Infinity) {
     let lo=0,hi=guide.snapshots.length;
     while(lo<hi){const mid=(lo+hi)>>1;if(guide.snapshots[mid].availableAt<=cutoff)lo=mid+1;else hi=mid;}
     const latest=lo?guide.snapshots[lo-1]:null;
+    const events=guide.traceBasis==='BOS_CONFIRMED'?guide.events.slice(
+      cslPhotonEventBound(guide.events,eventStart),cslPhotonEventBound(guide.events,cutoff,true)):guide.events;
     result[tf]={state:latest && cutoff<latest.availableAt+guide.interval?latest:null,
-      events:guide.events.filter(e=>e.availableAt<=cutoff && e.time>=eventStart)};
+      events:events.filter(e=>e.availableAt<=cutoff && e.time>=eventStart)};
   }
   return result;
 }
 function cslPhotonNextEvent(mapping,cutoff,end) {
-  const times=Object.values(mapping?.timeframes || {}).flatMap(g=>g.events)
-    .filter(e=>['BOS','TREND_CHANGE','CHOCH'].includes(e.kind)&&e.availableAt>cutoff&&e.availableAt<=end)
-    .map(e=>e.availableAt);
-  return times.length?Math.min(...times):null;
+  let next=null;
+  for(const guide of Object.values(mapping?.timeframes || {})) {
+    for(let i=cslPhotonEventBound(guide.events,cutoff,true);i<guide.events.length;i++) {
+      const e=guide.events[i];if(e.availableAt>end)break;
+      if(['BOS','TREND_CHANGE','CHOCH'].includes(e.kind)){next=next==null?e.availableAt:Math.min(next,e.availableAt);break;}
+    }
+  }
+  return next;
+}
+function cslPhotonRecentEvents(guide,cutoff,limit=80) {
+  const events=guide.events,end=cslPhotonEventBound(events,cutoff,true);let start=end,count=0;
+  while(start>0&&count<limit){start--;if(['BOS','TREND_CHANGE','CHOCH'].includes(events[start].kind))count++;}
+  while(start>0&&events[start-1].availableAt===events[start]?.availableAt)start--;
+  return events.slice(start,end).filter(e=>['BOS','TREND_CHANGE','CHOCH'].includes(e.kind))
+    .sort((a,b)=>b.availableAt-a.availableAt).slice(0,limit);
 }
 function cslPhotonNarrative(view) {
   const frames=[['1w','Weekly'],['1d','Daily'],['4h','4H'],['15m','15m']];
@@ -118,8 +143,7 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
     strip.appendChild(box);
   }
   const select=$('photon-event-select'),previous=select.value;
-  const known=Object.entries(mapping.timeframes).filter(([tf])=>tf===$('photon-event-timeframe').value).flatMap(([tf,g])=>g.events
-    .filter(e=>e.availableAt<=cutoff&&['BOS','TREND_CHANGE','CHOCH'].includes(e.kind)).map(e=>({tf,e})))
+  const known=Object.entries(mapping.timeframes).filter(([tf])=>tf===$('photon-event-timeframe').value).flatMap(([tf,g])=>cslPhotonRecentEvents(g,cutoff).map(e=>({tf,e})))
     .sort((a,b)=>b.e.availableAt-a.e.availableAt || a.tf.localeCompare(b.tf)).slice(0,80);
   select.replaceChildren();
   for(const {tf,e} of known) {
@@ -223,7 +247,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     // trace follows exactly the same historical prices.
     for(const tf of displayFrames) {
       const color=tf==='4h'?'#f8fafc':tf==='1m'?'#2dd4bf':'#72a7f5',guide=mapping.timeframes[tf];if(!guide)continue;
-      const segments=cslPhotonSwingLines(guide,cutoff);
+      const segments=cslPhotonSwingLines(guide,cutoff,Math.max(bars[0]?.time ?? -Infinity,Number(visible?.from ?? -Infinity)));
       for(const segment of segments) {
         let path=[],previous=null;
         const flush=()=>{if(path.length>1)make('polyline',{points:path.join(' '),fill:'none',stroke:color,'stroke-width':tf==='4h'?2.8:1.4,'stroke-linejoin':'round','stroke-linecap':'round'},tf+' confirmed swing path');path=[];};

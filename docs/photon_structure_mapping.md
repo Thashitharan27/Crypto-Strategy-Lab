@@ -116,6 +116,16 @@ candles before trimming the chart. The display boundary does not reset its
 state. Hover the 1m context box to inspect the actual structure-history start;
 missing earlier archive data is not fabricated.
 
+Replay displays the latest **5,000 closed candles** by default. Change
+**Chart settings → Replay candles** to 2,000, 10,000 or All to review more or
+less history. This limits chart/indicator drawing only: full source history
+still drives structure, warmup and manual TP/SL evaluation. Position boxes
+remain attached to their original entry/exit even outside the displayed window.
+The toolbar provides quick **1m / 15m / 4h** buttons for available timeframes;
+switching preserves the replay clock. The three most recent timeframe/trade
+payloads are cached, including shared in-flight requests. The first 1m load
+still calculates full history; returning to a cached timeframe avoids reloading.
+
 The context strip sits above the main chart. Each timeframe has its own swing
 direction, internal phase and qualified relationship to its parent. Opposing
 directions mean a **possible** parent pullback, never a forced trend reversal.
