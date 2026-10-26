@@ -136,12 +136,21 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
         if not bounds['low'] <= entry <= bounds['high'] or sign*(target-entry) <= 0:
             continue
         context = campaign['contextZone']
+        # Prefer the 15m zone created by this reversal. It can sit outside the
+        # original HTF zone after price has departed that initial reaction area.
+        reversal = [z for z in zones.values() if z['timeframe'] == '15m'
+                    and z['kind'] == context['kind']
+                    and campaign['alignmentAt'] <= z['availableAt'] <= at
+                    and z.get('originTime', -float('inf'))+guides['15m']['interval'] > campaign['touchTime']
+                    and sign*(entry-(z['lower'] if long else z['upper'])) > 0]
         nested = [z for z in zones.values() if z['timeframe'] == '15m'
                   and z['kind'] == context['kind'] and z['availableAt'] <= at
                   and z['lower'] >= context['lower'] and z['upper'] <= context['upper']
                   and (z['id'] in campaign['stopZoneIds'] or z['lower'] <= campaign['extreme'] <= z['upper'])
                   and sign*(entry-(z['lower'] if long else z['upper'])) > 0]
-        parent = max(nested, key=lambda z: z['availableAt']) if nested else None
+        candidates = reversal or nested
+        parent = max(candidates, key=lambda z: (z['availableAt'],
+                     sign*(z['lower'] if long else z['upper']), z['id'])) if candidates else None
         boundary = (parent['lower'] if long else parent['upper']) if parent else campaign['extreme']
         av = float(atr_values[i])
         if not isfinite(av) or av <= 0:

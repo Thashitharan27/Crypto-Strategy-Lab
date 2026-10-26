@@ -306,8 +306,11 @@ missing data or a target reached before the retest. An unfilled order cancelled
 by an opposing 1m internal shift or expiry can retry after another value pullback
 and fresh internal change, while the original 15m confirmation remains valid.
 
-Use the latest relevant known 15m zone fully inside the touched higher-timeframe
-zone, which was touched during the reaction or contains its extreme. SL sits
+Prefer a valid 15m zone formed by the reversal, confirmed at/after the fresh 15m
+trend change and before the entry decision. Its origin candle must overlap or
+follow the initial HTF touch. It need not sit inside the original Daily/4H zone.
+If none qualifies, use the latest known 15m zone inside that HTF zone which was
+touched during the reaction or contains its extreme. SL sits
 beyond its far edge plus the configured ATR buffer. If absent, use the reaction's
 lowest low for longs / highest high for shorts plus that buffer. TP is the known
 4H midpoint frozen at the entry decision. Entry must remain inside the 4H range
