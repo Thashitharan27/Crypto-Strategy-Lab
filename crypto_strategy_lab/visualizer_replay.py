@@ -332,12 +332,33 @@ function cslNextReplayCutoff(bars, cutoff, interval, dayEnd=null) {
   if(!next || dayEnd!=null && cutoff>=dayEnd)return null;
   return dayEnd==null?next.time+interval:Math.min(dayEnd,next.time+interval);
 }
-function cslReplayChart(view, chartSource, cutoff, interval, entryTime, revealed=false) {
-  const projected=cslReplayView({...chartSource,selectedTrade:view.selectedTrade,markers:view.markers},cutoff,interval,entryTime,revealed,true).view;
-  return {...view,candles:projected.candles,overlays:projected.overlays,markers:projected.markers,chartTimeframe:chartSource.chartTimeframe};
+function cslTimeLowerBound(points,time,inclusive=false) {
+  let lo=0,hi=points.length;while(lo<hi){const mid=(lo+hi)>>1;if(inclusive?points[mid].time<=time:points[mid].time<time)lo=mid+1;else hi=mid;}return lo;
 }
-function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanced=false) {
-  if (reveal) return {view:source,outcomeVisible:true};
+function cslOffscreenTimeOffset(bars,time,firstTime,spacing) {
+  const index=cslTimeLowerBound(bars,time),first=cslTimeLowerBound(bars,firstTime);
+  return bars[index]?.time===time && bars[first]?.time===firstTime && index<first?(index-first)*spacing:null;
+}
+function cslPayloadCache(loader,maxEntries=3) {
+  const cache=new Map();
+  return key=>{
+    if(cache.has(key)){const value=cache.get(key);cache.delete(key);cache.set(key,value);return value;}
+    const pending=Promise.resolve().then(()=>loader(key));cache.set(key,pending);
+    while(cache.size>maxEntries)cache.delete(cache.keys().next().value);
+    pending.catch(()=>{if(cache.get(key)===pending)cache.delete(key);});return pending;
+  };
+}
+function cslRenderWindow(view,limit=0) {
+  const all=view.candles || [];if(!limit || all.length<=limit)return view;
+  const bars=all.slice(-limit),start=bars[0].time;
+  return {...view,candles:bars,overlays:(view.overlays || []).map(o=>({...o,data:(o.data || []).slice(cslTimeLowerBound(o.data || [],start))})),chartWindowed:true,renderedCandleLimit:limit};
+}
+function cslReplayChart(view, chartSource, cutoff, interval, entryTime, revealed=false, limit=0) {
+  const projected=cslReplayView({...chartSource,selectedTrade:view.selectedTrade,markers:view.markers},cutoff,interval,entryTime,revealed,true,limit).view;
+  return {...view,candles:projected.candles,overlays:projected.overlays,markers:projected.markers,chartWindowed:Boolean(projected.chartWindowed),renderedCandleLimit:limit,chartTimeframe:chartSource.chartTimeframe};
+}
+function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanced=false, limit=0) {
+  if (reveal) return {view:cslRenderWindow(source,limit),outcomeVisible:true};
   const original=source.selectedTrade || {};
   const exitTime=Date.parse(original['Exit Time'] || original.exitTime || '')/1000;
   const outcomeVisible=advanced && Number.isFinite(exitTime) && cutoff>=exitTime;
@@ -345,15 +366,20 @@ function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanc
   const known=['Pair','Side','Profile','Signal Strategy','Entry Time','Entry','Stop','Target','Entry Filter','Regime','ADX','+DI','-DI','DI Ratio'];
   for(const key of known) if(original[key]!=null) trade[key]=original[key];
   if(outcomeVisible) for(const key of ['Exit Time','Exit','Exit Reason','Net R','Net P&L']) trade[key]=original[key];
-  const bars=(source.candles || []).filter(bar=>bar.time+interval<=cutoff);
+  const all=source.candles || [],end=cslTimeLowerBound(all,cutoff-interval,true),start=limit?Math.max(0,end-limit):0;
+  const bars=all.slice(start,end);
   const closedTimes=new Set(bars.map(bar=>bar.time));
   // Never expose the entry candle's eventual H/L/C before it has closed.
-  const entryBar=(source.candles || []).find(bar=>bar.time<=entryTime && bar.time+interval>entryTime);
+  const entryIndex=cslTimeLowerBound(all,entryTime,true)-1;
+  const entryBar=entryIndex>=0 && all[entryIndex].time+interval>entryTime?all[entryIndex]:null;
   const entryPrice=Number(original.Entry);
-  if(entryBar && !closedTimes.has(entryBar.time) && Number.isFinite(entryPrice)) {
+  if(entryBar && entryBar.time+interval>cutoff && Number.isFinite(entryPrice)) {
     bars.push({time:entryBar.time,open:entryPrice,high:entryPrice,low:entryPrice,close:entryPrice});
   }
-  const overlays=(source.overlays || []).map(overlay=>({...overlay,data:(overlay.data || []).filter(point=>closedTimes.has(point.time))}));
+  const overlays=(source.overlays || []).map(overlay=>{
+    const data=overlay.data || [],first=bars[0]?.time ?? cutoff;
+    return {...overlay,data:data.slice(cslTimeLowerBound(data,first),cslTimeLowerBound(data,cutoff-interval,true)).filter(point=>closedTimes.has(point.time))};
+  });
   const markers=(source.markers || []).filter(marker=>marker.kind==='selected-open' || (outcomeVisible && marker.time<=cutoff))
     .map(marker=>marker.kind==='selected-open' && entryBar ? {...marker,time:entryBar.time} : marker);
   const fvg=source.fvgDerivation;
@@ -368,6 +394,6 @@ function cslReplayView(source, cutoff, interval, entryTime, reveal=false, advanc
   return {outcomeVisible,view:{...source,candles:bars,overlays,markers,selectedTrade:trade,
     fibDerivation:safeFib,fvgDerivation:safeFvg,
     selectedTradeViewStart:entryTime-120*interval,selectedTradeViewEnd:cutoff+interval*8,
-    fullRun:false}};
+    chartWindowed:start>0,renderedCandleLimit:limit,fullRun:false}};
 }
 """

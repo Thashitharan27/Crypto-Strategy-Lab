@@ -134,7 +134,7 @@ def test_v2_html_includes_trade_box_and_correct_summary_keys():
 
     assert 'id="trade-box-layer"' in html
     assert "function drawTradeBox()" in html
-    assert "timeToCoordinate(displayCandleTime(manual ? manualPlanDraft.entryTime : Number(open.time)))" in html
+    assert "const x1=chart.timeScale().timeToCoordinate(entryTime) ?? offscreenEntryX(entryTime)" in html
     assert "trade.Entry ?? trade.entry" in html
     assert "trade['Entry Time'] || trade.entryTime" in html
 
@@ -386,6 +386,8 @@ function Option(label,value){this.label=label;this.value=value;}
 function $(id){return controls[id] || (controls[id]={style:{}});}
 function stopReplay(){}
 function updateReplayControls(){}
+function updateQuickTimeframes(){}
+function getChartPayload(timeframe){return getJson({chart_timeframe:timeframe});}
 function api(path,query){return query;}
 async function getJson(query){
   calls.push(query);

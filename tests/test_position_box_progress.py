@@ -27,6 +27,7 @@ const side=SIDE,price=PRICE;
 const plan={entry:100,stop:side==='LONG'?90:110,target:side==='LONG'?120:80,entryTime:0};
 const record={key:'r',manualEntry:{...plan,interval:60},manualBoxBars:70};
 let payload={selectedTrade:{Side:side},markers:[],candles:[{time:120,close:price}]};
+const replayChartSource=null,sourcePayload={candles:Array.from({length:20},(_,i)=>({time:i*60}))};
 const manualPlanDraft={...plan};
 const currentReview=()=>record,replayKey=()=>'r',manualInterval=()=>60,manualPlanLocked=()=>true,manualCloseLocked=()=>true;
 const displayCandleTime=t=>t,formatPrice=p=>String(p),refreshTradeCard=()=>{},drawUserDrawings=()=>{};
@@ -34,7 +35,7 @@ const controls={'trade-card':{},'drawing-tool':{value:'cursor'},'drawing-selecte
 const $=id=>controls[id];
 const tradeBoxLayer={replaceChildren(){elements=[]},appendChild(n){elements.push(n)}};
 const document={createElement:tag=>({tag,style:{},dataset:{},className:'',classList:{add(){}},setAttribute(){},addEventListener(){}})};
-const chartWrap={focus(){}},chart={timeScale:()=>({timeToCoordinate:t=>t/6,options:()=>({barSpacing:10})})};
+const chartWrap={focus(){}},chart={timeScale:()=>({timeToCoordinate:t=>t<payload.candles[0].time?null:(t-payload.candles[0].time)/6,options:()=>({barSpacing:10})})};
 const candles={priceToCoordinate:p=>200-(p-100)*5};
 function snapshot(){drawTradeBox();return elements.map(e=>({className:e.className,style:e.style}));}
 '''.replace("SIDE",json.dumps(side)).replace("PRICE",str(price))

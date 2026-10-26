@@ -265,6 +265,7 @@ body.structure-lines #day-layer{display:none}
     <span id="chart-symbol" class="symbol"></span>
     <label for="chart-timeframe">Chart timeframe</label>
     <select id="chart-timeframe" aria-label="Chart timeframe"></select>
+    <span id="quick-timeframes" role="group" aria-label="Quick chart timeframes"></span>
     <label id="photon-view-label" for="photon-view" hidden>View</label>
     <select id="photon-view" aria-label="Structure display" hidden>
       <option value="CANDLES">Candles</option>
@@ -280,6 +281,7 @@ body.structure-lines #day-layer{display:none}
     <label title="Confirmed chart-timeframe swings, sweeps, structure breaks, FVGs and midpoint; visual references, not entries"><input id="structure-guide" type="checkbox"> Structure guide</label>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
+    <label>Replay candles <select id="replay-candle-limit" aria-label="Replay candle display limit"><option value="2000">2,000</option><option value="5000" selected>5,000</option><option value="10000">10,000</option><option value="0">All</option></select></label>
     <label title="Previous UTC day confirmed swing zones; visual reference only"><input id="sr-zones" type="checkbox" checked> Previous-day S/R</label>
     <select id="sr-width" aria-label="S/R zone width"><option value="1" selected>Narrow zones</option><option value="2">Normal zones</option><option value="4">Wide zones</option></select>
     <span id="sr-status" role="status" hidden></span>
@@ -848,7 +850,7 @@ body.structure-lines #day-layer{display:none}
     const entry=currentReview()?.manualEntry;if(!entry || manualMarket())return;
     const timeframe=entry.timeframe || boot.run.timeframe;if(manualMarketLoads.has(timeframe))return;
     manualMarketLoads.add(timeframe);
-    getJson(api('/api/payload',{trade_index:String(currentTrade),chart_timeframe:timeframe,full_run:'1'})).then(data=>{
+    getChartPayload(timeframe).then(data=>{
       manualMarkets.set(timeframe,data);if(replayActive)refreshReplay(true);
     }).catch(error=>{manualEntryMessage='Position candles could not load: '+error.message;refreshManualPlan();});
   }
@@ -1013,6 +1015,7 @@ body.structure-lines #day-layer{display:none}
       const manual=cslManualWorkflowSummary(reviewRecords.filter(r=>r.runId===boot.run.runId && r.symbol===boot.run.symbol));
       message+=' · Auto reference '+total.toFixed(2)+' R · Manual: '+manual.entered+' entered, '+manual.closed+' closed · '+manual.grossR.toFixed(2)+' R gross.';
     }
+    if(payload?.chartWindowed)message+=' · Chart: latest '+payload.renderedCandleLimit.toLocaleString()+' candles; full history retained.';
     message+=' · Saved in this browser; export to keep reviews across visualizer sessions.';
     if(!reviewStorageAvailable) message+=' Browser storage unavailable: export before closing.';
     $('replay-status').textContent=message;
@@ -1021,9 +1024,10 @@ body.structure-lines #day-layer{display:none}
   function refreshReplay(incremental=false) {
     if(!sourcePayload) return;
     if(replayActive) {
-      const projected=cslReplayView(sourcePayload,replayCutoff,replayInterval,replayEntryTime,dayMode?false:replayRevealed,false);
+      const candleLimit=Number($('replay-candle-limit').value);
+      const projected=cslReplayView(sourcePayload,replayCutoff,replayInterval,replayEntryTime,dayMode?false:replayRevealed,false,candleLimit);
       payload=projected.view; replayOutcomeVisible=projected.outcomeVisible;
-      if(replayChartSource)payload=cslReplayChart(payload,replayChartSource,replayCutoff,chartInterval(),replayEntryTime,!dayMode && replayRevealed);
+      if(replayChartSource)payload=cslReplayChart(payload,replayChartSource,replayCutoff,chartInterval(),replayEntryTime,!dayMode && replayRevealed,candleLimit);
       warmManualMarket();
       const record=currentReview();
       if(record && replayOutcomeVisible) {
@@ -1292,6 +1296,21 @@ body.structure-lines #day-layer{display:none}
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     return data;
   }
+  const cachedChartPayload=cslPayloadCache(key=>{
+    const [tradeIndex,timeframe]=JSON.parse(key);
+    return getJson(api('/api/payload',{trade_index:String(tradeIndex),chart_timeframe:timeframe,full_run:'1'}));
+  });
+  function getChartPayload(timeframe,tradeIndex=currentTrade) {
+    return cachedChartPayload(JSON.stringify([tradeIndex,timeframe]));
+  }
+  function updateQuickTimeframes(available,selected) {
+    const quick=$('quick-timeframes');quick.replaceChildren();
+    for(const tf of ['1m','15m','4h'])if(available.some(item=>item.interval===tf)) {
+      const button=document.createElement('button');button.textContent=tf;button.setAttribute('aria-pressed',String(tf===selected));
+      button.addEventListener('click',()=>{if(currentTimeframe!==tf){timeframeSelect.value=tf;timeframeSelect.dispatchEvent(new Event('change'));}});quick.appendChild(button);
+    }
+  }
+  $('replay-candle-limit').addEventListener('change',()=>{if(replayActive)refreshReplay();});
 
   function nearestIndex(time) {
     const items = payload?.candles || [];
@@ -1518,7 +1537,7 @@ body.structure-lines #day-layer{display:none}
     const interval=chartInterval(),strength=boot.run.swingStrength || 2;
     const end=bars.at(-1).time+interval,range=chart.timeScale().getVisibleRange();
     const cutoff=replayActive?Math.min(replayCutoff,end):Math.min(end,Number.isFinite(range?.to)?range.to+interval:end);
-    if(market.photonMapping){drawPhotonMapping(market.photonMapping,cutoff,bars,interval,layer);return;}
+    if(market.photonMapping){drawPhotonMapping(market.photonMapping,cutoff,payload?.candles || bars,interval,layer);return;}
     let cached=structureCache.get(bars);
     if(!cached || cached.interval!==interval || cached.strength!==strength) {
       cached=cslBuildStructureGuide(bars,interval,strength,64);structureCache.set(bars,cached);
@@ -2071,7 +2090,15 @@ body.structure-lines #day-layer{display:none}
     const stop=Number(trade.Stop ?? trade.stop);
     const target=Number(trade.Target ?? trade.target);
     const exitPrice=Number(trade.Exit ?? trade.exit);
-    const x1=chart.timeScale().timeToCoordinate(displayCandleTime(manual ? manualPlanDraft.entryTime : Number(open.time)));
+    function offscreenEntryX(time) {
+      const first=payload.candles?.[0],scale=chart.timeScale();if(!first || time>=first.time)return null;
+      const firstX=scale.timeToCoordinate(first.time);if(firstX==null)return null;
+      const all=(replayChartSource || sourcePayload)?.candles || [];
+      const offset=cslOffscreenTimeOffset(all,time,first.time,scale.options().barSpacing);
+      return offset==null?null:firstX+offset;
+    }
+    const entryTime=displayCandleTime(manual ? manualPlanDraft.entryTime : Number(open.time));
+    const x1=chart.timeScale().timeToCoordinate(entryTime) ?? offscreenEntryX(entryTime);
     const endTime=exit ? Number(exit.time) : Number(payload.selectedTradeViewEnd);
     const manualExit=manual && currentReview()?.manualExit;
     const visibleManualExit=manualExit && (manualExit.availableAt ?? manualExit.candleTime+manualInterval())<=replayCutoff;
@@ -2079,7 +2106,7 @@ body.structure-lines #day-layer{display:none}
     const boxBars=positionResize?.key==='width'?positionResize.bars:currentReview()?.manualBoxBars;
     const confirmed=manual && Boolean(currentReview()?.manualEntry),spacing=chart.timeScale().options().barSpacing;
     const liveEnd=confirmed?cslPositionBoxEnd(currentReview(),replayCutoff,lastVisible?.time,manualInterval()):null;
-    const endX=confirmed && liveEnd!=null?chart.timeScale().timeToCoordinate(displayCandleTime(liveEnd)):null;
+    const endX=confirmed && liveEnd!=null?(chart.timeScale().timeToCoordinate(displayCandleTime(liveEnd)) ?? offscreenEntryX(displayCandleTime(liveEnd))):null;
     const fallbackEndX=confirmed && lastVisible?chart.timeScale().timeToCoordinate(lastVisible.time):null;
     const x2=confirmed?(endX ?? fallbackEndX ?? x1)+spacing/2:manual?Number(x1)+cslPositionBoxWidth(spacing,boxBars):(replayActive && !replayOutcomeVisible)?Number(x1)+100:chart.timeScale().timeToCoordinate(endTime);
     const entryY=candles.priceToCoordinate(entry);
@@ -2495,16 +2522,12 @@ body.structure-lines #day-layer{display:none}
     diag.textContent = 'Loading…';
     $('timeframe-note').textContent = 'Loading ' + requestedTimeframe + '…';
     try {
-      const nextPayload = await getJson(api('/api/payload',{
-        trade_index:String(currentTrade),
-        chart_timeframe:requestedTimeframe,
-        full_run:'1',
-      }));
+      const nextPayload = await getChartPayload(requestedTimeframe);
       if (generation !== loadGeneration) return;
       // A new trade still needs strategy candles even when the retained chart
       // timeframe differs. Never project chart candles with the strategy interval.
       const strategyPayload=replayActive && !preserveReplay && requestedTimeframe!==boot.run.timeframe
-        ? await getJson(api('/api/payload',{trade_index:String(currentTrade),chart_timeframe:boot.run.timeframe,full_run:'1'}))
+        ? await getChartPayload(boot.run.timeframe)
         : nextPayload;
       if (generation !== loadGeneration) return;
       manualMarkets.set(requestedTimeframe,nextPayload);
@@ -2521,6 +2544,7 @@ body.structure-lines #day-layer{display:none}
         timeframeSelect.add(new Option(label, item.interval));
       }
       timeframeSelect.value = requestedTimeframe;
+      updateQuickTimeframes(nextPayload.run.availableChartTimeframes || [{interval:boot.run.timeframe}],requestedTimeframe);
       $('timeframe-note').textContent = requestedTimeframe === boot.run.timeframe
         ? 'CSL indicators · strategy timeframe'
         : 'CSL indicators · chart timeframe ' + requestedTimeframe + ' · trades from ' + boot.run.timeframe;

@@ -33,7 +33,7 @@ def test_photon_defaults_to_15m_review_without_changing_execution(coverage,expec
     assert 'boot.run.defaultChartTimeframe || boot.run.timeframe' in html
     assert 'if(boot.run.photonTrading){load();return;}' in html
     # The existing loader keeps 1m replay facts separate from the review chart.
-    assert "chart_timeframe:boot.run.timeframe,full_run:'1'" in html
+    assert "await getChartPayload(boot.run.timeframe)" in html
 
 
 def walkthrough(short=False):
