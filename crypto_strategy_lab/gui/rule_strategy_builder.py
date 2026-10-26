@@ -1941,7 +1941,7 @@ class RuleStrategyBuilder(QWidget):
             return
         if self.direction_mode.currentData() == "PHOTON_STRUCTURE_MAP":
             self.summary.setText(
-                "Photon Parts 1 & 2 · Mapping only · No entries · Run on 15m, then open Strategy Visualizer. "
+                "Photon Parts 1 & 2 · No automatic entries · Manual simulated entries in Strategy Visualizer · Run on 15m. "
                 "Weekly/daily context above the 4H + 15m overlay; swing breaks use closes, internal CHoCH uses wicks. "
                 "Premium/discount and daily/4H/15m supply-demand layers are available in the visualizer. "
                 "Swing breaks require a candle close beyond the mapped high/low; no preceding CHoCH is required."

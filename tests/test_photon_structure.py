@@ -151,7 +151,7 @@ console.log(JSON.stringify([cslPhotonView(m,14399),cslPhotonView(m,14400),cslPho
     assert all(e["availableAt"] <= 14399 for e in before["15m"]["events"])
 
 
-def test_mapping_browser_startup_disables_trade_controls():
+def test_mapping_browser_exposes_manual_simulation_without_automatic_trades():
     from crypto_strategy_lab.strategy_visualizer_browser_v2 import build_browser_visualizer_v2_html
     profiles, _ = compile_profiles(direction_mode=MODE, market_permissions=MARKET_PERMISSIONS)
     model = SimpleNamespace(trade_count=0, manifest={}, run_dir=Path("example"),
@@ -159,8 +159,12 @@ def test_mapping_browser_startup_disables_trade_controls():
             config=SimpleNamespace(strategy=SimpleNamespace(profiles=profiles))))
     html = build_browser_visualizer_v2_html(model, "test")
     assert '"mappingOnly":true' in html
-    assert "$('manual-confirm').disabled=true" in html
-    assert "body.mapping-only #trade-panel" in html
+    assert "$('manual-confirm').disabled=true" not in html
+    assert "$('manual-confirm').hidden=true" not in html
+    assert "body.mapping-only #trade-panel" not in html
+    assert "body.mapping-only #position-tools-button" not in html
+    assert "body.mapping-only #replay-controls>.manual-plan" not in html
+    assert "Review structure and confirm simulated manual trades; no automatic entries" in html
     assert "__PHOTON_HELPERS__" not in html
     assert 'aria-label="Structure display"' in html
     assert 'value="LINES">Structure lines' in html
