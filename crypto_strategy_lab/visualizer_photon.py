@@ -120,7 +120,7 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
   select.replaceChildren();
   for(const {tf,e} of known) {
     const key=tf+':'+e.availableAt+':'+e.kind+':'+e.direction;
-    select.add(new Option(tf.toUpperCase()+' '+(e.kind==='CHOCH'?'CHoCH':e.kind==='TREND_CHANGE'?'Swing change':'BOS')+' · '+fmtTime(e.availableAt),key));
+    select.add(new Option(tf.toUpperCase()+' '+(e.kind==='CHOCH'?'CHoCH':e.kind==='TREND_CHANGE'?(e.direction===1?'\u2191 Bullish trend change':'\u2193 Bearish trend change'):'BOS')+' · '+fmtTime(e.availableAt),key));
   }
   if(select.dataset.pinned==='true'&&known.some(({tf,e})=>tf+':'+e.availableAt+':'+e.kind+':'+e.direction===previous))select.value=previous;
   select.disabled=!known.length;
@@ -180,6 +180,31 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     }
   };
   drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,height,placeLabel);
+  // Reserve prominent labels before ordinary structure labels take the space.
+  // Paint them last so candle paths and zone outlines cannot obscure them.
+  const trendMarks=[];
+  if(!showLines || $('photon-labels')?.checked)for(const tf of ['4h','15m']) {
+    for(const e of view[tf]?.events || []) {
+      if(e.kind!=='TREND_CHANGE')continue;
+      const cx=x(e.time),cy=candles.priceToCoordinate(e.price);
+      if(cx==null||cx<0||cx>width||cy==null||cy<0||cy>height)continue;
+      const up=e.direction===1,color=up?'#34d399':'#fb7185';
+      const label=(tf==='4h'?'4H':'15m')+(up?' \u2191 BULLISH':' \u2193 BEARISH')+' TREND CHANGE';
+      const w=Math.min(width-6,label.length*6.4+16),h=23;
+      const left=Math.max(3,Math.min(width-w-3,cx+10));
+      let box=null;
+      const offsets=up?[-34,14,-62,42,-90,70]:[14,-34,42,-62,70,-90];
+      for(const offset of offsets) {
+        const top=cy+offset;
+        if(top<3||top+h>height-3)continue;
+        const candidate={x:left,y:top,w,h};
+        if(!box)box=candidate;
+        if(!labelBoxes.some(b=>left<b.x+b.w&&left+w>b.x&&top<b.y+b.h&&top+h>b.y)){box=candidate;break;}
+      }
+      if(box)labelBoxes.push({...box,x:box.x-3,y:box.y-3,w:w+6,h:h+6});
+      trendMarks.push({e,cx,cy,up,color,label,box});
+    }
+  }
   if(showLines) {
     // Coarse white stroke stays visible as an outline where the thinner blue
     // trace follows exactly the same historical prices.
@@ -234,6 +259,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     }
     for(const e of events) {
       if(!['BOS','TREND_CHANGE','CHOCH','SWING','PIVOT'].includes(e.kind))continue;
+      if(e.kind==='TREND_CHANGE')continue; // Highlighted after all quiet overlays.
       const cx=x(e.time),y=candles.priceToCoordinate(e.price);if(cx==null||cx<0||cx>width||y==null||y<0||y>height)continue;
       const color=showLines?(tf==='4h'?'#f8fafc':'#72a7f5'):e.direction===1?'#34d399':'#fb7185';
       if(showLines && ['BOS','TREND_CHANGE','CHOCH'].includes(e.kind)) {
@@ -254,12 +280,24 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   $('photon-status').title=alignment+' · '+(mapping.qualification || 'Legacy swing qualification.');
   drawPhotonContext(mapping,cutoff,view,bars);
   const tf=$('photon-event-timeframe')?.value,guide=mapping.timeframes[tf];
-  const selected=guide?.events.find(e=>e.availableAt<=cutoff&&tf+':'+e.availableAt+':'+e.kind===$('photon-event-select')?.value);
+  const selected=guide?.events.find(e=>e.availableAt<=cutoff&&tf+':'+e.availableAt+':'+e.kind+':'+e.direction===$('photon-event-select')?.value);
   if(selected&&['4h','15m'].includes(tf)) {
     const left=x(selected.fromTime),right=x(selected.time),cy=candles.priceToCoordinate(selected.price);
     if(left!=null&&right!=null&&cy!=null&&right>=0&&right<=width&&cy>=0&&cy<=height) {
       make('line',{x1:left,x2:right,y1:cy,y2:cy,stroke:'#e4b76c','stroke-width':2.5,'stroke-dasharray':selected.kind==='CHOCH'?'4 3':'none'},cslPhotonEventText(tf,selected));
       make('circle',{cx:right,cy,r:5,fill:'#e4b76c'},cslPhotonEventText(tf,selected));
+    }
+  }
+  for(const {e,cx,cy,up,color,label,box} of trendMarks) {
+    const title=label+' · confirmed at candle close '+fmtTime(e.availableAt)+' · broken level '+formatPrice(e.price)+' · origin '+fmtTime(e.fromTime);
+    const left=x(e.fromTime) ?? (e.fromTime<bars[0].time?0:null);
+    if(left!=null)make('line',{x1:left,x2:cx,y1:cy,y2:cy,stroke:color,'stroke-width':2.5},title);
+    const points=up?`${cx},${cy-7} ${cx-7},${cy+6} ${cx+7},${cy+6}`:`${cx},${cy+7} ${cx-7},${cy-6} ${cx+7},${cy-6}`;
+    make('polygon',{points,fill:color,stroke:'#0b1220','stroke-width':1.5},title);
+    if(box) {
+      make('line',{x1:cx,x2:box.x,y1:cy,y2:box.y+box.h/2,stroke:color,'stroke-width':1,'stroke-opacity':.8},title);
+      make('rect',{x:box.x,y:box.y,width:box.w,height:box.h,rx:4,fill:up?'#064e3b':'#7f1d1d',stroke:color,'stroke-width':1.2},title);
+      make('text',{x:box.x+8,y:box.y+15,fill:up?'#ecfdf5':'#fff1f2','font-size':11,'font-weight':700},title,label);
     }
   }
 }
