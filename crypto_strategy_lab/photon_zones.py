@@ -67,7 +67,7 @@ separate from price invalidation. Consecutive bars inside a zone are one visit.
         origin = origins.get(event["availableAt"])
         if origin is None:
             continue
-        start, end = indices.get(origin["fromTime"]), indices.get(event["time"])
+        start, end = indices.get(origin.get("fromParentTime", origin["fromTime"])), indices.get(event["time"])
         if start is None or end is None:
             continue
         direction = event["direction"]

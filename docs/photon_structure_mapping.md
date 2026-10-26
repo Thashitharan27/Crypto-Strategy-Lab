@@ -124,15 +124,14 @@ broken low and the highest pullback point become confirmed anchors. Opposite
 swing breaks confirm a trend change under the same close rule. Internal CHoCH
 does not add solid swing anchors.
 
-Consecutive same-direction closing breaks extend the run from its existing
-protected origin; the breaking candle's opposite wick is not automatically a
-new HL/LH. An intervening candle between the run extreme and break allows the
-existing pullback-origin search. If a continuation candle crosses both swing
-boundaries, matching complete lower-timeframe candles must establish the order
-of its high and low before a new opposite origin is admitted. Missing or
-same-child extreme ordering retains the protected origin and records ambiguity.
-Ordered child extreme times are used for geometry; confirmation remains at the
-parent close. This applies to both directions in the shared mapping function.
+Every close-confirmed break uses the pullback-origin search, including
+consecutive breaks. The experimental continuation suppression has been removed.
+For 4H mapping, complete matching 15m source candles place each wick extreme at
+its actual child candle time rather than the parent open. Parent indices still
+control structure calculations and confirmations still occur at the parent
+close. Missing or inconsistent source data falls back to parent-time geometry;
+high and low in the same child candle retain unknown intrabar order. Timing
+evidence never vetoes a close-confirmed swing update.
 
 **Unconfirmed leg (dashed)** defaults on. It shows the developing run extreme
 and subsequent reaction to the latest completed candle, rather than one direct
