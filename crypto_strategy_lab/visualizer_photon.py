@@ -8,7 +8,7 @@ function cslPhotonReviewView(sd,cutoff=Infinity) {
   const review=sd.review;
   if(!review || !Array.isArray(review.checks))return {legacy:true,label:'Legacy setup — mismatch checks were not saved',checks:[]};
   const mismatches=review.checks.filter(c=>c.passed!==true);
-  return {legacy:false,label:mismatches.length?'Manual review · '+mismatches.length+' mismatch'+(mismatches.length===1?'':'es'):'Preferred alignment · manual decision',
+  return {legacy:false,label:sd.entryModel==='HTF_ZONE_REVERSAL'?'Automated zone reversal · entry checks':mismatches.length?'Manual review · '+mismatches.length+' mismatch'+(mismatches.length===1?'':'es'):'Preferred alignment · manual decision',
     checks:review.checks,mismatches,entryModel:sd.entryModel};
 }
 function renderPhotonEntryReview(sd,cutoff=Infinity) {
@@ -20,7 +20,7 @@ function renderPhotonEntryReview(sd,cutoff=Infinity) {
     const row=document.createElement('p');row.textContent=(check.passed?'\u2713 ':'\u26a0 ')+check.label+' — '+check.detail;
     row.style.color=check.passed?'#86efac':'#fbbf24';body.appendChild(row);
   }
-  const note=document.createElement('p');note.textContent=view.legacy?'Rerun to capture decision-time checks.':'Checks were frozen when the 1m CHoCH armed this simulated candidate. Confirm manual entry, Skip or Unsure in replay to record your own decision. These checks do not place live orders.';body.appendChild(note);
+  const note=document.createElement('p');note.textContent=view.legacy?'Rerun to capture decision-time checks.':view.entryModel==='HTF_ZONE_REVERSAL'?'Checks were saved at the confirmed entry decision. SL uses the 15m zone or touch extreme; TP is the frozen 4H midpoint. Minimum reward/risk is checked again at the actual simulated fill.':'Checks were frozen when the 1m CHoCH armed this simulated candidate. Confirm manual entry, Skip or Unsure in replay to record your own decision. These checks do not place live orders.';body.appendChild(note);
 }
 function cslPhotonEventBound(events,time,inclusive=false) {
   let lo=0,hi=events.length;while(lo<hi){const mid=(lo+hi)>>1;if(inclusive?events[mid].availableAt<=time:events[mid].availableAt<time)lo=mid+1;else hi=mid;}return lo;
@@ -313,7 +313,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   const h=view['4h']?.state,m=view['15m']?.state;
   let alignment='Waiting for swing confirmation';
   if(h?.trend && m?.trend)alignment=h.trend===m.trend?'15m aligned with 4H; possible continuation':'15m opposes 4H; possible 4H pullback';
-  $('photon-status').textContent=(mapping.mappingOnly?'Structure + manual simulated replay':'4H trend trades + structure')+' · '+(showLines?'4H: white · 15m: blue'+(minuteVisible?' · 1m: teal':'')+' · Solid: confirmed · Dashed: developing':'Swing and internal structure at completed candles');
+  $('photon-status').textContent=(mapping.mappingOnly?'Structure + manual simulated replay':'Photon trades + structure')+' · '+(showLines?'4H: white · 15m: blue'+(minuteVisible?' · 1m: teal':'')+' · Solid: confirmed · Dashed: developing':'Swing and internal structure at completed candles');
   $('photon-status').title=alignment+' · '+(mapping.qualification || 'Legacy swing qualification.');
   drawPhotonContext(mapping,cutoff,view,bars);
   const tf=$('photon-event-timeframe')?.value,guide=mapping.timeframes[tf];

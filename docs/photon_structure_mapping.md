@@ -279,3 +279,40 @@ knowledge times, origin selection, birth visibility, return-visit counting,
 own-timeframe invalidation versus 15m touches, wick/equality cases, data-gap
 retirement, price symmetry, nearby selection and complete prefix equivalence
 of the added zone/lifecycle payloads. Tests do not measure trading performance.
+
+
+## Automated Daily / 4H zone reversal
+
+Select **Photon — Automated Trades / 1m Confirmation**; selection enables the
+Daily / 4H zone reversal model and actual 1m execution. It is also available as
+`config/data_lake/Photon_Zone_Reversal_1m.json` (2R minimum by default).
+Risk Execution exposes the model toggle, minimum reward/risk, stop buffer,
+confirmation expiry, and optional close on an opposing 15m trend change.
+Previously saved configurations keep their legacy entry model unless enabled.
+
+A completed 1m candle must touch a previously known Daily or 4H demand/supply
+zone in the appropriate 4H value half. Demand arms a long; supply arms a short.
+The 4H swing direction is context, not an additional alignment requirement.
+Wait for a fresh close-confirmed 15m TREND_CHANGE after that touch; CHoCH and BOS
+alone do not qualify. Once the 15m swing agrees, the 1m swing must agree too;
+existing 1m alignment is sufficient. The confirmation close must move away from
+the touch candle close. Simulated entry is at the next 1m open, with slippage.
+
+Use the latest relevant known 15m zone fully inside the touched higher-timeframe
+zone, which was touched during the reaction or contains its extreme. SL sits
+beyond its far edge plus the configured ATR buffer. If absent, use the reaction's
+lowest low for longs / highest high for shorts plus that buffer. TP is the known
+4H midpoint frozen at the entry decision. Entry must remain inside the 4H range
+and on the correct side of EQ; minimum R is checked at confirmation and again
+using the actual slipped fill. A gap that violates stop, target or minimum R
+skips that order instead of turning it into a delayed limit order.
+
+One setup is emitted per continuous zone visit. A later departure and revisit
+can arm another setup. Invalidated/retired context, expired confirmation or a
+data gap cancels the campaign. No future zones, unfinished higher-timeframe
+candles or backdated fills qualify. All warmup remains calculation input.
+
+When enabled, an opposing confirmed 15m TREND_CHANGE closes at the next 1m open,
+with slippage; an opening SL/TP crossing takes precedence. The midpoint target
+remains active alongside this early exit. Trade evidence records the context
+zone, 15m alignment time, stop source, range and fixed target for visual review.

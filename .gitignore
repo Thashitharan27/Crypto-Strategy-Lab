@@ -19,6 +19,7 @@ config/data_lake/*.json
 !config/data_lake/BTCUSDT_4H_SMOKE.json
 !config/data_lake/Photon_Structure_Parts_1_2.json
 !config/data_lake/Photon_4H_Trend_1m.json
+!config/data_lake/Photon_Zone_Reversal_1m.json
 
 # Atomic Binance downloads can leave a temporary file if the desktop process is terminated.
 data/.*.tmp

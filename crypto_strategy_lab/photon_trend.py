@@ -17,7 +17,7 @@ from .photon_structure import aggregate_closed, map_structure, valid_bar
 from .photon_zones import attach_ranges, build_zones
 
 MODE = "PHOTON_4H_TREND"
-LABEL = "Photon — 4H Trend / 1m Confirmation"
+LABEL = "Photon — Automated Trades / 1m Confirmation"
 
 
 def selected(profiles):
@@ -34,17 +34,18 @@ def validate_settings(confirmation, retest, timeframe=None, active=False):
         raise ValueError("Photon 4H Trend requires actual 1m strategy candles")
 
 
-def prepare_context(bars):
+def prepare_context(bars, *, zone_reversal=False):
     result={}
     for tf,seconds,offset in (("1m",60,0),("15m",900,0),("4h",14400,0),("1d",86400,0),("1w",604800,345600)):
         native=bars if tf=="1m" else aggregate_closed(bars,60,seconds,offset)
-        guide=map_structure(native,seconds,qualification="CHOCH_PULLBACK")
-        if tf=="1m":
+        guide=map_structure(native,seconds,qualification="CHOCH_PULLBACK",
+                            intrabars=bars if zone_reversal and seconds>60 else None, intrabar_interval=60)
+        if tf=="1m" and not zone_reversal:
             # Only internal-break evidence is required on the execution chart.
             guide["snapshots"]=[];guide["trace"]=[]
         else:
             attach_ranges(guide)
-            if tf in ("15m","4h"):
+            if tf in (("15m","4h","1d") if zone_reversal else ("15m","4h")):
                 guide["supplyDemand"]=build_zones(bars,native,guide,tf,source_interval=60)
         result[tf]=guide
     return result
@@ -245,6 +246,17 @@ class PhotonTrendMixin:
         if not selected(self.config.strategy_profiles):return
         validate_settings(self.config.photon_confirmation_minutes,self.config.photon_retest_minutes,self.config.strategy_timeframe_minutes,True)
         bars=[dict(time=int(pd.Timestamp(t).timestamp()),open=float(o),high=float(h),low=float(l),close=float(c)) for t,o,h,l,c in zip(self.times,self.open,self.high,self.low,self.close)]
+        self.photon_trend_exits = {}
+        if self.config.photon_zone_reversal:
+            from .photon_zone_reversal import zone_reversal_setups
+            guides = prepare_context(bars, zone_reversal=True)
+            self.photon_setups, self.photon_order_live = zone_reversal_setups(
+                bars, self.atr_values, guides,
+                confirmation_minutes=self.config.photon_confirmation_minutes,
+                stop_buffer_atr=self.config.sd_stop_buffer_atr, minimum_r=self.config.sd_minimum_r)
+            self.photon_trend_exits = {e['availableAt']: e['direction'] for e in guides['15m']['events']
+                                       if e['kind'] == 'TREND_CHANGE'}
+            return
         self.photon_setups,self.photon_order_live=trend_setups(bars,self.atr_values,
             confirmation_minutes=self.config.photon_confirmation_minutes,retest_minutes=self.config.photon_retest_minutes,
             stop_buffer_atr=self.config.sd_stop_buffer_atr,minimum_r=self.config.sd_minimum_r,target_4h=self.config.photon_target_4h,
@@ -264,7 +276,7 @@ class PhotonTrendMixin:
     def _entry_decision(self,i,active_at_candle_start=False):
         if getattr(self,"signal_strategy_mode",None)!=MODE:return super()._entry_decision(i,active_at_candle_start)
         if active_at_candle_start or self.active_pairs or self.pending_next_open_entry or i+1>=len(self.times) or not self._should_enter(i):return None
-        return dict(execution_index=i+1,indicator_index=i,defer_to_next_open=True,photon_limit=True,fill_price_source="PHOTON_ORIGIN_RETEST",scheduled_timestamp=pd.Timestamp(self.times[i])+pd.Timedelta(minutes=1),actual_entry_timestamp=None)
+        return dict(execution_index=i+1,indicator_index=i,defer_to_next_open=True,photon_limit=True,photon_market=self.config.photon_zone_reversal,fill_price_source="PHOTON_ZONE_REVERSAL_OPEN" if self.config.photon_zone_reversal else "PHOTON_ORIGIN_RETEST",scheduled_timestamp=pd.Timestamp(self.times[i])+pd.Timedelta(minutes=1),actual_entry_timestamp=None)
 
     def _execute_pending_next_open_entry(self,i,active_at_candle_start=False):
         order=getattr(self,"pending_next_open_entry",None)
@@ -279,12 +291,15 @@ class PhotonTrendMixin:
             or self.trading_start is not None and stamp<self.trading_start
             or self.trading_end is not None and stamp>self.trading_end):return
         setup=self.photon_setups[j]
-        status,raw=resolve_retest(setup,dict(open=self.open[i],high=self.high[i],low=self.low[i]))
+        if order.get("photon_market"):
+            status, raw = "FILLED", float(self.open[i])
+        else:
+            status,raw=resolve_retest(setup,dict(open=self.open[i],high=self.high[i],low=self.low[i]))
         if status=="WAITING":
             if i+1<len(self.times):order["execution_index"]=i+1;self.pending_next_open_entry=order
             return
         if status!="FILLED":return
-        order.update(fill_price=raw,actual_entry_timestamp=pd.Timestamp(self.times[i]),entry_schedule_status="PHOTON_LIMIT_FILLED")
+        order.update(fill_price=raw,actual_entry_timestamp=pd.Timestamp(self.times[i]),entry_schedule_status="PHOTON_MARKET_FILLED" if order.get("photon_market") else "PHOTON_LIMIT_FILLED")
         self._photon_fill=raw
         try:
             passed,reason=self._entry_filter_result(j,i)
@@ -293,12 +308,44 @@ class PhotonTrendMixin:
                 if len(self.active_pairs)>before:
                     pair=self.active_pairs[-1]
                     for pos in pair.positions():
-                        pos.fib_limit_fill_time=pd.Timestamp(self.times[i]);pos.fib_limit_fill_price=raw
-                        # Native scanning skips entry_index; explicitly assess
-                        # this first minute once, with profits suppressed above.
+                        if not order.get("photon_market"):
+                            pos.fib_limit_fill_time=pd.Timestamp(self.times[i]);pos.fib_limit_fill_price=raw
+                        # Market entries fill at the open, so both SL and TP are
+                        # eligible in this first minute. Limit fills stay conservative.
                         self._scan_position_exit(pair,pos,i)
             else:self._record_skipped_signal(j,reason)
         finally:self._photon_fill=None
+
+    def _scan_pair_exit(self, pair, i):
+        for pos in pair.positions():
+            self._photon_close_on_trend(pos, i)
+        if pair.is_open:
+            return super()._scan_pair_exit(pair, i)
+
+    def _scan_position_exit(self, pair, pos, i):
+        if not self._photon_close_on_trend(pos, i):
+            return super()._scan_position_exit(pair, pos, i)
+
+    def _scan_exit(self, pos, i):
+        if not self._photon_close_on_trend(pos, i):
+            return super()._scan_exit(pos, i)
+
+    def _photon_close_on_trend(self, pos, i):
+        if (getattr(self, "signal_strategy_mode", None) == MODE
+                and self.config.photon_zone_reversal and self.config.photon_exit_on_15m_change):
+            from .trade import Side, ExitReason, ExitSource
+            at = int(pd.Timestamp(self.times[i]).timestamp())
+            direction = self.photon_trend_exits.get(at)
+            if direction and pos.is_open and (direction == -1 if pos.side == Side.LONG else direction == 1):
+                opening = float(self.open[i])
+                long = pos.side == Side.LONG
+                stopped = opening <= pos.sl if long else opening >= pos.sl
+                reached = opening >= pos.tp if long else opening <= pos.tp
+                reason = ExitReason.SL if stopped else ExitReason.TP if reached else ExitReason.PHOTON_15M_TREND_CHANGE
+                slip = 1-self.config.slippage if long else 1+self.config.slippage
+                self._close_position(pos, i, opening*slip, reason, ExitSource.STRATEGY_OPEN, self.times[i])
+                return True
+        return False
 
     def _profile_context(self,i):
         context=super()._profile_context(i)
@@ -319,8 +366,10 @@ class PhotonTrendMixin:
         if not s or side!=s["side"]:return reject
         entry=self._expected_entry_price(i,execution_i,side);sign=1 if side=="LONG" else -1
         risk=sign*(entry-s["stop"]);reward=sign*(s["target"]-entry)
+        if self.config.photon_zone_reversal and not s["range4h"]["low"] <= entry <= s["range4h"]["high"]:
+            return reject
         if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk<self.config.sd_minimum_r:return reject
-        return dict(passed=True,applied=True,reason="PHOTON_CONFIRMED_ORIGIN_STOP",distance=risk,stop_price=s["stop"],boundary_price=s["stop"],level_price=s["target"],distance_atr=risk/float(self.atr_values[i]),timeframe_minutes=1)
+        return dict(passed=True,applied=True,reason=("PHOTON_"+s["stopSource"]+"_STOP") if self.config.photon_zone_reversal else "PHOTON_CONFIRMED_ORIGIN_STOP",distance=risk,stop_price=s["stop"],boundary_price=s["stop"],level_price=s["target"],distance_atr=risk/float(self.atr_values[i]),timeframe_minutes=1)
 
     def _sr_tp_filter_result(self,i,execution_i=None):
         if getattr(self,"signal_strategy_mode",None)==MODE:return True,None
