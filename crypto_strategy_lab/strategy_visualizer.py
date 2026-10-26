@@ -2262,6 +2262,24 @@ class CompletedRunVisualizer:
             self._photon_mapping_cache = build_mapping(bars, detail_start=detail_start)
         return self._photon_mapping_cache
 
+    def _photon_chart_mapping_payload(self, chart_timeframe, candles):
+        """Attach minute structure lazily, without changing the shared context."""
+        mapping = self._photon_mapping_payload()
+        if mapping is None or chart_timeframe != "1m":
+            return mapping
+        from crypto_strategy_lab.photon_structure import map_structure
+        from crypto_strategy_lab.photon_zones import attach_ranges
+
+        key = (len(candles), candles[0]["time"] if candles else None,
+               candles[-1]["time"] if candles else None)
+        cached = getattr(self, "_photon_minute_mapping_cache", None)
+        if cached is None or cached[0] != key:
+            guide = map_structure(candles, 60, qualification="CHOCH_PULLBACK")
+            attach_ranges(guide)
+            self._photon_minute_mapping_cache = (key, guide)
+        return {**mapping, "timeframes": {**mapping["timeframes"],
+                                          "1m": self._photon_minute_mapping_cache[1]}}
+
     def build_v2_diagnostic_payload(
         self,
         *,
@@ -2460,7 +2478,7 @@ class CompletedRunVisualizer:
             "candles": candles,
             "overlays": overlays,
             "markers": markers,
-            "photonMapping": self._photon_mapping_payload(),
+            "photonMapping": self._photon_chart_mapping_payload(chart_timeframe, candles),
             "fullRun": True,
             "chartTimeframe": chart_timeframe,
         }

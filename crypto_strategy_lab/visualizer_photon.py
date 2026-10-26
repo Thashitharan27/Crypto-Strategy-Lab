@@ -88,6 +88,7 @@ function cslPhotonNextEvent(mapping,cutoff,end) {
 }
 function cslPhotonNarrative(view) {
   const frames=[['1w','Weekly'],['1d','Daily'],['4h','4H'],['15m','15m']];
+  if(view['1m'])frames.push(['1m','1m']);
   return frames.map(([tf,name],i)=>{
     const s=view[tf]?.state,parent=i?view[frames[i-1][0]]?.state:null;
     const direction=!s?.trend?'Unknown':s.trend===1?'Bullish':'Bearish';
@@ -97,7 +98,7 @@ function cslPhotonNarrative(view) {
   });
 }
 function cslPhotonEventText(tf,e) {
-  const direction=e.direction===1?'bullish':'bearish',name={'1w':'Weekly','1d':'Daily','4h':'4H','15m':'15m'}[tf] || tf;
+  const direction=e.direction===1?'bullish':'bearish',name={'1w':'Weekly','1d':'Daily','4h':'4H','15m':'15m','1m':'1m'}[tf] || tf;
   const meaning=e.kind==='CHOCH'?'Internal '+direction+' wick break. Possible phase change; this alone does not change the swing direction.':e.kind==='TREND_CHANGE'?'Close beyond the protected swing level confirms a '+direction+' swing change.':'Close beyond the swing level confirms '+direction+' continuation and its originating protected point.';
   const order=e.orderBasis==='LOWER_TIMEFRAME'?' Break order resolved from '+(e.sourceInterval/60)+'m candles at the parent candle close.':'';
   return name+' · '+meaning+order+' Level '+formatPrice(e.price)+' · origin '+fmtTime(e.fromTime)+' · known '+fmtTime(e.availableAt);
@@ -110,7 +111,7 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
     const title=document.createElement('strong');title.textContent=row.name+' · '+row.direction;box.appendChild(title);
     for(const text of [row.phase,row.relation]){const small=document.createElement('small');small.textContent=text;box.appendChild(small);}
     const range=view[row.tf]?.state?.range;
-    if(range){const small=document.createElement('small');small.textContent=cslPhotonRangePosition(view['15m']?.state?.close,range).toLowerCase().replaceAll('_',' ')+' · EQ '+formatPrice(range.equilibrium);box.appendChild(small);}
+    if(range){const small=document.createElement('small');small.textContent=cslPhotonRangePosition(view['1m']?.state?.close ?? view['15m']?.state?.close,range).toLowerCase().replaceAll('_',' ')+' · EQ '+formatPrice(range.equilibrium);box.appendChild(small);}
     box.title=row.availableAt?'Last completed candle: '+fmtTime(row.availableAt):'Insufficient completed structure in available history';strip.appendChild(box);
   }
   const select=$('photon-event-select'),previous=select.value;
@@ -160,6 +161,15 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
 function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   const visible=chart.timeScale().getVisibleRange();
   const view=cslPhotonView(mapping,cutoff,Number(visible?.from ?? -Infinity)),height=chart.panes()[0].getHeight(),width=chartWrap.clientWidth-76;
+  const minuteVisible=interval===60 && Boolean(mapping.timeframes['1m']);
+  const displayFrames=minuteVisible?['4h','15m','1m']:['4h','15m'];
+  if(!minuteVisible)delete view['1m'];
+  const eventFrame=$('photon-event-timeframe'),minuteOption=eventFrame?.querySelector?.('option[value="1m"]');
+  const activatingMinute=minuteVisible && minuteOption?.disabled;
+  if(minuteOption){minuteOption.hidden=!minuteVisible;minuteOption.disabled=!minuteVisible;}
+  if(activatingMinute){eventFrame.value='1m';$('photon-event-select').dataset.pinned='false';}
+  if(!minuteVisible && eventFrame?.value==='1m'){eventFrame.value='15m';$('photon-event-select').dataset.pinned='false';}
+
   layer.style.height=height+'px';
   const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
   svg.setAttribute('width','100%');svg.setAttribute('height',String(height));layer.appendChild(svg);
@@ -183,13 +193,13 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   // Reserve prominent labels before ordinary structure labels take the space.
   // Paint them last so candle paths and zone outlines cannot obscure them.
   const trendMarks=[];
-  if(!showLines || $('photon-labels')?.checked)for(const tf of ['4h','15m']) {
+  if(!showLines || $('photon-labels')?.checked)for(const tf of displayFrames) {
     for(const e of view[tf]?.events || []) {
       if(e.kind!=='TREND_CHANGE')continue;
       const cx=x(e.time),cy=candles.priceToCoordinate(e.price);
       if(cx==null||cx<0||cx>width||cy==null||cy<0||cy>height)continue;
       const up=e.direction===1,color=up?'#34d399':'#fb7185';
-      const label=(tf==='4h'?'4H':'15m')+(up?' \u2191 BULLISH':' \u2193 BEARISH')+' TREND CHANGE';
+      const label=(tf==='4h'?'4H':tf)+(up?' \u2191 BULLISH':' \u2193 BEARISH')+' TREND CHANGE';
       const w=Math.min(width-6,label.length*6.4+16),h=23;
       const left=Math.max(3,Math.min(width-w-3,cx+10));
       let box=null;
@@ -208,8 +218,8 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   if(showLines) {
     // Coarse white stroke stays visible as an outline where the thinner blue
     // trace follows exactly the same historical prices.
-    for(const tf of ['4h','15m']) {
-      const color=tf==='4h'?'#f8fafc':'#72a7f5',guide=mapping.timeframes[tf];if(!guide)continue;
+    for(const tf of displayFrames) {
+      const color=tf==='4h'?'#f8fafc':tf==='1m'?'#2dd4bf':'#72a7f5',guide=mapping.timeframes[tf];if(!guide)continue;
       const segments=cslPhotonSwingLines(guide,cutoff);
       for(const segment of segments) {
         let path=[],previous=null;
@@ -237,31 +247,31 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   const summary=[];
   const layers=Object.entries(view);if(showLines)layers.sort(([a],[b])=>a==='4h'?-1:b==='4h'?1:0);
   for(const [tf,{state:s,events}] of layers) {
-    if(!['4h','15m'].includes(tf))continue;
-    const name=tf==='4h'?'4H':'15m';
+    if(!displayFrames.includes(tf))continue;
+    const name=tf==='4h'?'4H':tf;
     if(!s){summary.push(name+': waiting for completed candles');continue;}
     const direction=s.trend===1?'Bullish':s.trend===-1?'Bearish':'Unknown';
     summary.push(name+': '+direction+' · '+s.phase.toLowerCase().replaceAll('_',' '));
     if(showLines && !$('photon-labels')?.checked)continue;
     for(const [key,p] of [['high',s.high],['low',s.low]]) {
       if(!p)continue;const y=candles.priceToCoordinate(p.price);if(y==null || y<0 || y>height)continue;
-      const left=x(p.time) ?? 0,right=x(cutoff-interval) ?? width,color=tf==='4h'?'#fbbf24':'#60a5fa';
+      const left=x(p.time) ?? 0,right=x(cutoff-interval) ?? width,color=tf==='4h'?'#fbbf24':tf==='1m'?'#2dd4bf':'#60a5fa';
       const text=name+' '+(p.strong?'Strong ':s.trend?'Weak ':'Initial ')+key+(p.confirmed?'':mapping.timeframes[tf].swingBreakRule==='CLOSE_ONLY'?' (awaiting close break)':p.eligible?' (pullback candidate)':' (developing)');
       make('line',{x1:left,x2:right,y1:y,y2:y,stroke:color,'stroke-width':tf==='4h'?2:1,'stroke-dasharray':p.strong?'none':'5 4'},text+' '+formatPrice(p.price));
-      if(showLines)placeLabel(name+' '+(p.strong?'strong ':'weak ')+(key==='high'?'H':'L'),right-100,y,tf==='4h'?'#f8fafc':'#72a7f5',text+' '+formatPrice(p.price));
+      if(showLines)placeLabel(name+' '+(p.strong?'strong ':'weak ')+(key==='high'?'H':'L'),right-100,y,tf==='4h'?'#f8fafc':tf==='1m'?'#2dd4bf':'#72a7f5',text+' '+formatPrice(p.price));
       else make('text',{x:Math.max(5,right-260),y:Math.max(12,y+(key==='high'?-6:15)),fill:color,'font-size':11,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},text,text+' '+formatPrice(p.price));
     }
     if($('photon-labels')?.checked)for(const [key,p] of [['high',s.internalHigh],['low',s.internalLow]]) {
       if(!p)continue;const cy=candles.priceToCoordinate(p.price),left=x(p.time),right=x(cutoff-interval);
       if(cy==null||cy<0||cy>height||left==null||right==null)continue;
-      const color=tf==='4h'?'#e2e8f0':'#72a7f5';
+      const color=tf==='4h'?'#e2e8f0':tf==='1m'?'#2dd4bf':'#72a7f5';
       make('line',{x1:left,x2:right,y1:cy,y2:cy,stroke:color,'stroke-width':1,'stroke-dasharray':'2 5','stroke-opacity':.45},name+' internal '+key+' reference; wick break may change internal phase');
     }
     for(const e of events) {
       if(!['BOS','TREND_CHANGE','CHOCH','SWING','PIVOT'].includes(e.kind))continue;
       if(e.kind==='TREND_CHANGE')continue; // Highlighted after all quiet overlays.
       const cx=x(e.time),y=candles.priceToCoordinate(e.price);if(cx==null||cx<0||cx>width||y==null||y<0||y>height)continue;
-      const color=showLines?(tf==='4h'?'#f8fafc':'#72a7f5'):e.direction===1?'#34d399':'#fb7185';
+      const color=showLines?(tf==='4h'?'#f8fafc':tf==='1m'?'#2dd4bf':'#72a7f5'):e.direction===1?'#34d399':'#fb7185';
       if(showLines && ['BOS','TREND_CHANGE','CHOCH'].includes(e.kind)) {
         const left=x(e.fromTime) ?? (e.fromTime<bars[0].time?0:null);if(left!=null)make('line',{x1:left,x2:cx,y1:y,y2:y,stroke:color,'stroke-width':1,'stroke-dasharray':e.kind==='CHOCH'?'3 3':'none','stroke-opacity':.6},tf+' '+e.kind+' '+formatPrice(e.price));
       }
@@ -276,12 +286,12 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   const h=view['4h']?.state,m=view['15m']?.state;
   let alignment='Waiting for swing confirmation';
   if(h?.trend && m?.trend)alignment=h.trend===m.trend?'15m aligned with 4H; possible continuation':'15m opposes 4H; possible 4H pullback';
-  $('photon-status').textContent=(mapping.mappingOnly?'Structure + manual simulated replay':'4H trend trades + structure')+' · '+(showLines?'4H: white · 15m: blue · Solid: confirmed · Dashed: developing':'Swing and internal structure at completed candles');
+  $('photon-status').textContent=(mapping.mappingOnly?'Structure + manual simulated replay':'4H trend trades + structure')+' · '+(showLines?'4H: white · 15m: blue'+(minuteVisible?' · 1m: teal':'')+' · Solid: confirmed · Dashed: developing':'Swing and internal structure at completed candles');
   $('photon-status').title=alignment+' · '+(mapping.qualification || 'Legacy swing qualification.');
   drawPhotonContext(mapping,cutoff,view,bars);
   const tf=$('photon-event-timeframe')?.value,guide=mapping.timeframes[tf];
   const selected=guide?.events.find(e=>e.availableAt<=cutoff&&tf+':'+e.availableAt+':'+e.kind+':'+e.direction===$('photon-event-select')?.value);
-  if(selected&&['4h','15m'].includes(tf)) {
+  if(selected&&displayFrames.includes(tf)) {
     const left=x(selected.fromTime),right=x(selected.time),cy=candles.priceToCoordinate(selected.price);
     if(left!=null&&right!=null&&cy!=null&&right>=0&&right<=width&&cy>=0&&cy<=height) {
       make('line',{x1:left,x2:right,y1:cy,y2:cy,stroke:'#e4b76c','stroke-width':2.5,'stroke-dasharray':selected.kind==='CHOCH'?'4 3':'none'},cslPhotonEventText(tf,selected));
