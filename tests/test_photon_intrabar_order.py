@@ -31,7 +31,7 @@ def test_actual_april_pullback_is_retained_after_parent_close():
     assert result["snapshots"][-1]["low"]["price"] == 6668.02
     segments = js('cslPhotonSwingLines(' + json.dumps(result) + ',1586160000)')
     assert [(p["time"], p["price"]) for p in segments[-1]][-3:] == [
-        (1585987200, 6629.99), (1586030400, 7020), (1586102400, 6668.02)]
+        (1585999800, 6629.99), (1586030400, 7020), (1586106900, 6668.02)]
     before = js('cslPhotonSwingLines(' + json.dumps(result) + ',1586159999)')
     assert all(p["price"] != 6668.02 for line in before for p in line)
     for n in range(1, len(data["parents"]) + 1):
