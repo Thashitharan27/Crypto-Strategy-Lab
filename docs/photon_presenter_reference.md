@@ -1,5 +1,15 @@
 # Photon presenter reference and implementation audit
 
+## Current visual-review experiment
+
+At the user's request, all mapped timeframes now accept a close beyond the
+existing swing wick level without a preceding internal CHoCH. Weak wick extremes
+continue to develop; CHoCH is separate phase evidence. This supersedes the
+CHoCH-gated implementation described in the historical audit below. It is an
+experiment for visual review, not a claim of exact presenter swing selection.
+The normalized fixtures now verify the retained internal event ordering and
+close-break semantics rather than requiring the former gated swing sequence.
+
 ## Scope and evidence
 
 This is the reference for reproducing the presenter's reading, before changing

@@ -1,7 +1,7 @@
 # Photon Market Structure — Structure, Premium/Discount and Supply/Demand
 
-**Rule basis:** the chart uses weekly/daily context, CHoCH-qualified possible
-swing pullbacks and close-confirmed swing breaks. See
+**Rule basis:** the chart uses weekly/daily context and close-confirmed swing
+breaks without a preceding internal CHoCH requirement on any timeframe. See
 [the reference sequences and rule audit](photon_presenter_reference.md) for the
 source lesson relationships. Meaningful swing size and zone boundaries use the
 explicit mechanical interpretations documented below.
@@ -117,8 +117,8 @@ The line view hides the candles
 and grid for a diagram-like display, fitting the loaded period so larger swings
 are visible. Zoom remains available and the replay position is preserved.
 Each solid line connects **BOS-confirmed swing points only**, independently on
-its own timeframe. An internal CHoCH qualifies a possible pullback and cannot
-alone add a solid point. On an upward swing break, the broken high and the lowest pullback point
+its own timeframe. Internal CHoCH remains phase evidence and is neither required
+for a swing break nor sufficient to add a solid point. On an upward swing break, the broken high and the lowest pullback point
 that produced the break become confirmed anchors. On a downward break, the
 broken low and the highest pullback point become confirmed anchors. Opposite
 swing breaks confirm a trend change under the same close rule. Internal CHoCH

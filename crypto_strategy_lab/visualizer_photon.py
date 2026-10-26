@@ -221,7 +221,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     for(const [key,p] of [['high',s.high],['low',s.low]]) {
       if(!p)continue;const y=candles.priceToCoordinate(p.price);if(y==null || y<0 || y>height)continue;
       const left=x(p.time) ?? 0,right=x(cutoff-interval) ?? width,color=tf==='4h'?'#fbbf24':'#60a5fa';
-      const text=name+' '+(p.strong?'Strong ':s.trend?'Weak ':'Initial ')+key+(p.confirmed?'':p.eligible?' (pullback candidate)':' (developing)');
+      const text=name+' '+(p.strong?'Strong ':s.trend?'Weak ':'Initial ')+key+(p.confirmed?'':mapping.timeframes[tf].swingBreakRule==='CLOSE_ONLY'?' (awaiting close break)':p.eligible?' (pullback candidate)':' (developing)');
       make('line',{x1:left,x2:right,y1:y,y2:y,stroke:color,'stroke-width':tf==='4h'?2:1,'stroke-dasharray':p.strong?'none':'5 4'},text+' '+formatPrice(p.price));
       if(showLines)placeLabel(name+' '+(p.strong?'strong ':'weak ')+(key==='high'?'H':'L'),right-100,y,tf==='4h'?'#f8fafc':'#72a7f5',text+' '+formatPrice(p.price));
       else make('text',{x:Math.max(5,right-260),y:Math.max(12,y+(key==='high'?-6:15)),fill:color,'font-size':11,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},text,text+' '+formatPrice(p.price));
@@ -251,7 +251,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   let alignment='Waiting for swing confirmation';
   if(h?.trend && m?.trend)alignment=h.trend===m.trend?'15m aligned with 4H; possible continuation':'15m opposes 4H; possible 4H pullback';
   $('photon-status').textContent=(mapping.mappingOnly?'Mapping only':'4H trend trades + structure')+' · '+(showLines?'4H: white · 15m: blue · Solid: confirmed · Dashed: developing':'Swing and internal structure at completed candles');
-  $('photon-status').title=alignment+' · '+(mapping.schemaVersion===2?'CHoCH-qualified pullbacks; rules-based crypto mapping.':'Legacy two-bar swing qualification.');
+  $('photon-status').title=alignment+' · '+(mapping.qualification || 'Legacy swing qualification.');
   drawPhotonContext(mapping,cutoff,view,bars);
   const tf=$('photon-event-timeframe')?.value,guide=mapping.timeframes[tf];
   const selected=guide?.events.find(e=>e.availableAt<=cutoff&&tf+':'+e.availableAt+':'+e.kind===$('photon-event-select')?.value);

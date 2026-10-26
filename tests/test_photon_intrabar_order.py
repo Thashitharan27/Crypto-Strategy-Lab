@@ -59,7 +59,9 @@ def test_unreliable_or_unordered_source_remains_ambiguous(damage):
         children = None
     result = guide(data["parents"], children)
     assert any(e["kind"] == "AMBIGUOUS" and e["availableAt"] == 1586116800 for e in result["events"])
-    assert not any(e["kind"] == "BOS" and e["price"] == 7020 for e in result["events"])
+    # Unknown internal order no longer vetoes a later close-confirmed BOS.
+    assert any(e["kind"] == "BOS" and e["price"] == 7020
+               and e["availableAt"] == 1586160000 for e in result["events"])
 
 
 def test_ordered_crossings_are_symmetric():

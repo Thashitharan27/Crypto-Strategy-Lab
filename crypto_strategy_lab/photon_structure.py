@@ -1,7 +1,7 @@
 """Mapping-only Photon structure, premium/discount and supply/demand analysis.
 
-The chart uses candle-run CHoCH to qualify possible swing pullbacks, without a
-fixed pivot-bar threshold. Only close-confirmed swing breaks admit solid points.
+The chart uses close-confirmed swing breaks without a preceding CHoCH gate.
+Only close-confirmed swing breaks admit solid points.
 The old two-sided pivot method remains available for legacy callers. Neither
 method claims to resolve the presenter's discretionary meaningful-swing size.
 No order, entry, stop or target is produced.
@@ -88,9 +88,9 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
     Internal pivots follow candle runs: a failure to extend the previous high
     (up run) or low (down run) starts the opposing run, including inside bars.
     Legacy PIVOT qualification needs `strength` bars on both sides. The chart's
-    CHOCH_PULLBACK mode instead qualifies a weak extreme when a counter-direction
-    internal break signals a possible pullback. Protected points are only
-    promoted by a close beyond the opposing eligible swing level.
+    CHOCH_PULLBACK identifier is retained for saved callers, but no longer gates
+    swing breaks on internal CHoCH. Protected points are promoted by a close
+    beyond the existing swing level, tested before learning this candle's wick.
     """
     if qualification not in ("PIVOT", "CHOCH_PULLBACK"):
         raise ValueError("unknown swing qualification")
@@ -153,8 +153,6 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
             continue
 
         # Test existing levels before learning any pivots from this candle.
-        internal_break = 0
-        internal_breaks = []
         up = ih is not None and b["high"] > ih["price"]
         down = il is not None and b["low"] < il["price"]
         order = crossing_order(b, ih, il) if up and down and qualification == "CHOCH_PULLBACK" else None
@@ -165,20 +163,15 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
                 for direction in order:
                     if internal != direction:
                         internal = direction
-                        internal_breaks.append(direction)
                         emit("CHOCH", direction, ih if direction == 1 else il, at)
                         events[-1]["orderBasis"] = "LOWER_TIMEFRAME"
                         events[-1]["sourceInterval"] = intrabar_interval
         elif up and internal != 1:
             internal = 1
-            internal_break = 1
             emit("CHOCH", 1, ih, at)
         elif down and internal != -1:
             internal = -1
-            internal_break = -1
             emit("CHOCH", -1, il, at)
-        if internal_break:
-            internal_breaks.append(internal_break)
 
         if qualification == "CHOCH_PULLBACK":
             # Retire penetrated references even when the break continued the
@@ -190,18 +183,10 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
                 il = None
             if up and down and order is None:
                 internal = 0
-            # A counter-direction internal break identifies a possible swing
-            # pullback. It makes the run extreme eligible, not BOS-confirmed.
-            # Ordered child breaks may qualify a pullback even if the final
-            # internal phase realigns. All evidence is published at parent close.
-            if trend == 1 and -1 in internal_breaks and high["index"] < i and b["high"] <= high["price"]:
-                high_ready = True
-            if trend == -1 and 1 in internal_breaks and low["index"] < i and b["low"] >= low["price"]:
-                low_ready = True
 
         range_known = high is not None and low is not None and high["price"] > low["price"]
-        up = range_known and high_ready and b["close"] > high["price"]
-        down = range_known and low_ready and b["close"] < low["price"]
+        up = range_known and (qualification == "CHOCH_PULLBACK" or high_ready) and b["close"] > high["price"]
+        down = range_known and (qualification == "CHOCH_PULLBACK" or low_ready) and b["close"] < low["price"]
         if up or down:
             direction = 1 if up else -1
             broken = high if up else low
@@ -242,9 +227,9 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
             trend, last_break = direction, i
 
         # Track the developing weak extreme without calling it confirmed.
-        if trend == 1 and not high_ready and b["high"] > high["price"]:
+        if trend == 1 and (qualification == "CHOCH_PULLBACK" or not high_ready) and b["high"] > high["price"]:
             high = point(i, "high")
-        if trend == -1 and not low_ready and b["low"] < low["price"]:
+        if trend == -1 and (qualification == "CHOCH_PULLBACK" or not low_ready) and b["low"] < low["price"]:
             low = point(i, "low")
         j = i - strength
         if qualification == "PIVOT" and j - strength >= segment:
@@ -302,9 +287,9 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
         s["internalHigh"] = dict(ih) if ih else None
         s["internalLow"] = dict(il) if il else None
         if qualification == "CHOCH_PULLBACK":
-            for key, ready in (("high", high_ready), ("low", low_ready)):
+            for key in ("high", "low"):
                 if s[key]:
-                    s[key]["eligible"] = ready
+                    s[key]["eligible"] = True
                     s[key]["confirmed"] = s[key]["strong"]
             weak = high if trend == 1 else low if trend == -1 else None
             s["developing"] = [dict(weak)] if weak else []
@@ -313,7 +298,8 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
                 # neither becomes a solid anchor until a swing break proves it.
                 s["developing"].append(dict(time=b["time"], price=b["close"], index=i))
     return dict(events=events, trace=trace, traceBasis="BOS_CONFIRMED", snapshots=snapshots,
-                interval=interval, qualification=qualification)
+                interval=interval, qualification=qualification,
+                swingBreakRule="CLOSE_ONLY" if qualification == "CHOCH_PULLBACK" else "PIVOT_CLOSE")
 
 
 def build_mapping(bars, detail_start=None):
@@ -334,5 +320,5 @@ def build_mapping(bars, detail_start=None):
         timeframes[tf] = guide
     return dict(strategy=MODE, mappingOnly=True, schemaVersion=2, contextDays=CONTEXT_DAYS,
                 lessons=["Market structure", "Multi-timeframe structure", "Premium/discount and supply/demand"],
-                qualification="Counter-direction internal CHoCH qualifies a possible swing pullback; only a close-confirmed swing break confirms its origin. Research interpretation; meaningful swing size remains discretionary in the lessons.",
+                qualification="Swing breaks require a close beyond the existing swing level; no preceding internal CHoCH is required. CHoCH remains separate internal-phase evidence. Experimental mapping for visual review.",
                 timeframes=timeframes)

@@ -46,7 +46,7 @@ function drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,hei
   const tf=$('photon-range-timeframe')?.value || '4h',range=view[tf]?.state?.range;
   const names={'1d':'Daily','4h':'4H','15m':'15m'};
   const rangeStatus=$('photon-range-status');
-  if(rangeStatus)rangeStatus.textContent=range?names[tf]+' range '+formatPrice(range.low)+'–'+formatPrice(range.high)+' · EQ '+formatPrice(range.equilibrium)+' · '+cslPhotonRangePosition(price,range).toLowerCase().replaceAll('_',' ')+' · '+(range.status==='PULLBACK_CANDIDATE'?'pullback candidate':'developing range'):'Waiting for '+names[tf]+' swing range.';
+  if(rangeStatus)rangeStatus.textContent=range?names[tf]+' range '+formatPrice(range.low)+'–'+formatPrice(range.high)+' · EQ '+formatPrice(range.equilibrium)+' · '+cslPhotonRangePosition(price,range).toLowerCase().replaceAll('_',' ')+' · '+(range.status==='CLOSE_BREAK_PENDING'?'awaiting close break':range.status==='PULLBACK_CANDIDATE'?'pullback candidate':'developing range'):'Waiting for '+names[tf]+' swing range.';
   if(range&&$('photon-range-show')?.checked) {
     const lowY=candles.priceToCoordinate(range.low),highY=candles.priceToCoordinate(range.high),eqY=candles.priceToCoordinate(range.equilibrium);
     const start=x(Math.min(range.lowTime,range.highTime)) ?? 0,end=x(cutoff-interval) ?? width;
