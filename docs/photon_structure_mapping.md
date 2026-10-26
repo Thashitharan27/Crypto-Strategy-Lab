@@ -97,6 +97,14 @@ break-even, review reports and export use the existing manual-review workflow.
 Positions remain selected when continuous structure replay crosses UTC midnight.
 These actions record local replay reviews and do not place live orders.
 
+Switching the chart to **1m** lazily calculates independent structure from the
+actual minute candles. A teal 1m swing/developing path, CHoCH/BOS/trend-change
+markers and context state appear alongside 15m/4H context. The event inspector
+switches to 1m. Switching away removes the minute overlay and context state,
+hides the 1m inspector choice and returns it to 15m. No minute calculations or
+payload are added to other chart timeframes. Minute events are available only
+after their own candle close; switching timeframes preserves the replay clock.
+
 The context strip sits above the main chart. Each timeframe has its own swing
 direction, internal phase and qualified relationship to its parent. Opposing
 directions mean a **possible** parent pullback, never a forced trend reversal.

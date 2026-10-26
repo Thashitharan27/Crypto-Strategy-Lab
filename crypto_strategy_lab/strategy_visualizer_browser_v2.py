@@ -330,7 +330,7 @@ body.structure-lines #day-layer{display:none}
         <div id="photon-context-chart" aria-label="Weekly and daily structure overview"></div>
       </details>
       <div id="photon-event-row"><label for="photon-event-select">Inspect event</label>
-        <select id="photon-event-timeframe" aria-label="Event timeframe"><option value="15m">15m</option><option value="4h">4H</option><option value="1d">Daily</option><option value="1w">Weekly</option></select>
+        <select id="photon-event-timeframe" aria-label="Event timeframe"><option value="1m" hidden disabled>1m</option><option value="15m" selected>15m</option><option value="4h">4H</option><option value="1d">Daily</option><option value="1w">Weekly</option></select>
         <select id="photon-event-select" aria-label="Known structure events"></select>
         <button id="photon-next-event" disabled>Next structure event</button></div>
       <div id="photon-event-detail" role="status"></div>
@@ -546,9 +546,9 @@ body.structure-lines #day-layer{display:none}
   $('photon-event-select').addEventListener('change',()=>{
     $('photon-event-select').dataset.pinned='true';
     const market=replayChartSource || marketPayload || sourcePayload,tf=$('photon-event-timeframe').value,guide=market?.photonMapping?.timeframes[tf];
-    const event=guide?.events.find(e=>tf+':'+e.availableAt+':'+e.kind===$('photon-event-select').value);
+    const event=guide?.events.find(e=>tf+':'+e.availableAt+':'+e.kind+':'+e.direction===$('photon-event-select').value);
     const cutoff=replayActive?replayCutoff:(market?.candles?.at(-1)?.time || 0)+chartInterval();
-    if(event&&['4h','15m'].includes(tf)&&event.time>=market.candles[0].time&&event.availableAt<=cutoff) {
+    if(event&&['4h','15m','1m'].includes(tf)&&event.time>=market.candles[0].time&&event.availableAt<=cutoff) {
       chart.timeScale().setVisibleRange({from:Math.max(market.candles[0].time,event.time-12*guide.interval),to:Math.min(cutoff,event.time+12*guide.interval)});
     }
     redrawOverlays();
