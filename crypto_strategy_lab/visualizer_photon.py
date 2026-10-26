@@ -112,7 +112,10 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
     for(const text of [row.phase,row.relation]){const small=document.createElement('small');small.textContent=text;box.appendChild(small);}
     const range=view[row.tf]?.state?.range;
     if(range){const small=document.createElement('small');small.textContent=cslPhotonRangePosition(view['1m']?.state?.close ?? view['15m']?.state?.close,range).toLowerCase().replaceAll('_',' ')+' · EQ '+formatPrice(range.equilibrium);box.appendChild(small);}
-    box.title=row.availableAt?'Last completed candle: '+fmtTime(row.availableAt):'Insufficient completed structure in available history';strip.appendChild(box);
+    box.title=row.availableAt?'Last completed candle: '+fmtTime(row.availableAt):'Insufficient completed structure in available history';
+    const historyStart=mapping.timeframes[row.tf]?.historyStart;
+    if(historyStart!=null)box.title+=' · Structure history starts: '+fmtTime(historyStart);
+    strip.appendChild(box);
   }
   const select=$('photon-event-select'),previous=select.value;
   const known=Object.entries(mapping.timeframes).filter(([tf])=>tf===$('photon-event-timeframe').value).flatMap(([tf,g])=>g.events

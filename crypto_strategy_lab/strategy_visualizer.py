@@ -2262,7 +2262,7 @@ class CompletedRunVisualizer:
             self._photon_mapping_cache = build_mapping(bars, detail_start=detail_start)
         return self._photon_mapping_cache
 
-    def _photon_chart_mapping_payload(self, chart_timeframe, candles):
+    def _photon_chart_mapping_payload(self, chart_timeframe, candles, calculation_candles=None):
         """Attach minute structure lazily, without changing the shared context."""
         mapping = self._photon_mapping_payload()
         if mapping is None or chart_timeframe != "1m":
@@ -2270,12 +2270,14 @@ class CompletedRunVisualizer:
         from crypto_strategy_lab.photon_structure import map_structure
         from crypto_strategy_lab.photon_zones import attach_ranges
 
-        key = (len(candles), candles[0]["time"] if candles else None,
-               candles[-1]["time"] if candles else None)
+        history = candles if calculation_candles is None else calculation_candles
+        key = (len(history), history[0]["time"] if history else None,
+               history[-1]["time"] if history else None)
         cached = getattr(self, "_photon_minute_mapping_cache", None)
         if cached is None or cached[0] != key:
-            guide = map_structure(candles, 60, qualification="CHOCH_PULLBACK")
+            guide = map_structure(history, 60, qualification="CHOCH_PULLBACK")
             attach_ranges(guide)
+            guide["historyStart"] = history[0]["time"] if history else None
             self._photon_minute_mapping_cache = (key, guide)
         return {**mapping, "timeframes": {**mapping["timeframes"],
                                           "1m": self._photon_minute_mapping_cache[1]}}
@@ -2320,6 +2322,9 @@ class CompletedRunVisualizer:
         display_start = run_start - pd.Timedelta(days=60) if photon_structure else run_start
         if photon_structure:
             calculation_start = min(calculation_start, display_start)
+            if chart_timeframe == "1m":
+                calculation_start = min(calculation_start,
+                                        run_start - strategy_warmup_period(self.seed.config))
         market = self._market_frame(
             calculation_start,
             run_end,
@@ -2358,6 +2363,14 @@ class CompletedRunVisualizer:
                     ema_values[visible.to_numpy()],
                 ),
             })
+        minute_history = None
+        if photon_structure and chart_timeframe == "1m":
+            # Seed recursive minute structure before trimming chart display.
+            # The store supplies available canonical history; never fabricate
+            # unavailable early candles or seed from the currently visible view.
+            minute_history = [dict(time=_unix_seconds(row["period_start"]), **{
+                key: float(row[key]) for key in ("open", "high", "low", "close")
+            }) for _, row in market.iterrows()]
         market = market.loc[market["period_start"] >= display_start].reset_index(drop=True)
         candles = [
             {
@@ -2478,7 +2491,7 @@ class CompletedRunVisualizer:
             "candles": candles,
             "overlays": overlays,
             "markers": markers,
-            "photonMapping": self._photon_chart_mapping_payload(chart_timeframe, candles),
+            "photonMapping": self._photon_chart_mapping_payload(chart_timeframe, candles, minute_history),
             "fullRun": True,
             "chartTimeframe": chart_timeframe,
         }
