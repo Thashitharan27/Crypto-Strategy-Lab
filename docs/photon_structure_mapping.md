@@ -105,7 +105,7 @@ hides the 1m inspector choice and returns it to 15m. No minute calculations or
 payload are added to other chart timeframes. Minute events are available only
 after their own candle close; switching timeframes preserves the replay clock.
 Minute structure is seeded from the full configured strategy warmup (or the
-60-day display context if that is longer), using available canonical minute
+60-day structure context if that is longer), using available canonical minute
 candles before trimming the chart. The display boundary does not reset its
 state. Hover the 1m context box to inspect the actual structure-history start;
 missing earlier archive data is not fabricated.
@@ -232,12 +232,13 @@ gap; stale protected levels are not carried across it. The visualizer uses up
 to 730 calendar days of preceding canonical 15m history for daily/weekly
 context, subject to available canonical coverage. Daily buckets start at UTC
 midnight; weekly buckets start Monday 00:00 UTC and require all 672 consecutive
-15m candles. No partial week or day is exposed. The detailed 4H/15m maps and
-main chart retain 60 days of preceding history, so adding weekly/daily context
-does not compress the main chart to two years. That detail history is included
-in the Photon chart so both historical traces
-have a visible timeline, even for a short selected analysis period. Other
-strategies keep their normal selected-period chart bounds.
+15m candles. No partial week or day is exposed. The detailed 4H/15m maps retain
+60 days of preceding calculation history, but chart candles and indicator
+overlays start at the selected run date on every chart timeframe. For a June 1
+run, replay begins with June 1 data, not the preceding warmup months. Warmup
+structure and active levels/zones still inform that first visible candle.
+Higher-timeframe charts show the first available candle whose open is within
+the selected period; warmup candles are not added to replay day navigation.
 
 The display provides per-timeframe direction, internal phase, strong/weak range
 levels, HH/HL/LH/LL (and equal-point) labels, BOS, trend changes and CHoCH.

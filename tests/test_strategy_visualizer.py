@@ -1075,7 +1075,7 @@ def test_v2_rejects_unavailable_timeframe_before_loading_data(tmp_path):
     assert len(service.store.calls) == calls_before
 
 
-def test_photon_overlay_keeps_prior_history_for_both_traces(tmp_path):
+def test_photon_overlay_calculates_prior_history_but_displays_run_only(tmp_path):
     from dataclasses import asdict
     from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
     service, run_dir, manifest, market = _fixture(tmp_path)
@@ -1087,7 +1087,9 @@ def test_photon_overlay_keeps_prior_history_for_both_traces(tmp_path):
     profiles, _ = compile_profiles(direction_mode="PHOTON_STRUCTURE_MAP", market_permissions=MARKET_PERMISSIONS)
     manifest["config"]["strategy"]["profiles"] = {k: asdict(v) for k, v in profiles.items()}
     photon = CompletedRunVisualizer.load(service, run_dir, manifest).build_v2_diagnostic_payload()
-    assert photon["candles"][0]["time"] == int(market.period_start.iloc[0].timestamp())
-    assert photon["candles"][0]["time"] < int(start.timestamp())
+    assert photon["candles"][0]["time"] == int(start.timestamp())
+    assert all(c["time"] >= int(start.timestamp()) for c in photon["candles"])
+    assert all(p["time"] >= int(start.timestamp()) for o in photon["overlays"] for p in o.get("data", []))
+    assert photon["photonMapping"]["timeframes"]["15m"]["snapshots"][0]["availableAt"] < int(start.timestamp())
     assert set(photon["photonMapping"]["timeframes"]) == {"1w", "1d", "15m", "4h"}
     assert all("trace" in guide for guide in photon["photonMapping"]["timeframes"].values())

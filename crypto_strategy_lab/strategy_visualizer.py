@@ -2319,9 +2319,10 @@ class CompletedRunVisualizer:
         from crypto_strategy_lab.photon_trend import selected as photon_trading_selected
         mapping_only = photon_selected(self.seed.config.strategy.profiles)
         photon_structure = mapping_only or photon_trading_selected(self.seed.config.strategy.profiles)
-        display_start = run_start - pd.Timedelta(days=60) if photon_structure else run_start
+        display_start = run_start
         if photon_structure:
-            calculation_start = min(calculation_start, display_start)
+            # Context is calculation history, not part of the review period.
+            calculation_start = min(calculation_start, run_start - pd.Timedelta(days=60))
             if chart_timeframe == "1m":
                 calculation_start = min(calculation_start,
                                         run_start - strategy_warmup_period(self.seed.config))

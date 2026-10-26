@@ -67,7 +67,7 @@ def test_chart_payload_loads_configured_warmup_before_display_trim(tmp_path, mon
     manifest["config"]["strategy"]["profiles"] = {k: asdict(v) for k, v in profiles.items()}
     model = CompletedRunVisualizer.load(service, run_dir, manifest)
     run_start = pd.Timestamp(model.seed.request.period_start)
-    display_start = run_start - pd.Timedelta(days=60)
+    display_start = run_start
     values = minute_bars()
     times = pd.date_range(display_start - pd.Timedelta(minutes=5), periods=len(values), freq="min")
     frame = pd.DataFrame([dict(period_start=t, volume=1, **{k:v for k,v in b.items() if k!="time"})
@@ -89,6 +89,40 @@ def test_chart_payload_loads_configured_warmup_before_display_trim(tmp_path, mon
     assert guide["historyStart"] == int(times[0].timestamp())
     assert len(guide["snapshots"]) == len(values)
     assert len(payload["candles"]) == len(values)-5
+
+
+@pytest.mark.parametrize("timeframe,minutes", [("1m",1),("15m",15),("1h",60),("4h",240),("1d",1440),("1w",10080)])
+def test_every_chart_timeframe_hides_warmup_candles(tmp_path, monkeypatch, timeframe, minutes):
+    from dataclasses import asdict
+    import pandas as pd
+    from test_strategy_visualizer import _fixture
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
+
+    service, run_dir, manifest, _ = _fixture(tmp_path)
+    profiles, _ = compile_profiles(direction_mode="PHOTON_STRUCTURE_MAP", market_permissions=MARKET_PERMISSIONS)
+    manifest["config"]["strategy"]["profiles"] = {k:asdict(v) for k,v in profiles.items()}
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    start, end = pd.Timestamp(model.seed.request.period_start), pd.Timestamp(model.seed.request.period_end)
+    if timeframe == "1w":
+        times = pd.date_range(start-pd.Timedelta(days=60), end, freq="W-MON", inclusive="left")
+    else:
+        times = pd.date_range(start-pd.Timedelta(minutes=5*minutes), end,
+                              freq=f"{minutes}min", inclusive="left")
+    frame = pd.DataFrame(dict(period_start=times, open=100., high=101., low=99., close=100., volume=1.))
+    calls=[]
+    def market(calculation_start, visible_end, *, chart_timeframe):
+        calls.append((calculation_start,chart_timeframe))
+        return frame.loc[(frame.period_start>=calculation_start)&(frame.period_start<visible_end)].copy()
+    monkeypatch.setattr(model,"_market_frame",market)
+    monkeypatch.setattr(model,"available_chart_timeframes",lambda:[{"interval":timeframe}])
+    monkeypatch.setattr(model,"_photon_mapping_payload",lambda:{"timeframes":{}})
+    payload=model.build_v2_diagnostic_payload(chart_timeframe=timeframe)
+    assert calls[0][0] < start and calls[0][1] == timeframe
+    assert payload["candles"]
+    assert all(int(start.timestamp())<=b["time"]<int(end.timestamp()) for b in payload["candles"])
+    assert all(p["time"]>=int(start.timestamp()) for o in payload["overlays"] for p in o.get("data",[]))
+    if timeframe=="1m":
+        assert payload["photonMapping"]["timeframes"]["1m"]["historyStart"] < int(start.timestamp())
 
 
 def test_minute_renderer_switches_labels_inspector_and_hides_future_events():
