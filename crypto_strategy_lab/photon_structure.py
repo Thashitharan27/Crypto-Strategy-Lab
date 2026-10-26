@@ -77,11 +77,14 @@ def valid_bar(b):
             and b["high"] >= max(b["open"], b["close"]))
 
 
-def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PIVOT"):
+def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PIVOT",
+                  intrabars=None, intrabar_interval=900):
     """Forward-only snapshots. Historical pivots carry their confirmation time.
 
     Strict comparisons: equal prices are touches. An outside candle crossing
-    both internal levels has unknown intrabar order and emits no CHoCH.
+    both internal levels emits no CHoCH unless complete matching lower-timeframe
+    candles establish distinct first-crossing times. These ordered events remain
+    unavailable until the parent candle closes. Same-child crossings stay unknown.
     Internal pivots follow candle runs: a failure to extend the previous high
     (up run) or low (down run) starts the opposing run, including inside bars.
     Legacy PIVOT qualification needs `strength` bars on both sides. The chart's
@@ -101,6 +104,30 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
     extreme = None
     last_break = -1
     previous_high = previous_low = None
+    # Only complete source buckets whose OHLC matches the parent are evidence.
+    # Index once; missing, duplicate or inconsistent source stays ambiguous.
+    source_groups = {}
+    source_parents = {}
+    if intrabars is not None and intrabar_interval < interval:
+        for child in intrabars:
+            start = int(child["time"]) // interval * interval
+            source_groups.setdefault(start, []).append(child)
+        source_parents = {p["time"]: p for p in aggregate_closed(
+            intrabars, intrabar_interval, interval)}
+
+    def crossing_order(parent, upper, lower):
+        aggregate = source_parents.get(parent["time"])
+        if aggregate is None or any(aggregate[k] != parent[k] for k in ("open", "high", "low", "close")):
+            return None
+        first_up = first_down = None
+        for child in source_groups[parent["time"]]:
+            if first_up is None and child["high"] > upper["price"]:
+                first_up = child["time"]
+            if first_down is None and child["low"] < lower["price"]:
+                first_down = child["time"]
+        if first_up is None or first_down is None or first_up == first_down:
+            return None
+        return [1, -1] if first_up < first_down else [-1, 1]
 
     def point(index, kind):
         return {"index": index, "time": bars[index]["time"], "price": bars[index][kind]}
@@ -127,10 +154,21 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
 
         # Test existing levels before learning any pivots from this candle.
         internal_break = 0
+        internal_breaks = []
         up = ih is not None and b["high"] > ih["price"]
         down = il is not None and b["low"] < il["price"]
+        order = crossing_order(b, ih, il) if up and down and qualification == "CHOCH_PULLBACK" else None
         if up and down:
-            emit("AMBIGUOUS", 0, ih, at, "Both internal levels crossed; intrabar order unknown")
+            if order is None:
+                emit("AMBIGUOUS", 0, ih, at, "Both internal levels crossed; intrabar order unknown")
+            else:
+                for direction in order:
+                    if internal != direction:
+                        internal = direction
+                        internal_breaks.append(direction)
+                        emit("CHOCH", direction, ih if direction == 1 else il, at)
+                        events[-1]["orderBasis"] = "LOWER_TIMEFRAME"
+                        events[-1]["sourceInterval"] = intrabar_interval
         elif up and internal != 1:
             internal = 1
             internal_break = 1
@@ -139,6 +177,8 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
             internal = -1
             internal_break = -1
             emit("CHOCH", -1, il, at)
+        if internal_break:
+            internal_breaks.append(internal_break)
 
         if qualification == "CHOCH_PULLBACK":
             # Retire penetrated references even when the break continued the
@@ -148,14 +188,15 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
                 ih = None
             if down:
                 il = None
-            if up and down:
+            if up and down and order is None:
                 internal = 0
             # A counter-direction internal break identifies a possible swing
             # pullback. It makes the run extreme eligible, not BOS-confirmed.
-            # Do not order two opposing extremes inside an outside candle.
-            if trend == 1 and internal_break == -1 and high["index"] < i and b["high"] <= high["price"]:
+            # Ordered child breaks may qualify a pullback even if the final
+            # internal phase realigns. All evidence is published at parent close.
+            if trend == 1 and -1 in internal_breaks and high["index"] < i and b["high"] <= high["price"]:
                 high_ready = True
-            if trend == -1 and internal_break == 1 and low["index"] < i and b["low"] >= low["price"]:
+            if trend == -1 and 1 in internal_breaks and low["index"] < i and b["low"] >= low["price"]:
                 low_ready = True
 
         range_known = high is not None and low is not None and high["price"] > low["price"]
@@ -285,7 +326,8 @@ def build_mapping(bars, detail_start=None):
     for tf, (seconds, offset) in frames.items():
         native = detail if tf == "15m" else aggregate_closed(
             detail if tf == "4h" else bars, target_seconds=seconds, offset=offset)
-        guide = map_structure(native, seconds, qualification="CHOCH_PULLBACK")
+        guide = map_structure(native, seconds, qualification="CHOCH_PULLBACK",
+                              intrabars=detail if tf == "4h" else None)
         attach_ranges(guide)
         if tf != "1w":
             guide["supplyDemand"] = build_zones(detail if tf in ("15m", "4h") else bars, native, guide, tf)
