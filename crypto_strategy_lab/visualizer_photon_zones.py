@@ -38,12 +38,67 @@ function cslPhotonZoneText(zone,range) {
   return name+' '+zone.kind.toLowerCase()+' · '+formatPrice(zone.lower)+'–'+formatPrice(zone.upper)+
     ' · '+friendly(zone.state)+(zone.touches?' ('+zone.touches+' visits)':'')+
     ' · Origin '+fmtTime(zone.originTime)+' · Created '+fmtTime(zone.availableAt)+
-    ' by '+(zone.confirmedBy==='TREND_CHANGE'?'swing change':'BOS')+' through '+formatPrice(zone.brokenLevel)+
+    ' by '+(zone.confirmedBy==='THRUST'?'departure close':zone.confirmedBy==='TREND_CHANGE'?'swing change':'BOS')+' through '+formatPrice(zone.brokenLevel)+
     ' · At creation: '+friendly(zone.creationLocation)+' · Current range: '+friendly(cslPhotonZoneLocation(zone,range))+
     (zone.lastTouch?' · Last touch '+fmtTime(zone.lastTouch):'')+
     (zone.endedAt?' · Ended '+fmtTime(zone.endedAt)+(zone.endReason==='DATA_GAP'?' (data gap)':' (own-timeframe close '+formatPrice(zone.invalidatingClose)+')'):'')+
     ' · Boundaries: '+(zone.lessonModel?zone.lessonModel.toLowerCase().replaceAll('_',' ')+' base, full wicks':'full wick range of the last opposing candle')+'.'+
     (zone.lessonEvidence?' · Lesson evidence at '+fmtTime(zone.lessonEvidence.availableAt)+': '+Object.entries(zone.lessonEvidence.checks).map(([k,v])=>k.replaceAll('_',' ')+': '+(v?'yes':'no / unknown')).join('; ')+'. Selected requirements: '+(zone.lessonEvidence.eligible?'pass':'fail')+(zone.lessonEvidence.liquidityLevel!=null?' · Liquidity pivot '+formatPrice(zone.lessonEvidence.liquidityLevel):''):'');
+}
+function cslPhotonLessonMarks(zone,cutoff) {
+  if(!zone||zone.availableAt>cutoff)return [];
+  const seconds={'15m':900,'4h':14400,'1d':86400}[zone.timeframe]||900;
+  const evidence=zone.lessonEvidence?.availableAt<=cutoff?zone.lessonEvidence:null;
+  const near=zone.kind==='DEMAND'?zone.upper:zone.lower;
+  const model=zone.lessonModel||'LEGACY';
+  const baseEnd=model==='LEGACY'?zone.originTime+seconds:zone.breakTime;
+  const marks=[{kind:'BASE',shape:'box',t1:zone.originTime,t2:baseEnd,p1:zone.lower,p2:zone.upper,
+    label:model==='RANGE'?'1 · Range base':model==='PIVOT_TWO'?'1 · Two-candle pivot':'1 · Pivot origin',knownAt:zone.availableAt}];
+  if(Number.isFinite(evidence?.departurePrice))marks.push({kind:'DEPARTURE',shape:'line',t1:zone.breakTime,t2:zone.breakTime,
+    p1:near,p2:evidence.departurePrice,label:'2 · Departure close',knownAt:zone.availableAt});
+  const br=evidence?.breakReference;
+  if(br?.availableAt<=cutoff&&Number.isFinite(br.price))marks.push({kind:'BOS',shape:'line',t1:br.fromTime,t2:br.time,
+    p1:br.price,p2:br.price,label:'Structure broken',knownAt:br.availableAt});
+  if(evidence?.checks?.sweep&&Number.isFinite(evidence.sweepLevel))marks.push({kind:'SWEEP',shape:'line',t1:evidence.sweepTime,t2:zone.originTime,
+    p1:evidence.sweepLevel,p2:evidence.sweepLevel,label:'Liquidity sweep',knownAt:zone.availableAt});
+  if(evidence?.checks?.inducement&&Number.isFinite(evidence.liquidityLevel))marks.push({kind:'INDUCEMENT',shape:'line',t1:evidence.liquidityTime,t2:evidence.returnTime??evidence.availableAt,
+    p1:evidence.liquidityLevel,p2:evidence.liquidityLevel,label:'Liquidity ahead of zone',knownAt:evidence.availableAt});
+  const flip=evidence?.flipReference;
+  if(flip?.failedAt<=cutoff)marks.push({kind:'FLIP',shape:'box',t1:flip.originTime,t2:flip.failedAt,
+    p1:flip.lower,p2:flip.upper,label:'Opposing '+flip.kind.toLowerCase()+' failed',knownAt:flip.failedAt});
+  const stack=evidence?.stackReference;
+  if(stack?.availableAt<=cutoff)marks.push({kind:'STACK',shape:'box',t1:stack.originTime,t2:evidence.availableAt,
+    p1:stack.lower,p2:stack.upper,label:stack.timeframe+' same-side overlap',knownAt:evidence.availableAt});
+  if(evidence?.returnAvailableAt<=cutoff&&Number.isFinite(evidence.returnTime))marks.push({kind:'RETURN',shape:'point',t1:evidence.returnTime,t2:evidence.returnTime,
+    p1:near,p2:near,label:'3 · '+(evidence.touches===1?'First mitigation':'Return '+evidence.touches),knownAt:evidence.returnAvailableAt});
+  return marks;
+}
+function drawPhotonLessonMarks(zone,cutoff,bars,interval,make,x,width,height,placeLabel) {
+  const marks=cslPhotonLessonMarks(zone,cutoff);
+  const colors={BASE:'#f5cf7b',DEPARTURE:'#86efac',BOS:'#dbeafe',SWEEP:'#c4a1ff',INDUCEMENT:'#c4a1ff',FLIP:'#fb9ca9',STACK:'#67d5d0',RETURN:'#f5cf7b'};
+  let drawn=0;
+  for(const m of marks) {
+    if(!Number.isFinite(m.t1)||!Number.isFinite(m.t2)||m.t2<bars[0].time||m.t1>cutoff)continue;
+    const x1=x(Math.max(m.t1,bars[0].time)),x2=x(Math.min(m.t2,cutoff-interval));
+    const y1=candles.priceToCoordinate(m.p1),y2=candles.priceToCoordinate(m.p2);
+    if([x1,x2,y1,y2].some(v=>v==null||!Number.isFinite(v)))continue;
+    if(Math.max(y1,y2)<0||Math.min(y1,y2)>height)continue;
+    const color=colors[m.kind],title=m.label+' · known '+fmtTime(m.knownAt);
+    if(m.shape==='box') {
+      const left=Math.max(0,Math.min(x1,x2)),right=Math.min(width,Math.max(x1,x2));
+      if(right<=left)continue;
+      make('rect',{x:left,y:Math.max(0,Math.min(y1,y2)),width:right-left,height:Math.max(1,Math.min(height,Math.max(y1,y2))-Math.max(0,Math.min(y1,y2))),fill:color,'fill-opacity':m.kind==='BASE'?.16:.035,stroke:color,'stroke-width':m.kind==='BASE'?2:1.5,'stroke-dasharray':m.kind==='FLIP'?'4 3':'none','data-photon-lesson':m.kind},title);
+    } else if(m.shape==='point') {
+      make('circle',{cx:x1,cy:y1,r:5,fill:color,stroke:'#111827','stroke-width':2,'data-photon-lesson':m.kind},title);
+    } else {
+      make('line',{x1,y1,x2,y2,stroke:color,'stroke-width':2,'stroke-dasharray':m.kind==='DEPARTURE'?'none':'5 3','data-photon-lesson':m.kind},title);
+      make('circle',{cx:x2,cy:y2,r:3,fill:color},title);
+    }
+    const labelX=Math.max(8,Math.min(width-230,m.kind==='DEPARTURE'?x2+8:Math.min(x1,x2)+5));
+    placeLabel(m.label,labelX,Math.max(12,Math.min(height-15,Math.min(y1,y2)-8)),color,title);
+    drawn++;
+  }
+  return drawn;
 }
 function drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,height,placeLabel) {
   const price=view['15m']?.state?.close ?? null;
@@ -78,9 +133,15 @@ function drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,hei
   $('photon-zone-focus').title=selected?.endedAt!=null&&selected.endedAt<bars[0].time?'This zone ended before loaded main-chart history; choose a run covering that period.':'Fit the selected zone and visible candles. Reset price restores normal scaling.';
   $('photon-zone-detail').textContent=selected?cslPhotonZoneText(selected,view[selected.timeframe]?.state?.range):'Nearby zones: up to two supply and two demand areas per enabled timeframe. Select a zone to inspect its origin, confirmation and lifecycle.';
   const summary=$('photon-zone-summary');
-  if(!$('photon-zones-show')?.checked){if(summary)summary.textContent='Zone layers hidden';return;}
+  if(!$('photon-zones-show')?.checked){if(summary)summary.textContent='Zone layers hidden';if($('photon-lesson-status'))$('photon-lesson-status').textContent='Show zones to see lesson drawings.';return;}
   const zoneHistory=$('photon-zone-history')?.checked;
   const candidates=cslPhotonNearbyZones(all,price,selected?.id,zoneHistory);
+  const lessonStatus=$('photon-lesson-status');
+  if($('photon-lesson-show')?.checked) {
+    const count=selected?drawPhotonLessonMarks(selected,cutoff,bars,interval,make,x,width,height,placeLabel):0;
+    if(lessonStatus)lessonStatus.textContent=!selected?'Choose a zone above to trace its origin, departure and return.':count?count+' lesson annotations · origin \u2192 departure \u2192 return · known evidence only'+(selected.originTime<bars[0].time?' · Origin predates loaded candles; load an earlier period for the full sequence.':''):'Selected zone evidence is outside the visible chart. Use Focus selected zone or load its origin period.';
+  } else if(lessonStatus)lessonStatus.textContent='Select a zone and turn on Lesson drawings to inspect the chart sequence.';
+  // Reserve lesson captions before nearby zone labels occupy their space.
   let drawn=0;
   for(const z of candidates) {
     if(z.endedAt&&!zoneHistory&&z.id!==selected?.id)continue;
