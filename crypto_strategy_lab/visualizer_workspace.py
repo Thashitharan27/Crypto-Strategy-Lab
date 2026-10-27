@@ -118,6 +118,7 @@ function cslOrganizeWorkspace($) {
   replay.appendChild($('workspace-clock'));
   let selected='plan',wasReplay=false;
   const show=name=>{
+    if($('photon-inspector')){$('photon-inspector').hidden=true;$('photon-inspector-toggle').setAttribute('aria-pressed','false');}
     const panel=$('trade-panel');panel.hidden=false;selected=name;
     for(const tab of ['plan','risk','journal']) {
       $(tab+'-tab').hidden=tab!==name;

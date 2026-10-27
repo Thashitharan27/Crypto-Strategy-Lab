@@ -117,7 +117,7 @@ function drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,hei
     }
     if(eqY!=null&&eqY>=0&&eqY<=height&&right>left) {
       make('line',{x1:left,x2:right,y1:eqY,y2:eqY,stroke:'#d9b879','stroke-width':1.5,'stroke-dasharray':'6 4'},names[tf]+' EQ '+formatPrice(range.equilibrium)+' · range known '+fmtTime(range.knownAt));
-      placeLabel(names[tf]+' EQ '+formatPrice(range.equilibrium),right-140,eqY,'#d9b879','Current '+names[tf]+' range midpoint; not an entry or guaranteed reversal');
+      if($('photon-text-zones')?.checked!==false)placeLabel(names[tf]+' EQ '+formatPrice(range.equilibrium),right-140,eqY,'#d9b879','Current '+names[tf]+' range midpoint; not an entry or guaranteed reversal');
     }
   }
   const enabled=['1d','4h','15m'].filter(tf=>$('photon-zone-'+tf)?.checked);
@@ -154,7 +154,7 @@ function drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,hei
     const title=cslPhotonZoneText(z,view[z.timeframe]?.state?.range);
     make('rect',{x:left,y:Math.max(0,highY),width:right-left,height:Math.max(1,Math.min(height,lowY)-Math.max(0,highY)),fill:color,'fill-opacity':z.endedAt ? .025 : chosen ? .20 : z.timeframe==='1d' ? .11 : .065,stroke:color,'stroke-width':chosen?2:1,'stroke-opacity':z.endedAt ? .3 : .65,'stroke-dasharray':z.endedAt?'3 4':z.state==='TOUCHED'?'5 3':'none','data-photon-zone':z.id},title);
     drawn++;
-    placeLabel(names[z.timeframe]+' '+z.kind.toLowerCase()+' · '+z.state.toLowerCase(),right-185,Math.max(10,highY),color,title);
+    if($('photon-text-zones')?.checked!==false)placeLabel(names[z.timeframe]+' '+z.kind.toLowerCase()+' · '+z.state.toLowerCase(),right-185,Math.max(10,highY),color,title);
   }
   if(summary)summary.textContent=candidates.length?candidates.length+' nearby zones · '+drawn+' on-screen':zoneHistory?'No known zones in enabled layers':'No active zones in enabled layers';
 }

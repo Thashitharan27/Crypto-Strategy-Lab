@@ -239,7 +239,7 @@ def test_chart_controls_show_structure_without_disabling_trades(mode):
     html=build_browser_visualizer_v2_html(model,'photon')
     boot=json.loads(re.search(r'const boot = (.*?);',html).group(1))
     init=html[html.index('  if(boot.run.mappingOnly) {'):html.index('  function applyPhotonDisplay()')]
-    js="const boot="+json.dumps(boot)+";const nodes={};const $=id=>nodes[id]??(nodes[id]={hidden:true,disabled:false});const indicatorInputs=[];const document={body:{classList:{add(){}}}};"+init+";console.log(JSON.stringify(nodes));"
+    js="const boot="+json.dumps(boot)+";const nodes={};const $=id=>nodes[id]??(nodes[id]={hidden:true,disabled:false});const indicatorInputs=[];const initPhotonInspector=()=>nodes.inspectorInitialized=true;const document={body:{classList:{add(){}}}};"+init+";console.log(JSON.stringify(nodes));"
     nodes=json.loads(subprocess.run([node],input=js,text=True,capture_output=True,check=True).stdout)
     assert nodes['photon-view']['hidden'] is False
     assert nodes['photon-context']['hidden'] is False
@@ -248,7 +248,8 @@ def test_chart_controls_show_structure_without_disabling_trades(mode):
         assert nodes['photon-view']['value']=='BOTH'
         assert 'manual-confirm' not in nodes  # trading controls never disabled
     else:
-        assert nodes['photon-view']['value']=='LINES'
+        assert nodes['photon-view']['value']=='BOTH'
+        assert nodes['inspectorInitialized'] is True
         assert 'manual-confirm' not in nodes  # manual simulation is enabled in mapping mode too
 
 

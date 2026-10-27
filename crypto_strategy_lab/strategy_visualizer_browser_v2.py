@@ -255,6 +255,24 @@ body.structure-lines #day-layer{display:none}
 #photon-zone-select{width:100%;max-width:100%;margin-top:7px}
 #photon-zone-detail,#photon-range-status{font-size:12px;line-height:1.6;color:#c5d4e6;white-space:normal}
 @media(max-width:650px){#photon-context-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+#photon-inspector{width:300px;flex-shrink:0;min-height:0;overflow-y:auto;background:#181c27;border-left:1px solid #2a2e39;font-size:13px}
+#photon-inspector[hidden],#photon-inspector [hidden]{display:none!important}
+#photon-inspector .inspector-body{padding:12px;min-width:0;overflow-wrap:anywhere}
+#photon-inspector label{display:flex;align-items:center;gap:7px;margin:9px 0}
+#photon-inspector select{max-width:100%;min-width:0}
+#photon-inspector fieldset{border:0;padding:8px 0;margin:8px 0;border-bottom:1px solid #2a2e39}
+#photon-inspector legend{color:#aebbcf;padding:0}
+#photon-inspector #photon-value-controls,#photon-inspector #photon-zone-filters{display:block}
+#photon-inspector #photon-range-status,#photon-inspector #photon-zone-summary{display:block;margin-top:8px}
+#photon-inspector #photon-event-row{display:block}#photon-inspector #photon-event-row>*{margin:5px 0;width:100%}
+#photon-inspector #photon-status{font-size:12px;padding-top:12px;line-height:1.5}
+body.photon-structure #photon-context-strip{display:flex;flex-wrap:wrap;gap:8px 22px;background:transparent;flex-basis:100%;padding:3px 0}
+body.photon-structure .photon-context-state{padding:0;background:transparent;font-size:12px}
+body.photon-structure #photon-context-strip .photon-context-state small{display:none}
+#photon-context-full .photon-context-state{padding:8px 0;border-bottom:1px solid #2a2e39}
+body.photon-chart-focus #photon-context-strip{display:none}
+@media(max-width:760px){#photon-inspector{position:absolute;z-index:20;right:40px;top:0;bottom:0;width:min(300px,calc(100% - 80px));box-shadow:-8px 0 25px #0006}}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
 </head>
@@ -272,6 +290,9 @@ body.structure-lines #day-layer{display:none}
       <option value="LINES">Structure lines</option>
       <option value="BOTH">Candles + structure lines</option>
     </select>
+    <button id="photon-inspector-toggle" aria-controls="photon-inspector" aria-pressed="false" hidden>Layers &amp; labels</button>
+    <button id="photon-details-toggle" hidden>Details</button>
+    <button id="photon-chart-only" hidden>Chart only</button>
     <label id="photon-labels-wrap" hidden><input id="photon-labels" type="checkbox"> Break levels</label>
     <label id="photon-developing-wrap" hidden><input id="photon-developing" type="checkbox"> Unconfirmed leg (dashed)</label>
     <button id="indicators-btn" aria-haspopup="dialog">ƒx Indicators <span id="indicator-count"></span></button>
@@ -418,6 +439,25 @@ body.structure-lines #day-layer{display:none}
     </details>
     <svg id="drawing-layer" width="100%" height="100%" aria-label="Chart drawings"></svg>
   </div><aside id="setup-panel" aria-label="FVG setup explanation" hidden></aside>
+    <aside id="photon-inspector" aria-label="Chart inspector" hidden>
+      <header class="workspace-panel-header"><strong>Chart inspector</strong><button id="photon-inspector-close" aria-label="Close chart inspector">×</button></header>
+      <nav class="workspace-tabs" role="tablist" aria-label="Chart inspector sections">
+        <button id="photon-tab-layers" role="tab" aria-controls="photon-inspector-layers" aria-selected="true">Layers &amp; labels</button>
+        <button id="photon-tab-details" role="tab" aria-controls="photon-inspector-details" aria-selected="false">Details</button>
+      </nav>
+      <section id="photon-inspector-layers" class="inspector-body" role="tabpanel" aria-labelledby="photon-tab-layers">
+        <label>View preset <select id="photon-visibility-preset"><option value="CUSTOM">Custom</option><option value="CLEAN">Clean</option><option value="STRUCTURE" selected>Structure</option><option value="LESSON">Lesson</option><option value="ALL">All details</option></select></label>
+        <fieldset><legend>Text labels</legend>
+          <label><input id="photon-text-bos" type="checkbox" checked> BOS / swing breaks</label>
+          <label><input id="photon-text-choch" type="checkbox"> Internal CHoCH</label>
+          <label><input id="photon-text-trend" type="checkbox"> Trend-change banners</label>
+          <label><input id="photon-text-swings" type="checkbox"> Swing high / low names</label>
+          <label><input id="photon-text-zones" type="checkbox"> Zone names / prices and EQ text</label>
+          <label>Label density <select id="photon-label-density"><option value="RECENT">Recent / selected only</option><option value="ALL">All visible history</option></select></label>
+        </fieldset><p class="muted">Text can be hidden while drawings stay visible. Recent shows up to three events of each type per timeframe, plus your selected event.</p>
+      </section>
+      <section id="photon-inspector-details" class="inspector-body" role="tabpanel" aria-labelledby="photon-tab-details" hidden></section>
+    </aside>
     <aside id="trade-panel" aria-label="Trade workspace" hidden>
       <header class="workspace-panel-header"><strong>Trade workspace</strong><button id="close-trade-panel" aria-label="Close trade panel">×</button></header>
       <nav class="workspace-tabs" role="tablist" aria-label="Trade workspace sections">
@@ -499,12 +539,14 @@ body.structure-lines #day-layer{display:none}
     document.body.classList.add('photon-structure');
     $('photon-view').hidden=false;
     $('photon-view-label').hidden=false;
-    $('photon-view').value=boot.run.mappingOnly?'LINES':'BOTH';
+    $('photon-view').value='BOTH';
     $('photon-labels-wrap').hidden=false;
     $('photon-developing-wrap').hidden=false;
     $('photon-context').hidden=false;
     $('photon-labels').checked=true;
     $('photon-developing').checked=true;
+    $('photon-range-show').checked=false;
+    initPhotonInspector();
   }
   function applyPhotonDisplay() {
     if(!boot.run.photonStructure || !candles || !chart)return;

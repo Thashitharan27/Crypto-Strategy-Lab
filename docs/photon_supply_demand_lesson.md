@@ -109,3 +109,30 @@ requires a run covering that earlier period for the full sequence.
 This is a chart inspection aid. It neither enables automatic trades nor changes
 the existing swing/BOS/CHoCH algorithm. Discretionary markings in the presentation
 may still differ from these documented mechanical definitions.
+
+
+## Compact chart workspace
+
+Photon charts open with candles and structure lines, a compact timeframe trend
+row, and a docked **Chart inspector**. Long explanations, zone selection, entry
+checks and event inspection live in its **Details** tab. **Layers & labels**
+controls presentation independently of the strategy settings. Only one of the
+chart inspector and trade workspace is open at a time. On narrow screens the
+inspector overlays the chart rather than squeezing its width.
+
+- **Clean**: candles with the optional Photon overlays off.
+- **Structure**: structure and break-level drawings, zones and recent BOS text.
+- **Lesson**: structure, zones and selected-zone lesson drawings; opens Details
+  so a zone can be chosen.
+- **All details**: all label families and visible event history.
+
+BOS text, internal CHoCH text, trend-change banners, swing names, and zone/EQ
+text have separate switches. Text switches do not remove the underlying lines
+or boxes. Break-level drawings and the unconfirmed leg have separate controls.
+Recent density keeps up to three events of each type per displayed timeframe,
+plus an explicitly selected event. Banner collisions can suppress a caption;
+use Details to inspect its event text. Lesson captions retain priority.
+
+**Chart only** closes both side panels and toggles the compact trend row.
+Visibility choices are remembered in browser storage when available; they do
+not edit a report, strategy configuration or trade calculation.
