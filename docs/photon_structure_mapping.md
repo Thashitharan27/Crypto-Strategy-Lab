@@ -328,3 +328,23 @@ When enabled, an opposing confirmed 15m TREND_CHANGE closes at the next 1m open,
 with slippage; an opening SL/TP crossing takes precedence. The midpoint target
 remains active alongside this early exit. Trade evidence records the context
 zone, 15m alignment time, stop source, range and fixed target for visual review.
+
+## Reproduce the original zone-reversal entry and stop
+
+Enable **Original entry and SL** in the Photon zone reversal execution settings,
+or load `Photon_Original_Entry_SL_68c5fa4f.json` from the Data Lake presets.
+For MCP/JSON runs set `execution.photon_legacy_entry_and_stop` to `true`.
+This opt-in mode restores the model from commit `1739f4b7`, used by
+`BTCUSDT_1m_68c5fa4f80c64da3a0afcb8c4e77fefe` (June–August 2020).
+
+The original model accepts existing aligned 1m swing structure after the fresh
+15m reversal and enters at the next 1m open. It does not wait for the later
+pullback, internal CHoCH and origin retest. Its stop uses the latest qualifying
+nested 15m zone inside the touched Daily/4H zone, falling back to the touch
+extreme, with the configured ATR buffer. It does not prefer the newer reversal
+zone introduced by the stop update. Targets and fill-time minimum R checks are
+unchanged. The saved manifest records the option for future reruns.
+
+The option defaults to off. Existing presets continue to use the current
+pullback retest entry and reversal-zone-first stop. The original model is kept
+in a separate frozen module to avoid silently changing historical reruns.
