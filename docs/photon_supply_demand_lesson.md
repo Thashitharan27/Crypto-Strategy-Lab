@@ -89,3 +89,23 @@ The automated zone-reversal model still uses its selected original/current
 entry sequence, 4H value logic, structural stops and other existing constraints.
 These settings do not establish profitability or reproduce every discretionary
 zone in the video. Saved manifests include the chosen options for reproducibility.
+
+## Lesson drawings on the chart
+
+Use the mapping-only strategy, open **Strategy Visualizer**, and choose
+**Candles + structure lines**. Expand **Supply / demand zones · layers and
+inspection**, select a zone, and enable **Lesson drawings for selected zone**.
+Use **Focus selected zone** to include its prices. Choose PIVOT, PIVOT_TWO or
+RANGE in Risk Execution before generating a mapping run to inspect those bases.
+
+The selected zone can show its pivot/range base, departure close, broken
+structure level, liquidity sweep, liquidity ahead of the zone, failed opposing
+zone, overlap on another timeframe, and first mitigation/subsequent return.
+Only evidence actually found is drawn; a departure is not labelled a BOS.
+The selected zone's lesson captions take priority over nearby-zone captions.
+Replay hides evidence until its knowledge time. An origin before loaded candles
+requires a run covering that earlier period for the full sequence.
+
+This is a chart inspection aid. It neither enables automatic trades nor changes
+the existing swing/BOS/CHoCH algorithm. Discretionary markings in the presentation
+may still differ from these documented mechanical definitions.

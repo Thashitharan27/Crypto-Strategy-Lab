@@ -23,14 +23,15 @@ REQUIREMENTS = {
 }
 
 
-def options(config):
+def options(config, *, collect_evidence=False):
     return dict(photon_zone_model=getattr(config, 'photon_zone_model', 'LEGACY'),
+                collect_evidence=collect_evidence,
                 photon_range_base_bars=getattr(config, 'photon_range_base_bars', 3),
                 **{key: getattr(config, key, False) for key in REQUIREMENTS})
 
 
 def enabled(opts):
-    return opts and (opts.get('photon_zone_model', 'LEGACY') != 'LEGACY'
+    return opts and (opts.get('collect_evidence',False) or opts.get('photon_zone_model', 'LEGACY') != 'LEGACY'
                      or any(opts.get(k, False) for k in REQUIREMENTS))
 
 
@@ -152,7 +153,7 @@ def index_data(data):
         if e['kind'] in ('INVALIDATED','RETIRED'):
             data['_lesson_ends'].setdefault(e['zoneId'],e['availableAt'])
         if e['kind']=='TOUCHED':data['_lesson_touches'].setdefault(e['zoneId'],[]).append(e)
-    data['_lesson_flip_events']=sorted((e['availableAt'],data['_lesson_births'][e['zoneId']]['kind'])
+    data['_lesson_flip_events']=sorted((e['availableAt'],data['_lesson_births'][e['zoneId']]['kind'],e['zoneId'])
         for e in data.get('events',()) if e['kind']=='INVALIDATED' and e['zoneId'] in data['_lesson_births']
         and any(t['availableAt']<e['availableAt'] for t in data['_lesson_touches'].get(e['zoneId'],())))
     data['_lesson_flip_times']=[x[0] for x in data['_lesson_flip_events']]
@@ -173,10 +174,15 @@ def evidence(zone, guides, at):
         guide['_lesson_bos_candidates']=[(e,swings.get(e['availableAt'],{}))
             for e in guide.get('events',()) if e['kind'] in ('BOS','TREND_CHANGE')]
         guide['_lesson_bos_at']={}
+        guide['_lesson_bos_info']={}
     if zone['id'] not in guide['_lesson_bos_at']:
-        guide['_lesson_bos_at'][zone['id']]=min((e['availableAt'] for e,s in guide['_lesson_bos_candidates']
+        matches=[e for e,s in guide['_lesson_bos_candidates']
             if e['direction']==sign and zone['availableAt']<=e['availableAt']
-            and s.get('fromParentTime',s.get('fromTime',float('inf')))<=zone['originTime']<=e['time']),default=float('inf'))
+            and s.get('fromParentTime',s.get('fromTime',float('inf')))<=zone['originTime']<=e['time']]
+        first=min(matches,key=lambda e:e['availableAt']) if matches else None
+        guide['_lesson_bos_at'][zone['id']]=first['availableAt'] if first else float('inf')
+        guide['_lesson_bos_info'][zone['id']]=dict(price=first.get('price'),time=first['time'],
+            fromTime=first.get('fromTime',zone['originTime']),availableAt=first['availableAt']) if first else None
     bos = zone.get('confirmedBy') in ('BOS','TREND_CHANGE') or guide['_lesson_bos_at'][zone['id']]<=at
     before = state_at(guide, zone['originTime'])
     pivot = before.get('internalLow' if sign==1 else 'internalHigh') if before else None
@@ -185,7 +191,8 @@ def evidence(zone, guides, at):
     # own-timeframe close failure during this zone's initiation leg.
     start=bisect_right(data['_lesson_flip_times'],zone['originTime']-1)
     end=bisect_right(data['_lesson_flip_times'],min(zone['availableAt'],at))
-    flip=any(kind!=zone['kind'] for _,kind in data['_lesson_flip_events'][start:end])
+    failure=next(((time,key) for time,kind,key in data['_lesson_flip_events'][start:end] if kind!=zone['kind']),None)
+    flip=failure is not None
     # Evaluate liquidity just before the return candle: a confirmed internal
     # pivot formed after zone birth, between the zone and approaching price.
     touch = touches[-1] if touches else None
@@ -203,10 +210,11 @@ def evidence(zone, guides, at):
         inducement=bool(native is not None and not any(
             liquidity['time'] < b['time'] and b['time']+guide['interval']<=cutoff
             and (b['low']<=liquidity['price'] if sign==1 else b['high']>=liquidity['price']) for b in native))
-    stacked = any(other['timeframe'] != tf and other['kind']==zone['kind']
+    stack = next((other for g in guides.values() if 'supplyDemand' in g for other in g['supplyDemand']['zones']
+        if other['timeframe'] != tf and other['kind']==zone['kind']
         and min(other['upper'],zone['upper']) > max(other['lower'],zone['lower'])
-        and active_at(other,g['supplyDemand'],at)
-        for g in guides.values() if 'supplyDemand' in g for other in g['supplyDemand']['zones'])
+        and active_at(other,g['supplyDemand'],at)),None)
+    stacked=stack is not None
     checks = dict(fresh=fresh,bos=bool(bos),flip=bool(flip),sweep=sweep,
         inducement=inducement,stacked=stacked,
         in_value=zone.get('creationLocation')==('DISCOUNT' if sign==1 else 'PREMIUM'))
@@ -215,8 +223,18 @@ def evidence(zone, guides, at):
         checks[key]=bool(s and s.get('trend')==sign)
     s=state_at(guides.get('15m',{'interval':900}),at)
     checks['15m_internal_aligned']=bool(s and s.get('internal')==sign)
+    reference=lambda z:{k:z[k] for k in ('id','timeframe','kind','lower','upper','originTime','availableAt')}
+    departure=state_at(guide,zone['availableAt'])
     return dict(checks=checks,liquidityLevel=liquidity['price'] if inducement else None,
-                touches=len(touches),availableAt=at)
+        liquidityTime=liquidity['time'] if inducement else None,
+        sweepLevel=pivot['price'] if sweep else None,sweepTime=pivot['time'] if sweep else None,
+        breakReference=guide['_lesson_bos_info'][zone['id']] if bos and guide['_lesson_bos_at'][zone['id']]<=at else None,
+        flipReference=dict(**reference(data['_lesson_births'][failure[1]]),failedAt=failure[0]) if failure else None,
+        stackReference=reference(stack) if stack else None,
+        departurePrice=departure.get('close') if departure else None,
+        returnTime=touch['candleTime'] if touch else None,
+        returnAvailableAt=touch['availableAt'] if touch else None,
+        touches=len(touches),availableAt=at)
 
 
 def required_pass(checks, opts):
@@ -244,8 +262,13 @@ def apply_to_guides(guides, natives, source, source_interval, opts):
         for e in data['events']:
             if e['kind']=='TOUCHED':by_zone.setdefault(e['zoneId'],[]).append(e['availableAt'])
         for z in data['zones']:
-            for at in [z['availableAt']]+by_zone.get(z['id'],[]):
-                proof=evidence(z,guides,at)
+            birth=evidence(z,guides,z['availableAt'])
+            times={z['availableAt'],*by_zone.get(z['id'],[])}
+            if opts.get('collect_evidence',False):
+                broken_at=g.get('_lesson_bos_at',{}).get(z['id'],float('inf'))
+                if isfinite(broken_at):times.add(broken_at)
+            for at in sorted(times):
+                proof=birth if at==z['availableAt'] else evidence(z,guides,at)
                 proof.update(zoneId=z['id'],eligible=required_pass(proof['checks'],opts))
                 quality.append(proof)
         data['qualityEvents']=sorted(quality,key=lambda e:e['availableAt'])

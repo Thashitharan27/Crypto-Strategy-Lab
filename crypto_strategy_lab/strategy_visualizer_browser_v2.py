@@ -324,10 +324,12 @@ body.structure-lines #day-layer{display:none}
           <label><input id="photon-zone-4h" type="checkbox" checked> 4H</label>
           <label><input id="photon-zone-15m" type="checkbox" checked> 15m</label>
           <label><input id="photon-zone-history" type="checkbox"> Include ended zones</label>
+          <label><input id="photon-lesson-show" type="checkbox"> Lesson drawings for selected zone</label>
         </div>
         <select id="photon-zone-select" aria-label="Supply demand zone to inspect"><option value="">Choose a supply / demand zone</option></select>
         <button id="photon-zone-focus" disabled>Focus selected zone</button>
         <div id="photon-zone-detail" role="status"></div>
+        <div id="photon-lesson-status" role="status">Select a zone and turn on Lesson drawings to inspect the chart sequence.</div>
       </details>
       <details id="photon-context-details"><summary>Weekly / daily context · shared replay clock</summary>
         <div id="photon-context-chart" aria-label="Weekly and daily structure overview"></div>
@@ -526,7 +528,7 @@ body.structure-lines #day-layer{display:none}
   });
   $('photon-labels').addEventListener('change',redrawOverlays);
   $('photon-developing').addEventListener('change',redrawOverlays);
-  for(const id of ['photon-range-show','photon-range-timeframe','photon-zones-show','photon-zone-1d','photon-zone-4h','photon-zone-15m','photon-zone-history','photon-zone-select'])$(id).addEventListener('change',redrawOverlays);
+  for(const id of ['photon-range-show','photon-range-timeframe','photon-zones-show','photon-zone-1d','photon-zone-4h','photon-zone-15m','photon-zone-history','photon-zone-select','photon-lesson-show'])$(id).addEventListener('change',redrawOverlays);
   $('photon-zone-panel').addEventListener('toggle',redrawOverlays);
   $('photon-zone-focus').addEventListener('click',()=>{
     const market=replayChartSource || marketPayload || sourcePayload;
