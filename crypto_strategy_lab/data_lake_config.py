@@ -446,6 +446,21 @@ class ExecutionConfig:
     photon_flexible_entries: bool = False
     photon_zone_reversal: bool = False
     photon_daily_zone_only: bool = False
+    photon_zone_model: str = "LEGACY"
+    photon_range_base_bars: int = 3
+    photon_fresh_zone_only: bool = False
+    photon_require_zone_bos: bool = False
+    photon_require_flip: bool = False
+    photon_require_sweep: bool = False
+    photon_require_inducement: bool = False
+    photon_require_stacking: bool = False
+    photon_require_zone_value: bool = False
+    photon_require_4h_alignment: bool = False
+    photon_require_daily_alignment: bool = False
+    photon_require_weekly_alignment: bool = False
+    photon_require_15m_internal_alignment: bool = False
+    photon_fixed_target_enabled: bool = False
+    photon_fixed_target_r: float = 3
     photon_legacy_entry_and_stop: bool = False
     photon_exit_on_15m_change: bool = False
     photon_hold_tp_until_15m_reversal: bool = False
@@ -533,6 +548,8 @@ class ResearchRunConfig:
     config_version: int = CONFIG_VERSION
 
     def validate(self, request=None) -> None:
+        from .photon_lesson import validate as validate_lesson
+        validate_lesson(self.execution)
         from crypto_strategy_lab.photon_trend import selected as photon_selected, validate_settings as validate_photon
         validate_photon(self.execution.photon_confirmation_minutes,self.execution.photon_retest_minutes,self.data.strategy_timeframe_minutes,photon_selected(self.strategy.profiles))
         from crypto_strategy_lab.supply_demand_retest import validate_settings

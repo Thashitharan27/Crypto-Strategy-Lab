@@ -313,22 +313,25 @@ def map_structure(bars, interval=900, strength=SWING_STRENGTH, qualification="PI
                 swingBreakRule="CLOSE_ONLY" if qualification == "CHOCH_PULLBACK" else "PIVOT_CLOSE")
 
 
-def build_mapping(bars, detail_start=None):
+def build_mapping(bars, detail_start=None, lesson_options=None):
     from crypto_strategy_lab.photon_zones import attach_ranges, build_zones
 
     frames = {"15m": (900, 0), "4h": (14400, 0), "1d": (86400, 0),
               "1w": (604800, 345600)}  # Monday 00:00 UTC (Unix epoch was Thursday).
     detail = bars if detail_start is None else [b for b in bars if b["time"] >= detail_start]
-    timeframes = {}
+    timeframes = {};natives={}
     for tf, (seconds, offset) in frames.items():
         native = detail if tf == "15m" else aggregate_closed(
             detail if tf == "4h" else bars, target_seconds=seconds, offset=offset)
         guide = map_structure(native, seconds, qualification="CHOCH_PULLBACK",
                               intrabars=detail if tf == "4h" else None)
         attach_ranges(guide)
+        natives[tf]=native
         if tf != "1w":
             guide["supplyDemand"] = build_zones(detail if tf in ("15m", "4h") else bars, native, guide, tf)
         timeframes[tf] = guide
+    from .photon_lesson import apply_to_guides
+    apply_to_guides(timeframes,natives,bars,900,lesson_options)
     return dict(strategy=MODE, mappingOnly=True, schemaVersion=2, contextDays=CONTEXT_DAYS,
                 lessons=["Market structure", "Multi-timeframe structure", "Premium/discount and supply/demand"],
                 qualification="Swing breaks require a close beyond the existing swing level; no preceding internal CHoCH is required. CHoCH remains separate internal-phase evidence. Experimental mapping for visual review.",

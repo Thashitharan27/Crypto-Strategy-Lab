@@ -1943,7 +1943,7 @@ class RuleStrategyBuilder(QWidget):
             self.summary.setText(
                 "Photon Parts 1 & 2 · No automatic entries · Manual simulated entries in Strategy Visualizer · Run on 15m. "
                 "Weekly/daily context above the 4H + 15m overlay; swing breaks use closes, internal CHoCH uses wicks. "
-                "Premium/discount and daily/4H/15m supply-demand layers are available in the visualizer. "
+                "Premium/discount and daily/4H/15m supply-demand layers are available in the visualizer. Choose zone models and quality requirements in Risk Execution → Photon supply & demand lesson. "
                 "Swing breaks require a candle close beyond the mapped high/low; no preceding CHoCH is required."
             )
             return
