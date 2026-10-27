@@ -26,6 +26,39 @@ function renderPhotonEntryReview(sd,cutoff=Infinity) {
 function cslPhotonEventBound(events,time,inclusive=false) {
   let lo=0,hi=events.length;while(lo<hi){const mid=(lo+hi)>>1;if(inclusive?events[mid].availableAt<=time:events[mid].availableAt<time)lo=mid+1;else hi=mid;}return lo;
 }
+function cslPhotonInternalLines(guide,cutoff,eventStart=-Infinity) {
+  // Internal reaction pivots are separate from BOS-confirmed swing anchors.
+  // Learn them only when first present in a completed-candle snapshot.
+  const groups=[[]],seen={high:null,low:null};let previousAt=null;
+  const snapshots=guide.snapshots||[],end=cslPhotonEventBound(snapshots,cutoff,true);
+  const gaps=new Set((guide.events||[]).filter(e=>e.kind==='GAP'&&e.availableAt<=cutoff).map(e=>e.availableAt));
+  for(let i=0;i<end;i++) {
+    const s=snapshots[i];
+    if(gaps.has(s.availableAt)||previousAt!=null&&s.availableAt-previousAt!==guide.interval||!s.internalHigh&&!s.internalLow) {
+      if(groups.at(-1).length)groups.push([]);seen.high=seen.low=null;
+    }
+    previousAt=s.availableAt;
+    const learned=[];
+    for(const [key,side] of [['high',1],['low',-1]]) {
+      const p=s[key==='high'?'internalHigh':'internalLow'];
+      if(!p||!Number.isFinite(p.time)||!Number.isFinite(p.price)||p.time>=s.availableAt)continue;
+      const identity=p.time+':'+p.price;
+      if(seen[key]!==identity){learned.push({...p,side,availableAt:s.availableAt});seen[key]=identity;}
+    }
+    learned.sort((a,b)=>a.time-b.time);
+    for(const p of learned) {
+      const line=groups.at(-1),last=line.at(-1);
+      // An outside candle cannot supply a guessed high/low ordering.
+      if(last&&p.time<=last.time){if(p.time===last.time&&p.side!==last.side)groups.push([]);continue;}
+      if(last?.side===p.side){if(p.side===1?p.price>=last.price:p.price<=last.price)line[line.length-1]=p;}
+      else line.push(p);
+    }
+  }
+  return groups.map(line=>{
+    const first=line.findIndex(p=>p.time>=eventStart);
+    return first<0?[]:line.slice(Math.max(0,first-1));
+  }).filter(line=>line.length>1);
+}
 function cslPhotonSwingLines(guide,cutoff,eventStart=-Infinity) {
   // Use origin times for geometry only after the event is known at the replay
   // clock. Never draw a forecast arrow or join structure across missing data.
@@ -220,6 +253,17 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     }
   };
   drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,height,placeLabel);
+  for(const tf of ['4h','15m']) {
+    if(!$('photon-internal-'+tf)?.checked)continue;
+    const guide=mapping.timeframes[tf];if(!guide)continue;
+    const color=tf==='4h'?'#e4b76c':'#5eead4',dash=tf==='4h'?'6 4':'2 4';
+    for(const segment of cslPhotonInternalLines(guide,cutoff,Math.max(bars[0]?.time??-Infinity,Number(visible?.from??-Infinity)))) {
+      let points=[];
+      const flush=()=>{if(points.length>1)make('polyline',{points:points.join(' '),fill:'none',stroke:color,'stroke-width':1.3,'stroke-dasharray':dash,'stroke-linejoin':'round','data-photon-internal':tf},tf+' internal reaction pivots; separate from confirmed swing structure');points=[];};
+      for(const p of segment){const cx=x(p.time),cy=candles.priceToCoordinate(p.price);if(cx==null||cy==null){flush();continue;}points.push(cx+','+cy);}
+      flush();
+    }
+  }
   // Reserve prominent labels before ordinary structure labels take the space.
   // Paint them last so candle paths and zone outlines cannot obscure them.
   const trendMarks=[];

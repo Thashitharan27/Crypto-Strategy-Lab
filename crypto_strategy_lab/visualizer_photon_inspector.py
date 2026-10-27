@@ -17,7 +17,7 @@ function initPhotonInspector() {
   layers.append($('photon-labels-wrap'),$('photon-developing-wrap'),$('photon-value-controls'),$('photon-zone-filters'));
   $('photon-labels-wrap').lastChild.textContent=' Break-level drawings';
   for(const id of ['photon-inspector-toggle','photon-details-toggle','photon-chart-only'])$(id).hidden=false;
-  const ids=['photon-view','photon-labels','photon-developing','photon-range-show','photon-range-timeframe',
+  const ids=['photon-internal-4h','photon-internal-15m','photon-view','photon-labels','photon-developing','photon-range-show','photon-range-timeframe',
     'photon-zones-show','photon-zone-1d','photon-zone-4h','photon-zone-15m','photon-zone-history','photon-lesson-show',
     'photon-label-density','photon-text-bos','photon-text-choch','photon-text-trend','photon-text-swings','photon-text-zones'];
   const key='csl.photon.chart-visibility.v1';
@@ -44,6 +44,7 @@ function initPhotonInspector() {
     const preset=$('photon-visibility-preset').value;
     if(preset==='CUSTOM')return;
     $('photon-view').value=preset==='CLEAN'?'CANDLES':'BOTH';
+    for(const tf of ['4h','15m'])$('photon-internal-'+tf).checked=preset==='ALL';
     for(const type of ['bos','choch','trend','swings','zones'])$('photon-text-'+type).checked=preset==='ALL'||preset==='STRUCTURE'&&type==='bos';
     $('photon-labels').checked=preset!=='CLEAN';$('photon-developing').checked=preset!=='CLEAN';
     $('photon-zones-show').checked=preset!=='CLEAN';$('photon-range-show').checked=preset==='ALL';
