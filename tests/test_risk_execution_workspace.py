@@ -30,6 +30,13 @@ def test_photon_selection_uses_actual_minutes_and_roundtrips_owned_controls():
         window.apply_config(original)
         assert window.build_config().execution.photon_legacy_entry_and_stop
         assert 'original entry and SL' in workspace.summary_label.text()
+        hold = window.execution_form.widgets['photon_hold_tp_until_15m_reversal']
+        assert not hold.isHidden() and not hold.isChecked()
+        hold.setChecked(True)
+        saved = window.build_config()
+        window.apply_config(saved)
+        assert window.build_config().execution.photon_hold_tp_until_15m_reversal
+        assert 'SL stays active' in workspace.summary_label.text()
         window.execution_form.widgets['photon_exit_on_15m_change'].setChecked(True)
         assert window.build_config().execution.photon_exit_on_15m_change
         for name in ('photon_target_4h', 'photon_flexible_entries'):

@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import replace
 import json
 from math import isfinite
+from bisect import bisect_right
 
 import numpy as np
 import pandas as pd
@@ -250,6 +251,8 @@ class PhotonTrendMixin:
         if self.config.photon_zone_reversal:
             from .photon_zone_reversal import zone_reversal_setups
             guides = prepare_context(bars, zone_reversal=True)
+            self.photon_15m_snapshots = guides['15m'].get('snapshots', ())
+            self.photon_15m_snapshot_times = [s['availableAt'] for s in self.photon_15m_snapshots]
             self.photon_setups, self.photon_order_live = zone_reversal_setups(
                 bars, self.atr_values, guides,
                 confirmation_minutes=self.config.photon_confirmation_minutes,
@@ -334,21 +337,57 @@ class PhotonTrendMixin:
             return super()._scan_exit(pos, i)
 
     def _photon_close_on_trend(self, pos, i):
-        if (getattr(self, "signal_strategy_mode", None) == MODE
-                and self.config.photon_zone_reversal and self.config.photon_exit_on_15m_change):
+        held = getattr(pos, 'photon_tp_hold_activated', False)
+        if (getattr(self, "signal_strategy_mode", None) == MODE and pos.is_open
+                and self.config.photon_zone_reversal and (self.config.photon_exit_on_15m_change or held)):
             from .trade import Side, ExitReason, ExitSource
             at = int(pd.Timestamp(self.times[i]).timestamp())
-            direction = self.photon_trend_exits.get(at)
+            direction = self._photon_15m_trend(at) if held else self.photon_trend_exits.get(at)
             if direction and pos.is_open and (direction == -1 if pos.side == Side.LONG else direction == 1):
                 opening = float(self.open[i])
                 long = pos.side == Side.LONG
                 stopped = opening <= pos.sl if long else opening >= pos.sl
                 reached = opening >= pos.tp if long else opening <= pos.tp
-                reason = ExitReason.SL if stopped else ExitReason.TP if reached else ExitReason.PHOTON_15M_TREND_CHANGE
+                reason = ExitReason.SL if stopped else ExitReason.TP if reached and not held else ExitReason.PHOTON_15M_TREND_CHANGE
                 slip = 1-self.config.slippage if long else 1+self.config.slippage
                 self._close_position(pos, i, opening*slip, reason, ExitSource.STRATEGY_OPEN, self.times[i])
                 return True
         return False
+
+    def _photon_15m_trend(self, at):
+        """Only the latest completed, non-stale 15m snapshot is eligible."""
+        j = bisect_right(self.photon_15m_snapshot_times, at)-1
+        if j < 0 or at >= self.photon_15m_snapshot_times[j]+900:
+            return 0
+        return self.photon_15m_snapshots[j].get('trend', 0)
+
+    def _maybe_exit_bar(self, pos, i, high, low, timestamp, source):
+        if not (getattr(self, 'signal_strategy_mode', None) == MODE and pos.is_open
+                and self.config.photon_zone_reversal and self.config.photon_hold_tp_until_15m_reversal):
+            return super()._maybe_exit_bar(pos, i, high, low, timestamp, source)
+        from .trade import Side
+        long = pos.side == Side.LONG
+        held = getattr(pos, 'photon_tp_hold_activated', False)
+        reached = high >= pos.tp if long else low <= pos.tp
+        stopped = low <= pos.sl if long else high >= pos.sl
+        fill_time = getattr(pos, 'fib_limit_fill_time', None)
+        limit_fill_bar = fill_time is not None and (
+            pd.Timestamp(timestamp) == pd.Timestamp(fill_time)
+            or (str(getattr(source, 'value', source)) == '15M_FALLBACK' and pos.entry_index == i))
+        at = int(pd.Timestamp(timestamp).timestamp())
+        if not held and reached and not stopped and not limit_fill_bar and self._photon_15m_trend(at) == (1 if long else -1):
+            pos.photon_tp_hold_activated = held = True
+            pos.photon_tp_first_hit_time = pd.Timestamp(timestamp)
+        if not held:
+            return super()._maybe_exit_bar(pos, i, high, low, timestamp, source)
+        # Disable only the TP trigger. Keep the original target in trade reports
+        # and preserve the normal stop-loss scanner on every subsequent candle.
+        target = pos.tp
+        try:
+            pos.tp = float('inf') if long else -float('inf')
+            return super()._maybe_exit_bar(pos, i, high, low, timestamp, source)
+        finally:
+            pos.tp = target
 
     def _profile_context(self,i):
         context=super()._profile_context(i)
@@ -393,6 +432,9 @@ class PhotonTrendMixin:
         if getattr(self,"signal_strategy_mode",None)==MODE:
             setup=getattr(pair,'photon_setup',None)
             row["supply_demand_setup"]=json.dumps(setup,allow_nan=False)
+            row['photon_hold_tp_until_15m_reversal'] = self.config.photon_hold_tp_until_15m_reversal
+            row['photon_tp_hold_activated'] = any(getattr(p, 'photon_tp_hold_activated', False) for p in positions)
+            row['photon_tp_first_hit_time'] = next((getattr(p, 'photon_tp_first_hit_time', None) for p in positions if getattr(p, 'photon_tp_hold_activated', False)), None)
             review=setup.get('review',{}) if setup else {}
             row['photon_entry_model']=setup.get('entryModel') if setup else None
             row['photon_review_status']=review.get('status','LEGACY_NOT_RECORDED')

@@ -348,3 +348,27 @@ unchanged. The saved manifest records the option for future reruns.
 The option defaults to off. Existing presets continue to use the current
 pullback retest entry and reversal-zone-first stop. The original model is kept
 in a separate frozen module to avoid silently changing historical reruns.
+
+## Hold beyond TP until the confirmed 15m trend reverses
+
+In Risk Execution, enable **After TP is reached, hold while 15m trend agrees;
+close on reversal**. The JSON/MCP field is
+`execution.photon_hold_tp_until_15m_reversal` (default `false`). It works with
+both the original and current Photon zone reversal entry models.
+
+When the original TP is touched, a long continues only if the last completed
+15m trend is bullish; a short continues only if it is bearish. Once activated,
+the TP trigger stays disabled even if price returns below the target. Close
+at the next 1m open after a confirmed opposing 15m trend, with normal slippage.
+Use only trend snapshots available when the price candle opens. Future 15m
+candles never authorize a hold. If the trend is opposing, neutral or unknown
+when TP is first touched, the normal TP remains in effect.
+
+The original SL stays active and takes priority on an opening stop crossing.
+No break-even or target profit lock is added. Ambiguous SL/TP candles retain
+the normal tie policy and cannot manufacture a hold. Limit-fill candles keep
+their existing conservative TP treatment. With no later reversal, normal
+end-of-data liquidation still applies. This setting does not close before TP;
+the separate **Close when the 15m trend changes against the trade** setting
+can still do so if enabled. Trade reports retain the original TP and record
+`photon_tp_hold_activated` and `photon_tp_first_hit_time`.
