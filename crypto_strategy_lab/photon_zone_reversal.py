@@ -10,7 +10,13 @@ from .photon_structure import valid_bar
 
 def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
                         stop_buffer_atr=.05, minimum_r=1., retest_minutes=60,
-                        legacy_entry_and_stop=False):
+                        legacy_entry_and_stop=False, daily_zone_only=False):
+    if daily_zone_only and '4h' in guides:
+        # Restrict entry context without mutating the caller's replay guides.
+        # Keep 4H structure/ranges for value checks and midpoint targets, and
+        # keep 15m zones for stop placement in both entry models.
+        guides = {**guides, '4h': {**guides['4h'],
+                  'supplyDemand': {'zones': (), 'events': ()}}}
     if legacy_entry_and_stop:
         from .photon_zone_reversal_legacy import zone_reversal_setups as original_setups
         return original_setups(bars, atr_values, guides,

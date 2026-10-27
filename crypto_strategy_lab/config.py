@@ -120,6 +120,7 @@ class BacktestConfig:
     photon_target_4h: bool = False
     photon_flexible_entries: bool = False
     photon_zone_reversal: bool = False
+    photon_daily_zone_only: bool = False
     photon_legacy_entry_and_stop: bool = False
     photon_exit_on_15m_change: bool = False
     photon_hold_tp_until_15m_reversal: bool = False
