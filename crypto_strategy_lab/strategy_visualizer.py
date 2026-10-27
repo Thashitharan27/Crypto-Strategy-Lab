@@ -2261,7 +2261,7 @@ class CompletedRunVisualizer:
         else:
             detail_start = _unix_seconds(_utc(self.seed.request.period_start) - pd.Timedelta(days=60))
             from .photon_lesson import options
-            self._photon_mapping_cache = build_mapping(bars, detail_start=detail_start, lesson_options=options(config.execution))
+            self._photon_mapping_cache = build_mapping(bars, detail_start=detail_start, lesson_options=options(getattr(config,'execution',None)))
         return self._photon_mapping_cache
 
     def _photon_chart_mapping_payload(self, chart_timeframe, candles, calculation_candles=None):
