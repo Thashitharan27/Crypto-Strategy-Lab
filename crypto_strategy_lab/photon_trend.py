@@ -35,10 +35,11 @@ def validate_settings(confirmation, retest, timeframe=None, active=False):
         raise ValueError("Photon 4H Trend requires actual 1m strategy candles")
 
 
-def prepare_context(bars, *, zone_reversal=False):
-    result={}
+def prepare_context(bars, *, zone_reversal=False, lesson_options=None):
+    result={};natives={}
     for tf,seconds,offset in (("1m",60,0),("15m",900,0),("4h",14400,0),("1d",86400,0),("1w",604800,345600)):
         native=bars if tf=="1m" else aggregate_closed(bars,60,seconds,offset)
+        natives[tf]=native
         guide=map_structure(native,seconds,qualification="CHOCH_PULLBACK",
                             intrabars=bars if zone_reversal and seconds>60 else None, intrabar_interval=60)
         if tf=="1m" and not zone_reversal:
@@ -49,7 +50,8 @@ def prepare_context(bars, *, zone_reversal=False):
             if tf in (("15m","4h","1d") if zone_reversal else ("15m","4h")):
                 guide["supplyDemand"]=build_zones(bars,native,guide,tf,source_interval=60)
         result[tf]=guide
-    return result
+    from .photon_lesson import apply_to_guides
+    return apply_to_guides(result,natives,bars,60,lesson_options)
 
 
 def resolve_retest(order, candle):
@@ -250,7 +252,8 @@ class PhotonTrendMixin:
         self.photon_trend_exits = {}
         if self.config.photon_zone_reversal:
             from .photon_zone_reversal import zone_reversal_setups
-            guides = prepare_context(bars, zone_reversal=True)
+            from .photon_lesson import options, qualify_setup, context_pass
+            guides = prepare_context(bars, zone_reversal=True, lesson_options=options(self.config))
             self.photon_15m_snapshots = guides['15m'].get('snapshots', ())
             self.photon_15m_snapshot_times = [s['availableAt'] for s in self.photon_15m_snapshots]
             self.photon_setups, self.photon_order_live = zone_reversal_setups(
@@ -259,7 +262,31 @@ class PhotonTrendMixin:
                 stop_buffer_atr=self.config.sd_stop_buffer_atr, minimum_r=self.config.sd_minimum_r,
                 retest_minutes=self.config.photon_retest_minutes,
                 legacy_entry_and_stop=self.config.photon_legacy_entry_and_stop,
-                daily_zone_only=self.config.photon_daily_zone_only)
+                daily_zone_only=self.config.photon_daily_zone_only,
+                fixed_target_r=self.config.photon_fixed_target_r if self.config.photon_fixed_target_enabled else None,
+                context_filter=lambda z,at:context_pass(z,guides,at,self.config))
+            for j,setup in enumerate(self.photon_setups):
+                if setup is None:continue
+                passed,proof=qualify_setup(setup,guides,self.config)
+                if not passed:self.photon_setups[j]=None
+                elif proof is not None:
+                    setup['lessonEvidence']=proof
+                    for name,value in proof['checks'].items():
+                        required=name in proof['required']
+                        setup['review']['checks'].append(dict(code='LESSON_'+name.upper(),
+                            label=name.replace('_',' ')+' ('+('required' if required else 'optional evidence')+')',
+                            passed=value,detail='Observed price-pattern evidence at the saved touch / decision; unknown fails a required check.'))
+                if passed and self.config.photon_fixed_target_enabled:
+                    sign=1 if setup['side']=='LONG' else -1
+                    setup['target']=setup['entry']+sign*self.config.photon_fixed_target_r*abs(setup['entry']-setup['stop'])
+                    setup['targetMode']='FIXED_R'
+                    setup['fixedTargetR']=self.config.photon_fixed_target_r
+                    setup['target4h']=setup['range4h']['equilibrium']
+                    for check in setup['review']['checks']:
+                        if check['code']=='MINIMUM_R':
+                            check.update(label='Minimum reward / risk to fixed-R TP',detail=f'{self.config.photon_fixed_target_r:g}R before costs; recalculated from the actual fill and original SL.')
+                        if check['code']=='4H_VALUE':check['detail']=f"Planned entry {setup['entry']:g}; 4H midpoint {setup['range4h']['equilibrium']:g}"
+            self.photon_order_live=[j if j is not None and self.photon_setups[j] is not None else None for j in self.photon_order_live]
             self.photon_trend_exits = {e['availableAt']: e['direction'] for e in guides['15m']['events']
                                        if e['kind'] == 'TREND_CHANGE'}
             return
@@ -393,7 +420,7 @@ class PhotonTrendMixin:
     def _profile_context(self,i):
         context=super()._profile_context(i)
         if getattr(self,"signal_strategy_mode",None)!=MODE or context is None:return context
-        return (*context[:3],replace(context[3],reward_risk_ratio=1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
+        return (*context[:3],replace(context[3],reward_risk_ratio=self.config.photon_fixed_target_r if self.config.photon_zone_reversal and self.config.photon_fixed_target_enabled else 1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
             partial_profit_enabled=False,partial_stop_enabled=False,trailing_enabled=False,break_even_enabled=False,
             r_step_trailing_enabled=False,atr_checkpoint_tp_extension_enabled=False,timeout_enabled=False))
 
@@ -408,11 +435,14 @@ class PhotonTrendMixin:
         reject=dict(passed=False,applied=False,reason="PHOTON_ENTRY_GEOMETRY_REJECTED",distance=None)
         if not s or side!=s["side"]:return reject
         entry=self._expected_entry_price(i,execution_i,side);sign=1 if side=="LONG" else -1
-        risk=sign*(entry-s["stop"]);reward=sign*(s["target"]-entry)
+        risk=sign*(entry-s["stop"])
+        fixed=self.config.photon_zone_reversal and self.config.photon_fixed_target_enabled
+        target=entry+sign*self.config.photon_fixed_target_r*risk if fixed else s['target']
+        reward=sign*(target-entry)
         if self.config.photon_zone_reversal and not s["range4h"]["low"] <= entry <= s["range4h"]["high"]:
             return reject
-        if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk<self.config.sd_minimum_r:return reject
-        return dict(passed=True,applied=True,reason=("PHOTON_"+s["stopSource"]+"_STOP") if self.config.photon_zone_reversal else "PHOTON_CONFIRMED_ORIGIN_STOP",distance=risk,stop_price=s["stop"],boundary_price=s["stop"],level_price=s["target"],distance_atr=risk/float(self.atr_values[i]),timeframe_minutes=1)
+        if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk+(1e-10 if fixed else 0)<self.config.sd_minimum_r:return reject
+        return dict(passed=True,applied=True,reason=("PHOTON_"+s["stopSource"]+"_STOP") if self.config.photon_zone_reversal else "PHOTON_CONFIRMED_ORIGIN_STOP",distance=risk,stop_price=s["stop"],boundary_price=s["stop"],level_price=target,distance_atr=risk/float(self.atr_values[i]),timeframe_minutes=1)
 
     def _sr_tp_filter_result(self,i,execution_i=None):
         if getattr(self,"signal_strategy_mode",None)==MODE:return True,None
@@ -420,12 +450,18 @@ class PhotonTrendMixin:
 
     def _apply_sr_take_profit(self,i,pair):
         if getattr(self,"signal_strategy_mode",None)!=MODE:return super()._apply_sr_take_profit(i,pair)
-        for pos in pair.positions():pos.tp=float(self.photon_setups[i]["target"])
+        for pos in pair.positions():
+            sign=1 if str(getattr(pos.side,'value',pos.side)).upper()=='LONG' else -1
+            pos.tp=(pos.entry_price+sign*self.config.photon_fixed_target_r*abs(pos.entry_price-self.photon_setups[i]['stop'])
+                    if self.config.photon_zone_reversal and self.config.photon_fixed_target_enabled else float(self.photon_setups[i]['target']))
 
     def _open_pair(self,i,entry_filter_passed=True,entry_filter_reason="Strategy profile passed",schedule=None):
         before=len(self.active_pairs);result=super()._open_pair(i,entry_filter_passed,entry_filter_reason,schedule)
         if getattr(self,"signal_strategy_mode",None)==MODE and len(self.active_pairs)>before:
             self.active_pairs[-1].photon_setup=deepcopy(self.photon_setups[schedule["indicator_index"] if schedule else i])
+            if self.config.photon_zone_reversal and self.config.photon_fixed_target_enabled:
+                self.active_pairs[-1].photon_setup['target']=self.active_pairs[-1].positions()[0].tp
+                self.active_pairs[-1].photon_setup['targetMode']='FIXED_R'
         return result
 
     def _build_result_row(self,pair,row_kind,positions):

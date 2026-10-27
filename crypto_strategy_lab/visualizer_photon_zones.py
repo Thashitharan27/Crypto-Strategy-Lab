@@ -17,6 +17,9 @@ function cslPhotonZoneView(guide,cutoff) {
     if(e.kind==='TOUCHED'){zone.touches++;zone.lastTouch=e.availableAt;if(!zone.endedAt)zone.state='TOUCHED';}
     else if(['INVALIDATED','RETIRED'].includes(e.kind)){zone.state=e.kind;zone.endedAt=e.availableAt;zone.endReason=e.reason || 'OWN_TIMEFRAME_CLOSE';zone.invalidatingClose=e.close ?? null;}
   }
+  for(const e of guide?.supplyDemand?.qualityEvents || []) {
+    if(e.availableAt<=cutoff&&result.has(e.zoneId))result.get(e.zoneId).lessonEvidence=e;
+  }
   return [...result.values()];
 }
 function cslPhotonNearbyZones(zones,price,selectedId=null,history=false,limit=2) {
@@ -39,7 +42,8 @@ function cslPhotonZoneText(zone,range) {
     ' · At creation: '+friendly(zone.creationLocation)+' · Current range: '+friendly(cslPhotonZoneLocation(zone,range))+
     (zone.lastTouch?' · Last touch '+fmtTime(zone.lastTouch):'')+
     (zone.endedAt?' · Ended '+fmtTime(zone.endedAt)+(zone.endReason==='DATA_GAP'?' (data gap)':' (own-timeframe close '+formatPrice(zone.invalidatingClose)+')'):'')+
-    ' · Boundaries: full wick range of the last opposing candle.';
+    ' · Boundaries: '+(zone.lessonModel?zone.lessonModel.toLowerCase().replaceAll('_',' ')+' base, full wicks':'full wick range of the last opposing candle')+'.'+
+    (zone.lessonEvidence?' · Lesson evidence at '+fmtTime(zone.lessonEvidence.availableAt)+': '+Object.entries(zone.lessonEvidence.checks).map(([k,v])=>k.replaceAll('_',' ')+': '+(v?'yes':'no / unknown')).join('; ')+'. Selected requirements: '+(zone.lessonEvidence.eligible?'pass':'fail')+(zone.lessonEvidence.liquidityLevel!=null?' · Liquidity pivot '+formatPrice(zone.lessonEvidence.liquidityLevel):''):'');
 }
 function drawPhotonValueAreas(mapping,cutoff,view,bars,interval,make,x,width,height,placeLabel) {
   const price=view['15m']?.state?.close ?? null;

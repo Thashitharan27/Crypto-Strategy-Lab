@@ -253,6 +253,39 @@ class RiskExecutionWorkspace(QWidget):
         self.account["sp_hold_minutes"].setRange(75,100000)
         layout.addWidget(self.sd_card)
 
+        self.lesson_card = FormCard("Photon — supply and demand lesson",
+            note="Zone models and quality evidence appear in the mapping visualizer. Checked requirements also filter automated zone reversal entries. Each quality check uses the documented price-pattern definition, not inferred institutional orders. Defaults preserve existing runs.")
+        for name,label in (("photon_zone_model","Zone construction"),("photon_range_base_bars","Candles in a range base"),("photon_fixed_target_r","Exact take profit (R)")):
+            self.lesson_card.add_field(name,label,self.account[name])
+        model=self.account['photon_zone_model']
+        for i,label in enumerate(('Legacy: last opposing candle + BOS','Single-candle pivot: any colour + departure close','Two-candle pivot: full combined wicks','Range: overlapping base + departure close')):
+            model.setItemText(i,label)
+        self.account['photon_range_base_bars'].setRange(2,12)
+        self.account['photon_fixed_target_r'].setRange(.01,100.)
+        self.account['photon_fixed_target_r'].setSuffix(' R')
+        controls=(
+            ('photon_fresh_zone_only','First mitigation only — reject previously touched zones'),
+            ('photon_require_zone_bos','Require the zone to have caused a swing BOS / trend change'),
+            ('photon_require_flip','Require opposing-zone interaction followed by failure (flip)'),
+            ('photon_require_sweep','Require a sweep of a known internal swing at the zone origin'),
+            ('photon_require_inducement','Require a known internal liquidity pivot ahead of the zone'),
+            ('photon_require_stacking','Require same-side zone overlap across timeframes'),
+            ('photon_require_zone_value','Demand entirely in discount / supply entirely in premium at creation'),
+            ('photon_require_4h_alignment','Require 4H swing trend to agree'),
+            ('photon_require_daily_alignment','Require Daily swing trend to agree'),
+            ('photon_require_weekly_alignment','Require Weekly swing trend to agree'),
+            ('photon_require_15m_internal_alignment','Require 15m internal structure to agree'),
+            ('photon_fixed_target_enabled','Use an exact fixed-R TP instead of the 4H midpoint'))
+        for name,label in controls:
+            self.account[name].setText(label)
+            self.lesson_card.add_control(name,self.account[name])
+        self.account['photon_fixed_target_enabled'].setToolTip('True fixed-R exit based on actual entry and original SL. Enabling this turns off both 15m trend-exit options. Choose a target at least as large as Minimum reward/risk.')
+        self.account['photon_fixed_target_enabled'].toggled.connect(self._lesson_fixed_changed)
+        for name in ('photon_hold_tp_until_15m_reversal','photon_exit_on_15m_change'):
+            self.account[name].toggled.connect(lambda checked: self.account['photon_fixed_target_enabled'].setChecked(False) if checked else None)
+        model.currentIndexChanged.connect(self.refresh_visibility)
+        layout.addWidget(self.lesson_card)
+
         self.entry_card = FormCard(
             "1. Entry Execution",
             note=(
@@ -692,6 +725,12 @@ class RiskExecutionWorkspace(QWidget):
     def _ema_920_selected(self) -> bool:
         return self._signal_strategy_mode() == "EMA_9_20_PULLBACK"
 
+    def _lesson_fixed_changed(self, checked):
+        if checked:
+            self.account['photon_hold_tp_until_15m_reversal'].setChecked(False)
+            self.account['photon_exit_on_15m_change'].setChecked(False)
+        self.refresh_visibility()
+
     def refresh_visibility(self, *_args) -> None:
         ema_920 = self._ema_920_selected()
         fvg = self._signal_strategy_mode() in {"FAIR_VALUE_GAP", "FVG_SIX_FACTOR"}
@@ -1018,6 +1057,11 @@ class RiskExecutionWorkspace(QWidget):
         confluence = self._signal_strategy_mode() == "TJR_CONFLUENCE"
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
         photon = self._signal_strategy_mode() == "PHOTON_4H_TREND"
+        mapping = self._signal_strategy_mode() == 'PHOTON_STRUCTURE_MAP'
+        self.lesson_card.setVisible(mapping or photon and self.account['photon_zone_reversal'].isChecked())
+        self.lesson_card.set_row_visible('photon_range_base_bars', self.account['photon_zone_model'].currentData()=='RANGE')
+        self.lesson_card.set_row_visible('photon_fixed_target_enabled', photon and self.account['photon_zone_reversal'].isChecked())
+        self.lesson_card.set_row_visible('photon_fixed_target_r', photon and self.account['photon_zone_reversal'].isChecked() and self.account['photon_fixed_target_enabled'].isChecked())
         supply_demand = photon or self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
         zone_reversal = photon and self.account["photon_zone_reversal"].isChecked()
         for name in ("photon_confirmation_minutes", "photon_retest_minutes", "photon_zone_reversal"):
@@ -1133,6 +1177,8 @@ class RiskExecutionWorkspace(QWidget):
                     exit_note = "After TP is reached with an aligned confirmed 15m trend, hold until that trend opposes the trade and close at the next 1m open. SL stays active. Opposing or unknown 15m trend at the first TP touch takes normal TP."
                     if execution.photon_exit_on_15m_change:
                         exit_note += " The separate early trend exit also closes on opposing 15m changes before TP."
+                if execution.photon_fixed_target_enabled:
+                    exit_note = f"Exact fixed TP: {execution.photon_fixed_target_r:g}R from actual entry and original SL; no trend-based exits."
                 if execution.photon_legacy_entry_and_stop:
                     self.summary_label.setText(f"{context_note}Photon original entry and SL: touch {zone_label} demand in discount or supply in premium, wait for a fresh 15m trend change and aligned 1m swing. Existing 1m alignment is accepted. Enter at the next 1m open; no pullback retest is required. SL beyond the nested 15m zone, or the touch extreme, plus {execution.sd_stop_buffer_atr:g} ATR. Freeze TP at the 4H midpoint; minimum {execution.sd_minimum_r:g}R is checked again at fill. {exit_note} Context expires after {execution.photon_confirmation_minutes} minutes. Simulated backtest trades.")
                     return

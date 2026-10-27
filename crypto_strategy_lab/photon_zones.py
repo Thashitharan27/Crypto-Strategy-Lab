@@ -95,6 +95,20 @@ separate from price invalidation. Consecutive bars inside a zone are one visit.
         zones.append(zone)
         births[zone["availableAt"]].append(zone)
 
+    return zone_lifecycle(source, native, guide, zones, source_interval)
+
+
+def zone_lifecycle(source, native, guide, zones, source_interval=900):
+    """Shared causal lifecycle for legacy and lesson-derived zone origins."""
+    if any('lessonModel' in z for z in zones):
+        from .photon_lesson import indexed_lifecycle
+        return indexed_lifecycle(source,native,guide,zones,source_interval)
+    from .photon_structure import valid_bar
+    native_closes = {bar['time']+guide['interval']: bar for bar in native}
+    births = defaultdict(list)
+    for zone in zones:
+        births[zone['availableAt']].append(zone)
+    changes = []
     active, inside = {}, set()
     previous_time = None
     for candle in source:

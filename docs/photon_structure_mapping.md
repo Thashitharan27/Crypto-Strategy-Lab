@@ -1,5 +1,9 @@
 # Photon Market Structure — Structure, Premium/Discount and Supply/Demand
 
+Optional lesson-derived zone models, quality requirements and exact fixed-R
+exits are documented in [Supply and demand lesson options](photon_supply_demand_lesson.md).
+The legacy defaults below remain available unchanged.
+
 **Rule basis:** the chart uses weekly/daily context and close-confirmed swing
 breaks without a preceding internal CHoCH requirement on any timeframe. See
 [the reference sequences and rule audit](photon_presenter_reference.md) for the

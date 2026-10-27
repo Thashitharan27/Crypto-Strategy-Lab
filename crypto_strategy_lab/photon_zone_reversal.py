@@ -10,7 +10,8 @@ from .photon_structure import valid_bar
 
 def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
                         stop_buffer_atr=.05, minimum_r=1., retest_minutes=60,
-                        legacy_entry_and_stop=False, daily_zone_only=False):
+                        legacy_entry_and_stop=False, daily_zone_only=False, fixed_target_r=None,
+                        context_filter=None):
     if daily_zone_only and '4h' in guides:
         # Restrict entry context without mutating the caller's replay guides.
         # Keep 4H structure/ranges for value checks and midpoint targets, and
@@ -21,7 +22,8 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
         from .photon_zone_reversal_legacy import zone_reversal_setups as original_setups
         return original_setups(bars, atr_values, guides,
                                confirmation_minutes=confirmation_minutes,
-                               stop_buffer_atr=stop_buffer_atr, minimum_r=minimum_r)
+                               stop_buffer_atr=stop_buffer_atr, minimum_r=minimum_r,
+                               fixed_target_r=fixed_target_r, context_filter=context_filter)
     from .photon_trend import MODE, validate_settings, resolve_retest
     validate_settings(confirmation_minutes, retest_minutes)
     if len(bars) != len(atr_values):
@@ -100,6 +102,7 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
         if campaign is None:
             matches = [zones[k] for k in new_visits if k in zones
                        and zones[k]['timeframe'] in ('1d', '4h')
+                       and (context_filter is None or context_filter(zones[k],at))
                        and (b['low'] < bounds['equilibrium'] if zones[k]['kind'] == 'DEMAND'
                             else b['high'] > bounds['equilibrium'])]
             if matches:
@@ -168,8 +171,10 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
         if not isfinite(av) or av <= 0:
             continue
         stop = boundary-sign*stop_buffer_atr*av
-        risk, reward = sign*(entry-stop), sign*(target-entry)
-        if stop <= 0 or risk <= 0 or reward/risk < minimum_r:
+        risk=sign*(entry-stop)
+        if fixed_target_r is not None:target=entry+sign*fixed_target_r*risk
+        reward=sign*(target-entry)
+        if stop <= 0 or risk <= 0 or reward/risk+(1e-10 if fixed_target_r is not None else 0) < minimum_r:
             continue
         zone_source = parent or context
         zone = dict(bottom=zone_source['lower'], top=zone_source['upper'],
@@ -200,7 +205,7 @@ def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
                           alignmentAt=campaign['alignmentAt'], stopSource='15M_ZONE' if parent else 'TOUCH_EXTREME',
                           stopBoundary=boundary, touchExtreme=campaign['extreme'],
                           range4h=deepcopy(bounds), range15m=deepcopy(campaign['leg']),
-                          targetMode='4H_MIDPOINT', target4h=target,
+                          targetMode='FIXED_R' if fixed_target_r is not None else '4H_MIDPOINT', target4h=bounds['equilibrium'],
                           review=dict(status='PREFERRED_ALIGNMENT', checks=checks, mismatches=[]),
                           narrative={tf: dict(trend=s['trend'], internal=s.get('internal', 0), availableAt=s['availableAt'])
                                      for tf, s in current.items()})
