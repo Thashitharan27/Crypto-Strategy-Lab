@@ -37,6 +37,12 @@ def test_photon_selection_uses_actual_minutes_and_roundtrips_owned_controls():
         window.apply_config(saved)
         assert window.build_config().execution.photon_hold_tp_until_15m_reversal
         assert 'SL stays active' in workspace.summary_label.text()
+        daily = window.execution_form.widgets['photon_daily_zone_only']
+        assert not daily.isHidden() and not daily.isChecked()
+        daily.setChecked(True)
+        window.apply_config(window.build_config())
+        assert window.build_config().execution.photon_daily_zone_only
+        assert 'Daily zones only' in workspace.summary_label.text()
         window.execution_form.widgets['photon_exit_on_15m_change'].setChecked(True)
         assert window.build_config().execution.photon_exit_on_15m_change
         for name in ('photon_target_4h', 'photon_flexible_entries'):

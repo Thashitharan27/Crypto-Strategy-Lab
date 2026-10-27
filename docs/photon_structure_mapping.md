@@ -372,3 +372,17 @@ end-of-data liquidation still applies. This setting does not close before TP;
 the separate **Close when the 15m trend changes against the trade** setting
 can still do so if enabled. Trade reports retain the original TP and record
 `photon_tp_hold_activated` and `photon_tp_first_hit_time`.
+
+## Require a Daily supply/demand zone touch
+
+Enable **Require a Daily supply/demand zone touch** in Risk Execution to allow
+only confirmed Daily zones as the entry context. Longs need a Daily demand
+zone touch; shorts need a Daily supply zone touch. A 4H-only touch cannot start
+an entry campaign. The Daily zone must be known, active and actually touched;
+the presence of an unrelated Daily zone is insufficient.
+
+The JSON/MCP field is `execution.photon_daily_zone_only` (default `false`).
+Off retains the existing Daily-or-4H rule. The filter applies to both original
+and current Photon zone reversal entries. The 4H value/range and midpoint
+target remain in use, and 15m zones remain available for stop placement. The
+saved entry evidence identifies the Daily context zone used by each trade.
