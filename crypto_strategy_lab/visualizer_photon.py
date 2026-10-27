@@ -1,8 +1,9 @@
 """Replay-safe presentation of the Python Photon mapping snapshots."""
 
 from crypto_strategy_lab.visualizer_photon_zones import PHOTON_ZONE_HELPERS
+from crypto_strategy_lab.visualizer_photon_inspector import PHOTON_INSPECTOR_HELPERS
 
-PHOTON_HELPERS = PHOTON_ZONE_HELPERS + r"""
+PHOTON_HELPERS = PHOTON_INSPECTOR_HELPERS + PHOTON_ZONE_HELPERS + r"""
 function cslPhotonReviewView(sd,cutoff=Infinity) {
   if(sd?.strategy!=='PHOTON_4H_TREND' || sd.status!=='AVAILABLE' || sd.signalAvailableAt>cutoff)return null;
   const review=sd.review;
@@ -130,6 +131,7 @@ function cslPhotonEventText(tf,e) {
 }
 function drawPhotonContext(mapping,cutoff,view,bars) {
   const strip=$('photon-context-strip');if(!strip)return;
+  const full=$('photon-context-full');if(full)full.replaceChildren();
   strip.replaceChildren();
   for(const row of cslPhotonNarrative(view)) {
     const box=document.createElement('div');box.className='photon-context-state';
@@ -140,6 +142,7 @@ function drawPhotonContext(mapping,cutoff,view,bars) {
     box.title=row.availableAt?'Last completed candle: '+fmtTime(row.availableAt):'Insufficient completed structure in available history';
     const historyStart=mapping.timeframes[row.tf]?.historyStart;
     if(historyStart!=null)box.title+=' · Structure history starts: '+fmtTime(historyStart);
+    if(full)full.appendChild(box.cloneNode(true));
     strip.appendChild(box);
   }
   const select=$('photon-event-select'),previous=select.value;
@@ -220,9 +223,11 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   // Reserve prominent labels before ordinary structure labels take the space.
   // Paint them last so candle paths and zone outlines cannot obscure them.
   const trendMarks=[];
-  if(!showLines || $('photon-labels')?.checked)for(const tf of displayFrames) {
+  for(const tf of displayFrames) {
     for(const e of view[tf]?.events || []) {
       if(e.kind!=='TREND_CHANGE')continue;
+      const showBanner=cslPhotonTextVisible(tf,e,view[tf].events);
+      if(!showBanner&&!$('photon-labels')?.checked)continue;
       const cx=x(e.time),cy=candles.priceToCoordinate(e.price);
       if(cx==null||cx<0||cx>width||cy==null||cy<0||cy>height)continue;
       const up=e.direction===1,color=up?'#34d399':'#fb7185';
@@ -231,11 +236,10 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
       const left=Math.max(3,Math.min(width-w-3,cx+10));
       let box=null;
       const offsets=up?[-34,14,-62,42,-90,70]:[14,-34,42,-62,70,-90];
-      for(const offset of offsets) {
+      if(showBanner)for(const offset of offsets) {
         const top=cy+offset;
         if(top<3||top+h>height-3)continue;
         const candidate={x:left,y:top,w,h};
-        if(!box)box=candidate;
         if(!labelBoxes.some(b=>left<b.x+b.w&&left+w>b.x&&top<b.y+b.h&&top+h>b.y)){box=candidate;break;}
       }
       if(box)labelBoxes.push({...box,x:box.x-3,y:box.y-3,w:w+6,h:h+6});
@@ -279,14 +283,14 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
     if(!s){summary.push(name+': waiting for completed candles');continue;}
     const direction=s.trend===1?'Bullish':s.trend===-1?'Bearish':'Unknown';
     summary.push(name+': '+direction+' · '+s.phase.toLowerCase().replaceAll('_',' '));
-    if(showLines && !$('photon-labels')?.checked)continue;
+    const drawLevels=$('photon-labels')?.checked;
     for(const [key,p] of [['high',s.high],['low',s.low]]) {
       if(!p)continue;const y=candles.priceToCoordinate(p.price);if(y==null || y<0 || y>height)continue;
       const left=x(p.time) ?? 0,right=x(cutoff-interval) ?? width,color=tf==='4h'?'#fbbf24':tf==='1m'?'#2dd4bf':'#60a5fa';
       const text=name+' '+(p.strong?'Strong ':s.trend?'Weak ':'Initial ')+key+(p.confirmed?'':mapping.timeframes[tf].swingBreakRule==='CLOSE_ONLY'?' (awaiting close break)':p.eligible?' (pullback candidate)':' (developing)');
-      make('line',{x1:left,x2:right,y1:y,y2:y,stroke:color,'stroke-width':tf==='4h'?2:1,'stroke-dasharray':p.strong?'none':'5 4'},text+' '+formatPrice(p.price));
-      if(showLines)placeLabel(name+' '+(p.strong?'strong ':'weak ')+(key==='high'?'H':'L'),right-100,y,tf==='4h'?'#f8fafc':tf==='1m'?'#2dd4bf':'#72a7f5',text+' '+formatPrice(p.price));
-      else make('text',{x:Math.max(5,right-260),y:Math.max(12,y+(key==='high'?-6:15)),fill:color,'font-size':11,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},text,text+' '+formatPrice(p.price));
+      if(drawLevels)make('line',{x1:left,x2:right,y1:y,y2:y,stroke:color,'stroke-width':tf==='4h'?2:1,'stroke-dasharray':p.strong?'none':'5 4'},text+' '+formatPrice(p.price));
+      if($('photon-text-swings')?.checked!==false&&showLines)placeLabel(name+' '+(p.strong?'strong ':'weak ')+(key==='high'?'H':'L'),right-100,y,tf==='4h'?'#f8fafc':tf==='1m'?'#2dd4bf':'#72a7f5',text+' '+formatPrice(p.price));
+      else if($('photon-text-swings')?.checked!==false)make('text',{x:Math.max(5,right-260),y:Math.max(12,y+(key==='high'?-6:15)),fill:color,'font-size':11,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},text,text+' '+formatPrice(p.price));
     }
     if($('photon-labels')?.checked)for(const [key,p] of [['high',s.internalHigh],['low',s.internalLow]]) {
       if(!p)continue;const cy=candles.priceToCoordinate(p.price),left=x(p.time),right=x(cutoff-interval);
@@ -299,13 +303,14 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
       if(e.kind==='TREND_CHANGE')continue; // Highlighted after all quiet overlays.
       const cx=x(e.time),y=candles.priceToCoordinate(e.price);if(cx==null||cx<0||cx>width||y==null||y<0||y>height)continue;
       const color=showLines?(tf==='4h'?'#f8fafc':tf==='1m'?'#2dd4bf':'#72a7f5'):e.direction===1?'#34d399':'#fb7185';
-      if(showLines && ['BOS','TREND_CHANGE','CHOCH'].includes(e.kind)) {
+      if(drawLevels && ['BOS','TREND_CHANGE','CHOCH'].includes(e.kind)) {
         const left=x(e.fromTime) ?? (e.fromTime<bars[0].time?0:null);if(left!=null)make('line',{x1:left,x2:cx,y1:y,y2:y,stroke:color,'stroke-width':1,'stroke-dasharray':e.kind==='CHOCH'?'3 3':'none','stroke-opacity':.6},tf+' '+e.kind+' '+formatPrice(e.price));
       }
       if(showLines && ['SWING','PIVOT'].includes(e.kind))continue;
       const label=name+' '+(e.kind==='TREND_CHANGE'?'Trend change':e.kind==='CHOCH'?'CHoCH':e.label);
       const title=label+' · known '+fmtTime(e.availableAt)+' · level origin '+fmtTime(e.fromTime);
-      make('circle',{cx,cy:y,r:3,fill:color},title);
+      if(drawLevels)make('circle',{cx,cy:y,r:3,fill:color},title);
+      if(!cslPhotonTextVisible(tf,e,events))continue;
       if(showLines)placeLabel(label,cx+4,y,color,title);
       else make('text',{x:cx+4,y:y+(e.direction===1?-8:15),fill:color,'font-size':10,'paint-order':'stroke',stroke:'#0f1720','stroke-width':3},title,label);
     }
@@ -318,7 +323,7 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   drawPhotonContext(mapping,cutoff,view,bars);
   const tf=$('photon-event-timeframe')?.value,guide=mapping.timeframes[tf];
   const selected=guide?.events.find(e=>e.availableAt<=cutoff&&tf+':'+e.availableAt+':'+e.kind+':'+e.direction===$('photon-event-select')?.value);
-  if(selected&&displayFrames.includes(tf)) {
+  if(selected&&displayFrames.includes(tf)&&($('photon-labels')?.checked||$('photon-event-select')?.dataset.pinned==='true')) {
     const left=x(selected.fromTime),right=x(selected.time),cy=candles.priceToCoordinate(selected.price);
     if(left!=null&&right!=null&&cy!=null&&right>=0&&right<=width&&cy>=0&&cy<=height) {
       make('line',{x1:left,x2:right,y1:cy,y2:cy,stroke:'#e4b76c','stroke-width':2.5,'stroke-dasharray':selected.kind==='CHOCH'?'4 3':'none'},cslPhotonEventText(tf,selected));
@@ -328,9 +333,9 @@ function drawPhotonMapping(mapping,cutoff,bars,interval,layer) {
   for(const {e,cx,cy,up,color,label,box} of trendMarks) {
     const title=label+' · confirmed at candle close '+fmtTime(e.availableAt)+' · broken level '+formatPrice(e.price)+' · origin '+fmtTime(e.fromTime);
     const left=x(e.fromTime) ?? (e.fromTime<bars[0].time?0:null);
-    if(left!=null)make('line',{x1:left,x2:cx,y1:cy,y2:cy,stroke:color,'stroke-width':2.5},title);
+    if(left!=null&&$('photon-labels')?.checked)make('line',{x1:left,x2:cx,y1:cy,y2:cy,stroke:color,'stroke-width':2.5},title);
     const points=up?`${cx},${cy-7} ${cx-7},${cy+6} ${cx+7},${cy+6}`:`${cx},${cy+7} ${cx-7},${cy-6} ${cx+7},${cy-6}`;
-    make('polygon',{points,fill:color,stroke:'#0b1220','stroke-width':1.5},title);
+    if($('photon-labels')?.checked)make('polygon',{points,fill:color,stroke:'#0b1220','stroke-width':1.5},title);
     if(box) {
       make('line',{x1:cx,x2:box.x,y1:cy,y2:box.y+box.h/2,stroke:color,'stroke-width':1,'stroke-opacity':.8},title);
       make('rect',{x:box.x,y:box.y,width:box.w,height:box.h,rx:4,fill:up?'#064e3b':'#7f1d1d',stroke:color,'stroke-width':1.2},title);
