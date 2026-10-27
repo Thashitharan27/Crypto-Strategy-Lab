@@ -174,6 +174,41 @@ def test_new_preset_roundtrip_and_old_default_unchanged():
     assert not ResearchRunConfig().execution.photon_zone_reversal
 
 
+@pytest.mark.parametrize('short', [False, True])
+def test_original_option_uses_existing_swing_alignment_and_original_stop(short):
+    bars, guides = scenario(short)
+    t = bars[0]['time']
+    # A fresh reversal zone outside the original context must not replace the
+    # original nested-zone stop, even though current stops prefer it.
+    guides['15m']['supplyDemand']['zones'].append(dict(
+        id='fresh', timeframe='15m', kind='SUPPLY' if short else 'DEMAND',
+        availableAt=t+180, originTime=t+120,
+        lower=111 if short else 106, upper=114 if short else 109))
+    signals, live = zone_reversal_setups(bars, np.ones(len(bars)), guides,
+                                       minimum_r=.1, legacy_entry_and_stop=True)
+    assert [i for i, s in enumerate(signals) if s] == [2]
+    s = signals[2]
+    assert s['entryModel'] == 'HTF_ZONE_REVERSAL'
+    assert s.get('entryExecution') != 'LIMIT_RETEST'
+    assert s['entry'] == bars[2]['close']
+    assert s['parentZone']['id'] == 'nested'
+    assert s['stop'] == pytest.approx(126.05 if short else 93.95)
+    assert live[2] == 2 and live[3] is None
+    for end in range(1, len(bars)+1):
+        assert zone_reversal_setups(bars[:end], np.ones(end), guides,
+            minimum_r=.1, legacy_entry_and_stop=True) == (signals[:end], live[:end])
+
+
+def test_original_preset_survives_json_and_native_config_roundtrip():
+    from crypto_strategy_lab.data_lake_config import load_data_lake_config, ResearchRunConfig, normalize_data_lake_config
+    from crypto_strategy_lab.research_adapters import native_simulator_config
+    original = load_data_lake_config('config/data_lake/Photon_Original_Entry_SL_68c5fa4f.json')
+    original = normalize_data_lake_config(json.loads(json.dumps(asdict(original))))
+    native = native_simulator_config(original.data, original.features, original.strategy, original.execution)
+    assert native.photon_legacy_entry_and_stop and native.photon_zone_reversal
+    assert not ResearchRunConfig().execution.photon_legacy_entry_and_stop
+
+
 def test_real_context_retains_minute_swings_and_daily_zones_without_future_bars():
     from crypto_strategy_lab.photon_trend import prepare_context
     t=1767225600

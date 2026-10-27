@@ -254,7 +254,8 @@ class PhotonTrendMixin:
                 bars, self.atr_values, guides,
                 confirmation_minutes=self.config.photon_confirmation_minutes,
                 stop_buffer_atr=self.config.sd_stop_buffer_atr, minimum_r=self.config.sd_minimum_r,
-                retest_minutes=self.config.photon_retest_minutes)
+                retest_minutes=self.config.photon_retest_minutes,
+                legacy_entry_and_stop=self.config.photon_legacy_entry_and_stop)
             self.photon_trend_exits = {e['availableAt']: e['direction'] for e in guides['15m']['events']
                                        if e['kind'] == 'TREND_CHANGE'}
             return

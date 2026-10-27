@@ -9,7 +9,13 @@ from .photon_structure import valid_bar
 
 
 def zone_reversal_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
-                        stop_buffer_atr=.05, minimum_r=1., retest_minutes=60):
+                        stop_buffer_atr=.05, minimum_r=1., retest_minutes=60,
+                        legacy_entry_and_stop=False):
+    if legacy_entry_and_stop:
+        from .photon_zone_reversal_legacy import zone_reversal_setups as original_setups
+        return original_setups(bars, atr_values, guides,
+                               confirmation_minutes=confirmation_minutes,
+                               stop_buffer_atr=stop_buffer_atr, minimum_r=minimum_r)
     from .photon_trend import MODE, validate_settings, resolve_retest
     validate_settings(confirmation_minutes, retest_minutes)
     if len(bars) != len(atr_values):
