@@ -136,3 +136,22 @@ use Details to inspect its event text. Lesson captions retain priority.
 **Chart only** closes both side panels and toggles the compact trend row.
 Visibility choices are remembered in browser storage when available; they do
 not edit a report, strategy configuration or trade calculation.
+
+
+## Optional internal structure lines
+
+In **Layers & labels → Internal structure (optional)**, independently enable
+**4H internal line** (thin amber dashed) and **15m internal line** (thin teal
+dotted). Both default off and are remembered with the other chart choices.
+They can be shown with candles alone or alongside the main white/blue swing
+paths. Text labels remain independently controlled. Clean, Structure and Lesson
+presets turn these optional paths off; All details turns both on.
+
+These paths connect changes to the existing internal high/low reaction pivots,
+not BOS-confirmed swing anchors. A turn becomes visible only when first recorded
+in a completed native-timeframe snapshot; replay geometry uses its original
+wick time after that confirmation. Missing data breaks the path, and unknown
+same-candle high/low ordering is not joined. The existing treatment of outside
+candles remains unchanged. A larger swing may therefore stay fixed while the
+internal path shows its intervening reactions. No entry or swing-trend rule is
+changed by these presentation controls.

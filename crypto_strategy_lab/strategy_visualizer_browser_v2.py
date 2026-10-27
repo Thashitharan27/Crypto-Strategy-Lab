@@ -447,6 +447,11 @@ body.photon-chart-focus #photon-context-strip{display:none}
       </nav>
       <section id="photon-inspector-layers" class="inspector-body" role="tabpanel" aria-labelledby="photon-tab-layers">
         <label>View preset <select id="photon-visibility-preset"><option value="CUSTOM">Custom</option><option value="CLEAN">Clean</option><option value="STRUCTURE" selected>Structure</option><option value="LESSON">Lesson</option><option value="ALL">All details</option></select></label>
+        <fieldset><legend>Internal structure (optional)</legend>
+          <label><input id="photon-internal-4h" type="checkbox"> 4H internal line · amber dashed</label>
+          <label><input id="photon-internal-15m" type="checkbox"> 15m internal line · teal dotted</label>
+          <p class="muted">Internal reaction pivots inside the larger swing range. These lines do not change the swing trend.</p>
+        </fieldset>
         <fieldset><legend>Text labels</legend>
           <label><input id="photon-text-bos" type="checkbox" checked> BOS / swing breaks</label>
           <label><input id="photon-text-choch" type="checkbox"> Internal CHoCH</label>
