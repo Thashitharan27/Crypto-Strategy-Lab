@@ -207,6 +207,7 @@ def test_original_preset_survives_json_and_native_config_roundtrip():
     native = native_simulator_config(original.data, original.features, original.strategy, original.execution)
     assert native.photon_legacy_entry_and_stop and native.photon_zone_reversal
     assert not ResearchRunConfig().execution.photon_legacy_entry_and_stop
+    assert not ResearchRunConfig().execution.photon_hold_tp_until_15m_reversal
 
 
 def test_real_context_retains_minute_swings_and_daily_zones_without_future_bars():

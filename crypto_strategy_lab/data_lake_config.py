@@ -447,6 +447,7 @@ class ExecutionConfig:
     photon_zone_reversal: bool = False
     photon_legacy_entry_and_stop: bool = False
     photon_exit_on_15m_change: bool = False
+    photon_hold_tp_until_15m_reversal: bool = False
     ema_reversal_target_r: float = 1.0
     ema_reversal_min_gap_atr: float = 0.5
     fvg_reject_ema100_in_tp: bool = False

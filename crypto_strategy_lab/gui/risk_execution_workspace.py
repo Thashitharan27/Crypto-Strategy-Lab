@@ -162,6 +162,9 @@ class RiskExecutionWorkspace(QWidget):
         self.sd_card.add_control("photon_legacy_entry_and_stop", self.account["photon_legacy_entry_and_stop"])
         self.account["photon_exit_on_15m_change"].setText("Close when the 15m trend changes against the trade")
         self.sd_card.add_control("photon_exit_on_15m_change", self.account["photon_exit_on_15m_change"])
+        self.account["photon_hold_tp_until_15m_reversal"].setText("After TP is reached, hold while 15m trend agrees; close on reversal")
+        self.account["photon_hold_tp_until_15m_reversal"].setToolTip("Long: if the last completed 15m trend is bullish when TP is touched, hold until it confirms bearish. Short: reverse the directions. SL stays active. Uses the next 1m open after confirmation. If 15m trend is opposing or unknown at TP, take the normal TP. Does not close before TP unless the separate early trend-exit option is enabled.")
+        self.sd_card.add_control("photon_hold_tp_until_15m_reversal", self.account["photon_hold_tp_until_15m_reversal"])
         self.account["photon_target_4h"].setText("Target 4H swing instead of the first 15m swing objective")
         self.sd_card.add_control("photon_target_4h",self.account["photon_target_4h"])
         self.account["photon_flexible_entries"].setText("Flexible candidates — show value and structure mismatches for manual review")
@@ -1017,6 +1020,7 @@ class RiskExecutionWorkspace(QWidget):
         for name in ("photon_confirmation_minutes", "photon_retest_minutes", "photon_zone_reversal"):
             self.sd_card.set_row_visible(name, photon)
         self.sd_card.set_row_visible("photon_exit_on_15m_change", zone_reversal)
+        self.sd_card.set_row_visible("photon_hold_tp_until_15m_reversal", zone_reversal)
         self.sd_card.set_row_visible("photon_legacy_entry_and_stop", zone_reversal)
         self.sd_card.set_row_visible("photon_retest_minutes", photon and not (zone_reversal and self.account["photon_legacy_entry_and_stop"].isChecked()))
         for name in ("photon_target_4h", "photon_flexible_entries"):
@@ -1119,6 +1123,10 @@ class RiskExecutionWorkspace(QWidget):
         if self._signal_strategy_mode() == "PHOTON_4H_TREND":
             if execution.photon_zone_reversal:
                 exit_note = "Close at the next 1m open after an opposing 15m trend change." if execution.photon_exit_on_15m_change else "Exit at SL or TP."
+                if execution.photon_hold_tp_until_15m_reversal:
+                    exit_note = "After TP is reached with an aligned confirmed 15m trend, hold until that trend opposes the trade and close at the next 1m open. SL stays active. Opposing or unknown 15m trend at the first TP touch takes normal TP."
+                    if execution.photon_exit_on_15m_change:
+                        exit_note += " The separate early trend exit also closes on opposing 15m changes before TP."
                 if execution.photon_legacy_entry_and_stop:
                     self.summary_label.setText(f"Photon original entry and SL: touch Daily / 4H demand in discount or supply in premium, wait for a fresh 15m trend change and aligned 1m swing. Existing 1m alignment is accepted. Enter at the next 1m open; no pullback retest is required. SL beyond the nested 15m zone, or the touch extreme, plus {execution.sd_stop_buffer_atr:g} ATR. Freeze TP at the 4H midpoint; minimum {execution.sd_minimum_r:g}R is checked again at fill. {exit_note} Context expires after {execution.photon_confirmation_minutes} minutes. Simulated backtest trades.")
                     return
