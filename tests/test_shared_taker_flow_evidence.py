@@ -8,6 +8,20 @@ import pytest
 from crypto_strategy_core.taker_flow import taker_flow_evidence_series
 
 
+def test_taker_flow_repeated_minute_decisions_and_missing_source_rows():
+    decisions = pd.date_range('2026-01-01', periods=16, freq='min', tz='UTC')
+    sources = decisions[[5, 10]]
+    result = taker_flow_evidence_series(decisions, sources, [10., 20.], [8., 5.])
+    assert all(pd.isna(t) for t in result['taker_source_available_at'][:5])
+    assert all(math.isnan(v) for v in result['taker_delta_pct'][:5])
+    assert result['taker_source_available_at'][5:10] == [sources[0]]*5
+    assert result['taker_source_available_at'][10:] == [sources[1]]*6
+    assert result['taker_delta_pct'][5:10] == pytest.approx([.6]*5)
+    assert result['taker_delta_pct'][10:] == pytest.approx([-.5]*6)
+    empty = taker_flow_evidence_series([], sources, [10., 20.], [8., 5.])
+    assert all(value == [] for value in empty.values())
+
+
 def test_taker_flow_elapsed_windows_and_persistence_match_csl() -> None:
     source_times = pd.to_datetime(
         [
