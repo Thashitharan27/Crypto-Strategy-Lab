@@ -8,6 +8,34 @@ from crypto_strategy_lab.gui.research_feature_ownership import apply_research_fe
 from crypto_strategy_lab.gui.risk_execution_install import apply_risk_execution_workspace
 
 
+def test_photon_quarter_range_controls_roundtrip_and_summary():
+    app, window = _window()
+    try:
+        selector = window.rule_builder.direction_mode
+        index = selector.findData('PHOTON_4H_TREND')
+        selector.setCurrentIndex(index)
+        selector.activated.emit(index)
+        quarter = window.execution_form.widgets['photon_quarter_range']
+        assert not quarter.isHidden()
+        quarter.setChecked(True)
+        app.processEvents()
+        workspace = window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert workspace.lesson_card.isHidden()
+        for name in ('photon_zone_reversal', 'photon_confirmation_minutes',
+                     'photon_retest_minutes', 'photon_fixed_target_enabled',
+                     'photon_exit_on_15m_change', 'photon_hold_tp_until_15m_reversal'):
+            assert not window.execution_form.widgets[name].isVisibleTo(workspace)
+        config = window.build_config()
+        assert config.execution.photon_quarter_range
+        window.apply_config(config)
+        assert window.build_config().execution.photon_quarter_range
+        assert '25%' in workspace.summary_label.text()
+        assert 'opposite 4H boundary' in workspace.summary_label.text()
+    finally:
+        window.close()
+
+
 def test_photon_selection_uses_actual_minutes_and_roundtrips_owned_controls():
     app, window = _window()
     try:

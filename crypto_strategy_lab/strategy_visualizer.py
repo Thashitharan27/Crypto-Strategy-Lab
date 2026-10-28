@@ -2252,7 +2252,11 @@ class CompletedRunVisualizer:
             # Match the trading engine's minute source and exact warmup boundary.
             # A separately seeded 15m history can choose different swing anchors.
             from .photon_lesson import options
-            guides = prepare_context(bars, zone_reversal=True, lesson_options=options(config.execution,collect_evidence=True)) if config.execution.photon_zone_reversal else prepare_context(bars)
+            if config.execution.photon_quarter_range:
+                from .photon_quarter_range import prepare_quarter_context
+                guides = prepare_quarter_context(bars)
+            else:
+                guides = prepare_context(bars, zone_reversal=True, lesson_options=options(config.execution,collect_evidence=True)) if config.execution.photon_zone_reversal else prepare_context(bars)
             self._photon_mapping_cache = dict(
                 strategy=MODE, mappingOnly=False, schemaVersion=2,
                 contextDays=int(strategy_warmup_period(config) / pd.Timedelta(days=1)),

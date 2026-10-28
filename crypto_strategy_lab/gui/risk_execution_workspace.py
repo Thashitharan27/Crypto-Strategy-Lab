@@ -155,6 +155,9 @@ class RiskExecutionWorkspace(QWidget):
         for name,label in (("photon_confirmation_minutes","Photon context / confirmation expiry (minutes)"),("photon_retest_minutes","Photon origin retest expiry (minutes)")):
             self.sd_card.add_field(name,label,self.account[name])
             self.account[name].setRange(1,10080)
+        self.account["photon_quarter_range"].setText("4H premium / discount: buy 25% / sell 75%; target opposite boundary")
+        self.sd_card.add_control("photon_quarter_range", self.account["photon_quarter_range"])
+        self.account["photon_quarter_range"].toggled.connect(self.refresh_visibility)
         self.account["photon_zone_reversal"].setText("Daily / 4H zone reversal → 15m change → pullback → 1m internal change → retest entry")
         self.sd_card.add_control("photon_zone_reversal", self.account["photon_zone_reversal"])
         self.account["photon_daily_zone_only"].setText("Require a Daily supply/demand zone touch (4H-only touches do not qualify)")
@@ -1058,21 +1061,23 @@ class RiskExecutionWorkspace(QWidget):
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
         photon = self._signal_strategy_mode() == "PHOTON_4H_TREND"
         mapping = self._signal_strategy_mode() == 'PHOTON_STRUCTURE_MAP'
-        self.lesson_card.setVisible(mapping or photon and self.account['photon_zone_reversal'].isChecked())
+        quarter = photon and self.account["photon_quarter_range"].isChecked()
+        self.lesson_card.setVisible(mapping or photon and not quarter and self.account['photon_zone_reversal'].isChecked())
         self.lesson_card.set_row_visible('photon_range_base_bars', self.account['photon_zone_model'].currentData()=='RANGE')
         self.lesson_card.set_row_visible('photon_fixed_target_enabled', photon and self.account['photon_zone_reversal'].isChecked())
         self.lesson_card.set_row_visible('photon_fixed_target_r', photon and self.account['photon_zone_reversal'].isChecked() and self.account['photon_fixed_target_enabled'].isChecked())
         supply_demand = photon or self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
-        zone_reversal = photon and self.account["photon_zone_reversal"].isChecked()
+        zone_reversal = photon and not quarter and self.account["photon_zone_reversal"].isChecked()
+        self.sd_card.set_row_visible("photon_quarter_range", photon)
         for name in ("photon_confirmation_minutes", "photon_retest_minutes", "photon_zone_reversal"):
-            self.sd_card.set_row_visible(name, photon)
+            self.sd_card.set_row_visible(name, photon and not quarter)
         self.sd_card.set_row_visible("photon_exit_on_15m_change", zone_reversal)
         self.sd_card.set_row_visible("photon_hold_tp_until_15m_reversal", zone_reversal)
         self.sd_card.set_row_visible("photon_daily_zone_only", zone_reversal)
         self.sd_card.set_row_visible("photon_legacy_entry_and_stop", zone_reversal)
-        self.sd_card.set_row_visible("photon_retest_minutes", photon and not (zone_reversal and self.account["photon_legacy_entry_and_stop"].isChecked()))
+        self.sd_card.set_row_visible("photon_retest_minutes", photon and not quarter and not (zone_reversal and self.account["photon_legacy_entry_and_stop"].isChecked()))
         for name in ("photon_target_4h", "photon_flexible_entries"):
-            self.sd_card.set_row_visible(name, photon and not zone_reversal)
+            self.sd_card.set_row_visible(name, photon and not quarter and not zone_reversal)
         self.sd_card.setTitle("Photon — Daily / 4H zone reversal" if zone_reversal else "Liquidity sweep — trend + zone retest" if liquidity else "Supply & demand retest")
         for name in ("ls_equal_tolerance_atr","ls_displacement_atr","ls_base_bars","ls_max_wait_bars"):
             self.sd_card.set_row_visible(name,liquidity or (imbalance and name in {"ls_displacement_atr","ls_max_wait_bars"}))
@@ -1095,6 +1100,9 @@ class RiskExecutionWorkspace(QWidget):
             self.sd_card.setTitle("Photon — 4H trend / 1m confirmation")
             self.sd_card.set_row_visible("sd_swing_strength",False)
             self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond 1m reaction extreme (ATR)")
+        if quarter:
+            self.sd_card.setTitle("Photon — 4H premium / discount 25% / 75%")
+            self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond strong 4H boundary (1m ATR)")
         self.sd_card.set_row_visible("ny_range_target_r",ny_range)
         policy=self.account["ny_range_overshoot_policy"].currentData()
         self.sd_card.set_row_visible("ny_range_overshoot_policy",ny_range)
@@ -1169,6 +1177,9 @@ class RiskExecutionWorkspace(QWidget):
 
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "PHOTON_4H_TREND":
+            if execution.photon_quarter_range:
+                self.summary_label.setText(f"4H premium / discount: bullish strong-low / weak-high range buys at 25%; bearish weak-low / strong-high range sells at 75%. Limit orders use later 1m candles, with one attempt per mapped range. Cancel unfilled orders when the range changes or becomes stale. SL beyond the strong 4H boundary + {execution.sd_stop_buffer_atr:g} 1m ATR; freeze TP at the opposite 4H boundary. Minimum {execution.sd_minimum_r:g}R is rechecked at fill. Exit at SL or TP. No 15m or 1m confirmation required.")
+                return
             if execution.photon_zone_reversal:
                 zone_label = "Daily" if execution.photon_daily_zone_only else "Daily / 4H"
                 context_note = "Daily zones only: longs require a Daily demand touch; shorts require a Daily supply touch. A 4H-only touch does not qualify. " if execution.photon_daily_zone_only else ""
