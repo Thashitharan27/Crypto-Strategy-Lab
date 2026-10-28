@@ -44,7 +44,7 @@ def validate(config):
     r = getattr(config, 'photon_fixed_target_r', 3.)
     if not isfinite(r) or r <= 0:
         raise ValueError('Photon fixed target R must be finite and positive')
-    if not getattr(config, 'photon_quarter_range', False) and getattr(config, 'photon_zone_reversal', False) and getattr(config, 'photon_fixed_target_enabled', False):
+    if not getattr(config, 'photon_midpoint_reversal', False) and not getattr(config, 'photon_quarter_range', False) and getattr(config, 'photon_zone_reversal', False) and getattr(config, 'photon_fixed_target_enabled', False):
         if getattr(config, 'photon_hold_tp_until_15m_reversal', False):
             raise ValueError('Photon fixed-R TP cannot be combined with hold beyond TP')
         if getattr(config, 'photon_exit_on_15m_change', False):

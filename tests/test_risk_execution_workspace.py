@@ -8,6 +8,30 @@ from crypto_strategy_lab.gui.research_feature_ownership import apply_research_fe
 from crypto_strategy_lab.gui.risk_execution_install import apply_risk_execution_workspace
 
 
+def test_photon_midpoint_reversal_roundtrip_and_summary():
+    app, window = _window()
+    try:
+        selector = window.rule_builder.direction_mode
+        index = selector.findData('PHOTON_4H_TREND')
+        selector.setCurrentIndex(index)
+        selector.activated.emit(index)
+        midpoint = window.execution_form.widgets['photon_midpoint_reversal']
+        assert not midpoint.isHidden()
+        midpoint.setChecked(True)
+        app.processEvents()
+        workspace = window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert workspace.lesson_card.isHidden()
+        assert window.execution_form.widgets['photon_quarter_range'].isHidden()
+        assert window.execution_form.widgets['sd_stop_buffer_atr'].isHidden()
+        window.apply_config(window.build_config())
+        assert window.build_config().execution.photon_midpoint_reversal
+        assert 'fresh confirmed bullish 15m' in workspace.summary_label.text()
+        assert '50% midpoint' in workspace.summary_label.text()
+    finally:
+        window.close()
+
+
 def test_photon_quarter_range_controls_roundtrip_and_summary():
     app, window = _window()
     try:

@@ -250,6 +250,11 @@ class PhotonTrendMixin:
         validate_settings(self.config.photon_confirmation_minutes,self.config.photon_retest_minutes,self.config.strategy_timeframe_minutes,True)
         bars=[dict(time=int(pd.Timestamp(t).timestamp()),open=float(o),high=float(h),low=float(l),close=float(c)) for t,o,h,l,c in zip(self.times,self.open,self.high,self.low,self.close)]
         self.photon_trend_exits = {}
+        if self.config.photon_midpoint_reversal:
+            from .photon_midpoint_reversal import midpoint_reversal_setups, prepare_midpoint_context
+            self.photon_setups, self.photon_order_live = midpoint_reversal_setups(
+                bars, prepare_midpoint_context(bars), minimum_r=max(1., self.config.sd_minimum_r))
+            return
         if self.config.photon_quarter_range:
             from .photon_quarter_range import quarter_range_setups, prepare_quarter_context
             self.photon_setups, self.photon_order_live = quarter_range_setups(
@@ -315,8 +320,8 @@ class PhotonTrendMixin:
     def _entry_decision(self,i,active_at_candle_start=False):
         if getattr(self,"signal_strategy_mode",None)!=MODE:return super()._entry_decision(i,active_at_candle_start)
         if active_at_candle_start or self.active_pairs or self.pending_next_open_entry or i+1>=len(self.times) or not self._should_enter(i):return None
-        market = (self.config.photon_zone_reversal and not self.config.photon_quarter_range) and self.photon_setups[i].get("entryExecution") != "LIMIT_RETEST"
-        source = "PHOTON_4H_QUARTER_LIMIT" if self.config.photon_quarter_range else "PHOTON_ZONE_REVERSAL_OPEN" if market else "PHOTON_ORIGIN_RETEST"
+        market = self.config.photon_midpoint_reversal or (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.photon_setups[i].get("entryExecution") != "LIMIT_RETEST"
+        source = "PHOTON_15M_MIDPOINT_OPEN" if self.config.photon_midpoint_reversal else "PHOTON_4H_QUARTER_LIMIT" if self.config.photon_quarter_range else "PHOTON_ZONE_REVERSAL_OPEN" if market else "PHOTON_ORIGIN_RETEST"
         return dict(execution_index=i+1,indicator_index=i,defer_to_next_open=True,photon_limit=True,photon_market=market,fill_price_source=source,scheduled_timestamp=pd.Timestamp(self.times[i])+pd.Timedelta(minutes=1),actual_entry_timestamp=None)
 
     def _execute_pending_next_open_entry(self,i,active_at_candle_start=False):
@@ -374,7 +379,7 @@ class PhotonTrendMixin:
     def _photon_close_on_trend(self, pos, i):
         held = getattr(pos, 'photon_tp_hold_activated', False)
         if (getattr(self, "signal_strategy_mode", None) == MODE and pos.is_open
-                and (self.config.photon_zone_reversal and not self.config.photon_quarter_range) and (self.config.photon_exit_on_15m_change or held)):
+                and (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and (self.config.photon_exit_on_15m_change or held)):
             from .trade import Side, ExitReason, ExitSource
             at = int(pd.Timestamp(self.times[i]).timestamp())
             direction = self._photon_15m_trend(at) if held else self.photon_trend_exits.get(at)
@@ -398,7 +403,7 @@ class PhotonTrendMixin:
 
     def _maybe_exit_bar(self, pos, i, high, low, timestamp, source):
         if not (getattr(self, 'signal_strategy_mode', None) == MODE and pos.is_open
-                and (self.config.photon_zone_reversal and not self.config.photon_quarter_range) and self.config.photon_hold_tp_until_15m_reversal):
+                and (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_hold_tp_until_15m_reversal):
             return super()._maybe_exit_bar(pos, i, high, low, timestamp, source)
         from .trade import Side
         long = pos.side == Side.LONG
@@ -427,7 +432,7 @@ class PhotonTrendMixin:
     def _profile_context(self,i):
         context=super()._profile_context(i)
         if getattr(self,"signal_strategy_mode",None)!=MODE or context is None:return context
-        return (*context[:3],replace(context[3],reward_risk_ratio=self.config.photon_fixed_target_r if (self.config.photon_zone_reversal and not self.config.photon_quarter_range) and self.config.photon_fixed_target_enabled else 1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
+        return (*context[:3],replace(context[3],reward_risk_ratio=self.config.photon_fixed_target_r if (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_fixed_target_enabled else 1.,stop_loss_multiple=1.,position_sizing_stop_override_enabled=False,
             partial_profit_enabled=False,partial_stop_enabled=False,trailing_enabled=False,break_even_enabled=False,
             r_step_trailing_enabled=False,atr_checkpoint_tp_extension_enabled=False,timeout_enabled=False))
 
@@ -443,13 +448,18 @@ class PhotonTrendMixin:
         if not s or side!=s["side"]:return reject
         entry=self._expected_entry_price(i,execution_i,side);sign=1 if side=="LONG" else -1
         risk=sign*(entry-s["stop"])
-        fixed=(self.config.photon_zone_reversal and not self.config.photon_quarter_range) and self.config.photon_fixed_target_enabled
+        fixed=(self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_fixed_target_enabled
         target=entry+sign*self.config.photon_fixed_target_r*risk if fixed else s['target']
         reward=sign*(target-entry)
-        if (self.config.photon_zone_reversal and not self.config.photon_quarter_range) and not s["range4h"]["low"] <= entry <= s["range4h"]["high"]:
+        if self.config.photon_midpoint_reversal:
+            bounds = s['range4h']
+            if (not bounds['low'] < entry < bounds['high'] or risk <= 0
+                    or reward/risk < max(1., self.config.sd_minimum_r)):
+                return reject
+        if (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and not s["range4h"]["low"] <= entry <= s["range4h"]["high"]:
             return reject
         if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk+(1e-10 if fixed else 0)<self.config.sd_minimum_r:return reject
-        return dict(passed=True,applied=True,reason=("PHOTON_"+s["stopSource"]+"_STOP") if self.config.photon_zone_reversal or self.config.photon_quarter_range else "PHOTON_CONFIRMED_ORIGIN_STOP",distance=risk,stop_price=s["stop"],boundary_price=s["stop"],level_price=target,distance_atr=risk/float(self.atr_values[i]),timeframe_minutes=1)
+        return dict(passed=True,applied=True,reason=("PHOTON_"+s["stopSource"]+"_STOP") if self.config.photon_zone_reversal or self.config.photon_quarter_range or self.config.photon_midpoint_reversal else "PHOTON_CONFIRMED_ORIGIN_STOP",distance=risk,stop_price=s["stop"],boundary_price=s["stop"],level_price=target,distance_atr=risk/float(self.atr_values[i]),timeframe_minutes=1)
 
     def _sr_tp_filter_result(self,i,execution_i=None):
         if getattr(self,"signal_strategy_mode",None)==MODE:return True,None
@@ -460,13 +470,13 @@ class PhotonTrendMixin:
         for pos in pair.positions():
             sign=1 if str(getattr(pos.side,'value',pos.side)).upper()=='LONG' else -1
             pos.tp=(pos.entry_price+sign*self.config.photon_fixed_target_r*abs(pos.entry_price-self.photon_setups[i]['stop'])
-                    if (self.config.photon_zone_reversal and not self.config.photon_quarter_range) and self.config.photon_fixed_target_enabled else float(self.photon_setups[i]['target']))
+                    if (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_fixed_target_enabled else float(self.photon_setups[i]['target']))
 
     def _open_pair(self,i,entry_filter_passed=True,entry_filter_reason="Strategy profile passed",schedule=None):
         before=len(self.active_pairs);result=super()._open_pair(i,entry_filter_passed,entry_filter_reason,schedule)
         if getattr(self,"signal_strategy_mode",None)==MODE and len(self.active_pairs)>before:
             self.active_pairs[-1].photon_setup=deepcopy(self.photon_setups[schedule["indicator_index"] if schedule else i])
-            if (self.config.photon_zone_reversal and not self.config.photon_quarter_range) and self.config.photon_fixed_target_enabled:
+            if (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_fixed_target_enabled:
                 self.active_pairs[-1].photon_setup['target']=self.active_pairs[-1].positions()[0].tp
                 self.active_pairs[-1].photon_setup['targetMode']='FIXED_R'
         return result
@@ -476,7 +486,7 @@ class PhotonTrendMixin:
         if getattr(self,"signal_strategy_mode",None)==MODE:
             setup=getattr(pair,'photon_setup',None)
             row["supply_demand_setup"]=json.dumps(setup,allow_nan=False)
-            row['photon_hold_tp_until_15m_reversal'] = self.config.photon_hold_tp_until_15m_reversal and not self.config.photon_quarter_range
+            row['photon_hold_tp_until_15m_reversal'] = self.config.photon_hold_tp_until_15m_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)
             row['photon_tp_hold_activated'] = any(getattr(p, 'photon_tp_hold_activated', False) for p in positions)
             row['photon_tp_first_hit_time'] = next((getattr(p, 'photon_tp_first_hit_time', None) for p in positions if getattr(p, 'photon_tp_hold_activated', False)), None)
             review=setup.get('review',{}) if setup else {}
