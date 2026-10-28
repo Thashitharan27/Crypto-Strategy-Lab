@@ -158,6 +158,9 @@ class RiskExecutionWorkspace(QWidget):
         self.account["photon_midpoint_reversal"].setText("15m trend change in 4H value; require 1R to the 50% midpoint")
         self.sd_card.add_control("photon_midpoint_reversal", self.account["photon_midpoint_reversal"])
         self.account["photon_midpoint_reversal"].toggled.connect(self.refresh_visibility)
+        self.account["photon_midpoint_fixed_1r"].setText("Take profit at exactly 1R, within the 4H midpoint")
+        self.sd_card.add_control("photon_midpoint_fixed_1r", self.account["photon_midpoint_fixed_1r"])
+        self.account["photon_midpoint_fixed_1r"].toggled.connect(self.refresh_visibility)
         self.account["photon_quarter_range"].setText("4H premium / discount: buy 25% / sell 75%; target opposite boundary")
         self.sd_card.add_control("photon_quarter_range", self.account["photon_quarter_range"])
         self.account["photon_quarter_range"].toggled.connect(self.refresh_visibility)
@@ -1073,6 +1076,7 @@ class RiskExecutionWorkspace(QWidget):
         supply_demand = photon or self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
         zone_reversal = photon and not quarter and self.account["photon_zone_reversal"].isChecked()
         self.sd_card.set_row_visible("photon_midpoint_reversal", photon)
+        self.sd_card.set_row_visible("photon_midpoint_fixed_1r", midpoint)
         self.sd_card.set_row_visible("photon_quarter_range", photon and not midpoint)
         for name in ("photon_confirmation_minutes", "photon_retest_minutes", "photon_zone_reversal"):
             self.sd_card.set_row_visible(name, photon and not quarter)
@@ -1111,6 +1115,7 @@ class RiskExecutionWorkspace(QWidget):
         if midpoint:
             self.sd_card.setTitle("Photon — 15m reversal to 4H midpoint")
             self.sd_card.set_row_visible("sd_stop_buffer_atr", False)
+            self.sd_card.set_row_visible("sd_minimum_r", not self.account["photon_midpoint_fixed_1r"].isChecked())
         self.sd_card.set_row_visible("ny_range_target_r",ny_range)
         policy=self.account["ny_range_overshoot_policy"].currentData()
         self.sd_card.set_row_visible("ny_range_overshoot_policy",ny_range)
@@ -1186,6 +1191,9 @@ class RiskExecutionWorkspace(QWidget):
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "PHOTON_4H_TREND":
             if execution.photon_midpoint_reversal:
+                if execution.photon_midpoint_fixed_1r:
+                    self.summary_label.setText("Fresh confirmed 15m trend change aligned with the 4H range: buy discount / sell premium at the next 1m open. SL exactly at the strong 4H boundary. TP exactly 1R from actual entry and original SL. Long TP must be at or below the 50% midpoint; short TP at or above it. Recheck at actual fill including slippage; skip if the 1R target exceeds the midpoint. Later fresh changes can trade the same range again; one trade at a time. Execute entries and exits on 1m candles.")
+                    return
                 self.summary_label.setText(f"4H bullish range: each fresh confirmed bullish 15m trend change in discount can buy at the next 1m open. Reverse for shorts in 4H premium. SL exactly at the strong 4H boundary; freeze TP at the 50% midpoint. Require at least {max(1., execution.sd_minimum_r):g}R to midpoint, checked at confirmation and again at actual fill including slippage. One open trade at a time; later fresh 15m changes can trade the same range again. Execute SL/TP on 1m candles.")
                 return
             if execution.photon_quarter_range:

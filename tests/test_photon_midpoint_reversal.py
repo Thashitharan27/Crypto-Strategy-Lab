@@ -81,8 +81,9 @@ def test_config_roundtrip():
 
 
 @pytest.mark.parametrize('short', [False, True])
-@pytest.mark.parametrize('fill', ['normal','insufficient_r','collision'])
-def test_engine_next_minute_market_fill_and_actual_r(monkeypatch, short, fill):
+@pytest.mark.parametrize('fill', ['normal','insufficient_r','collision','favorable_gap'])
+@pytest.mark.parametrize('fixed_1r', [False, True])
+def test_engine_next_minute_market_fill_and_actual_r(monkeypatch, short, fill, fixed_1r):
     from crypto_strategy_lab.config import BacktestConfig
     from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
     from crypto_strategy_lab.strategy_profiles import StrategyProfile
@@ -94,12 +95,14 @@ def test_engine_next_minute_market_fill_and_actual_r(monkeypatch, short, fill):
         bars[1].update(open=120 if short else 100)
     if fill == 'collision':
         bars[1].update(high=145, low=75)
+    if fill == 'favorable_gap':
+        bars[1].update(open=130 if short else 90, high=131 if short else 111, low=109 if short else 89)
     pad = [dict(time=bars[0]['time']-(150-i)*60, open=110, high=111, low=109, close=110) for i in range(150)]
     monkeypatch.setattr('crypto_strategy_lab.photon_midpoint_reversal.prepare_midpoint_context', lambda bars: guides)
     profiles, _ = compile_profiles(direction_mode=MODE, market_permissions=MARKET_PERMISSIONS)
     native = {k: StrategyProfile(**asdict(p)) for k,p in profiles.items()}
     config = BacktestConfig(strategy_timeframe_minutes=1, strategy_profiles=native,
-        photon_midpoint_reversal=True, photon_quarter_range=True, photon_zone_reversal=True,
+        photon_midpoint_reversal=True, photon_midpoint_fixed_1r=fixed_1r, photon_quarter_range=True, photon_zone_reversal=True,
         photon_fixed_target_enabled=True, photon_exit_on_15m_change=True,
         photon_hold_tp_until_15m_reversal=True,
         use_intrabar_data=False, enable_support_resistance_analysis=False,
@@ -117,6 +120,33 @@ def test_engine_next_minute_market_fill_and_actual_r(monkeypatch, short, fill):
     row = trades.iloc[0]
     assert pd.Timestamp(row.entry_time) == frame.timestamp.iloc[151]
     assert row[row.side.lower()+'_sl'] == (140 if short else 80)
-    assert row[row.side.lower()+'_tp'] == 110
+    target=row[row.side.lower()+'_tp']
+    expected=row.actual_entry_price+(-1 if short else 1)*abs(row.actual_entry_price-(140 if short else 80)) if fixed_1r else 110
+    assert target == pytest.approx(expected)
+    assert target >= 110 if short else target <= 110
+    saved=json.loads(row.supply_demand_setup)
+    assert saved['target'] == target
+    assert saved['targetMode'] == ('FIXED_1R_BEFORE_MIDPOINT' if fixed_1r else '4H_MIDPOINT')
     assert row[row.side.lower()+'_final_exit_reason'] == ('SL' if fill == 'collision' else 'TP')
     assert json.loads(row.supply_demand_setup)['entryModel'] == 'MIDPOINT_15M_REVERSAL'
+
+
+@pytest.mark.parametrize('short', [False, True])
+def test_fixed_one_r_target_inside_midpoint_and_exact_boundary(short):
+    bars, guides = scenario(short)
+    setups, _ = midpoint_reversal_setups(bars, guides, fixed_1r=True)
+    assert setups[0]['target'] == (112 if short else 108)
+    assert setups[0]['plannedR'] == 1.
+    assert setups[0]['midpointRoomR'] == pytest.approx(16/14)
+    bars[0]['close'] = 125 if short else 95
+    setups, _ = midpoint_reversal_setups(bars, guides, fixed_1r=True)
+    assert setups[0]['target'] == 110
+
+
+def test_fixed_one_r_config_roundtrip():
+    from crypto_strategy_lab.data_lake_config import load_data_lake_config, normalize_data_lake_config
+    from crypto_strategy_lab.research_adapters import native_simulator_config
+    c = load_data_lake_config('config/data_lake/Photon_15m_Reversal_Fixed_1R_1m.json')
+    c = normalize_data_lake_config(asdict(c))
+    native = native_simulator_config(c.data,c.features,c.strategy,c.execution)
+    assert native.photon_midpoint_reversal and native.photon_midpoint_fixed_1r

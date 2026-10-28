@@ -28,6 +28,13 @@ def test_photon_midpoint_reversal_roundtrip_and_summary():
         assert window.build_config().execution.photon_midpoint_reversal
         assert 'fresh confirmed bullish 15m' in workspace.summary_label.text()
         assert '50% midpoint' in workspace.summary_label.text()
+        fixed = window.execution_form.widgets['photon_midpoint_fixed_1r']
+        assert not fixed.isHidden()
+        fixed.setChecked(True)
+        window.apply_config(window.build_config())
+        assert window.build_config().execution.photon_midpoint_fixed_1r
+        assert 'TP exactly 1R' in workspace.summary_label.text()
+        assert window.execution_form.widgets['sd_minimum_r'].isHidden()
     finally:
         window.close()
 

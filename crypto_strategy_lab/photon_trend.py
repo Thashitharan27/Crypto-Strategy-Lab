@@ -253,7 +253,9 @@ class PhotonTrendMixin:
         if self.config.photon_midpoint_reversal:
             from .photon_midpoint_reversal import midpoint_reversal_setups, prepare_midpoint_context
             self.photon_setups, self.photon_order_live = midpoint_reversal_setups(
-                bars, prepare_midpoint_context(bars), minimum_r=max(1., self.config.sd_minimum_r))
+                bars, prepare_midpoint_context(bars),
+                minimum_r=1. if self.config.photon_midpoint_fixed_1r else max(1., self.config.sd_minimum_r),
+                fixed_1r=self.config.photon_midpoint_fixed_1r)
             return
         if self.config.photon_quarter_range:
             from .photon_quarter_range import quarter_range_setups, prepare_quarter_context
@@ -441,6 +443,15 @@ class PhotonTrendMixin:
         if getattr(self,"signal_strategy_mode",None)==MODE and raw is not None:return raw*(1+self.config.slippage if direction=="LONG" else 1-self.config.slippage)
         return super()._expected_entry_price(indicator_i,execution_i,direction)
 
+    def _photon_target(self, setup, entry):
+        sign = 1 if setup['side'] == 'LONG' else -1
+        if self.config.photon_midpoint_reversal and self.config.photon_midpoint_fixed_1r:
+            return entry+sign*abs(entry-setup['stop'])
+        if (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)
+                and self.config.photon_fixed_target_enabled):
+            return entry+sign*self.config.photon_fixed_target_r*abs(entry-setup['stop'])
+        return float(setup['target'])
+
     def _sr_stop_plan(self,i,execution_i=None):
         if getattr(self,"signal_strategy_mode",None)!=MODE:return super()._sr_stop_plan(i,execution_i)
         s=self.photon_setups[i];side=self._effective_trade_direction(i)
@@ -449,16 +460,18 @@ class PhotonTrendMixin:
         entry=self._expected_entry_price(i,execution_i,side);sign=1 if side=="LONG" else -1
         risk=sign*(entry-s["stop"])
         fixed=(self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_fixed_target_enabled
-        target=entry+sign*self.config.photon_fixed_target_r*risk if fixed else s['target']
+        fixed_1r=self.config.photon_midpoint_reversal and self.config.photon_midpoint_fixed_1r
+        minimum_r=1. if fixed_1r else self.config.sd_minimum_r
+        target=self._photon_target(s, entry)
         reward=sign*(target-entry)
         if self.config.photon_midpoint_reversal:
             bounds = s['range4h']
             if (not bounds['low'] < entry < bounds['high'] or risk <= 0
-                    or reward/risk < max(1., self.config.sd_minimum_r)):
+                    or sign*(bounds['equilibrium']-entry)/risk < max(1., minimum_r)):
                 return reject
         if (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and not s["range4h"]["low"] <= entry <= s["range4h"]["high"]:
             return reject
-        if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk+(1e-10 if fixed else 0)<self.config.sd_minimum_r:return reject
+        if not np.isfinite([entry,risk,reward]).all() or risk<=0 or reward<=0 or reward/risk+(1e-10 if fixed or fixed_1r else 0)<minimum_r:return reject
         return dict(passed=True,applied=True,reason=("PHOTON_"+s["stopSource"]+"_STOP") if self.config.photon_zone_reversal or self.config.photon_quarter_range or self.config.photon_midpoint_reversal else "PHOTON_CONFIRMED_ORIGIN_STOP",distance=risk,stop_price=s["stop"],boundary_price=s["stop"],level_price=target,distance_atr=risk/float(self.atr_values[i]),timeframe_minutes=1)
 
     def _sr_tp_filter_result(self,i,execution_i=None):
@@ -468,17 +481,16 @@ class PhotonTrendMixin:
     def _apply_sr_take_profit(self,i,pair):
         if getattr(self,"signal_strategy_mode",None)!=MODE:return super()._apply_sr_take_profit(i,pair)
         for pos in pair.positions():
-            sign=1 if str(getattr(pos.side,'value',pos.side)).upper()=='LONG' else -1
-            pos.tp=(pos.entry_price+sign*self.config.photon_fixed_target_r*abs(pos.entry_price-self.photon_setups[i]['stop'])
-                    if (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_fixed_target_enabled else float(self.photon_setups[i]['target']))
+            pos.tp=self._photon_target(self.photon_setups[i], pos.entry_price)
 
     def _open_pair(self,i,entry_filter_passed=True,entry_filter_reason="Strategy profile passed",schedule=None):
         before=len(self.active_pairs);result=super()._open_pair(i,entry_filter_passed,entry_filter_reason,schedule)
         if getattr(self,"signal_strategy_mode",None)==MODE and len(self.active_pairs)>before:
             self.active_pairs[-1].photon_setup=deepcopy(self.photon_setups[schedule["indicator_index"] if schedule else i])
-            if (self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_fixed_target_enabled:
+            if ((self.config.photon_zone_reversal and not (self.config.photon_quarter_range or self.config.photon_midpoint_reversal)) and self.config.photon_fixed_target_enabled
+                    or self.config.photon_midpoint_reversal and self.config.photon_midpoint_fixed_1r):
                 self.active_pairs[-1].photon_setup['target']=self.active_pairs[-1].positions()[0].tp
-                self.active_pairs[-1].photon_setup['targetMode']='FIXED_R'
+                self.active_pairs[-1].photon_setup['targetMode']='FIXED_1R_BEFORE_MIDPOINT' if self.config.photon_midpoint_reversal else 'FIXED_R'
         return result
 
     def _build_result_row(self,pair,row_kind,positions):
