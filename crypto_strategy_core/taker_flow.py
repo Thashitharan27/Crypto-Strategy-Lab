@@ -152,17 +152,15 @@ def taker_flow_evidence_series(
     decision_ns = decisions.to_numpy(dtype="datetime64[ns]").astype(np.int64, copy=False)
     indices = np.searchsorted(source_ns, decision_ns, side="right") - 1
 
-    output = {"taker_source_available_at": []}
+    # Gather each homogeneous column once. Constructing a mixed timestamp /
+    # numeric pandas row for every field at every minute is needlessly costly.
+    missing = indices < 0
+    safe_indices = np.maximum(indices, 0)
+    aligned_times = source_index.take(safe_indices).to_numpy(dtype=object)
+    aligned_times[missing] = pd.NaT
+    output = {"taker_source_available_at": aligned_times.tolist()}
     for field in TAKER_FLOW_FIELDS:
-        output[field] = []
-    for source_position in indices:
-        if source_position < 0:
-            output["taker_source_available_at"].append(pd.NaT)
-            for field in TAKER_FLOW_FIELDS:
-                output[field].append(float("nan"))
-            continue
-        position = int(source_position)
-        output["taker_source_available_at"].append(source_index[position])
-        for field in TAKER_FLOW_FIELDS:
-            output[field].append(source.iloc[position][field])
+        values = source[field].to_numpy(dtype=float)[safe_indices].copy()
+        values[missing] = np.nan
+        output[field] = values.tolist()
     return output
