@@ -9,7 +9,7 @@ function cslPhotonReviewView(sd,cutoff=Infinity) {
   const review=sd.review;
   if(!review || !Array.isArray(review.checks))return {legacy:true,label:'Legacy setup — mismatch checks were not saved',checks:[]};
   const mismatches=review.checks.filter(c=>c.passed!==true);
-  return {legacy:false,label:['HTF_ZONE_REVERSAL','HTF_ZONE_PULLBACK'].includes(sd.entryModel)?'Automated zone reversal · entry checks':mismatches.length?'Manual review · '+mismatches.length+' mismatch'+(mismatches.length===1?'':'es'):'Preferred alignment · manual decision',
+  return {legacy:false,label:sd.entryModel==='QUARTER_RANGE'?'4H premium / discount limit':['HTF_ZONE_REVERSAL','HTF_ZONE_PULLBACK'].includes(sd.entryModel)?'Automated zone reversal · entry checks':mismatches.length?'Manual review · '+mismatches.length+' mismatch'+(mismatches.length===1?'':'es'):'Preferred alignment · manual decision',
     checks:review.checks,mismatches,entryModel:sd.entryModel};
 }
 function renderPhotonEntryReview(sd,cutoff=Infinity) {
@@ -21,7 +21,7 @@ function renderPhotonEntryReview(sd,cutoff=Infinity) {
     const row=document.createElement('p');row.textContent=(check.passed?'\u2713 ':'\u26a0 ')+check.label+' — '+check.detail;
     row.style.color=check.passed?'#86efac':'#fbbf24';body.appendChild(row);
   }
-  const note=document.createElement('p');note.textContent=view.legacy?'Rerun to capture decision-time checks.':['HTF_ZONE_REVERSAL','HTF_ZONE_PULLBACK'].includes(view.entryModel)?'Checks were saved at the confirmed entry decision. SL uses the 15m zone or touch extreme; TP follows the saved target mode: fixed R when selected, otherwise the frozen 4H midpoint. Minimum reward/risk is checked again at the actual simulated fill.':'Checks were frozen when the 1m CHoCH armed this simulated candidate. Confirm manual entry, Skip or Unsure in replay to record your own decision. These checks do not place live orders.';body.appendChild(note);
+  const note=document.createElement('p');note.textContent=view.entryModel==='QUARTER_RANGE'?'Direct limit at 25% for longs or 75% for shorts. SL beyond the strong 4H boundary; TP at the opposite boundary. Saved at order creation; actual fill must occur on a later candle.':view.legacy?'Rerun to capture decision-time checks.':['HTF_ZONE_REVERSAL','HTF_ZONE_PULLBACK'].includes(view.entryModel)?'Checks were saved at the confirmed entry decision. SL uses the 15m zone or touch extreme; TP follows the saved target mode: fixed R when selected, otherwise the frozen 4H midpoint. Minimum reward/risk is checked again at the actual simulated fill.':'Checks were frozen when the 1m CHoCH armed this simulated candidate. Confirm manual entry, Skip or Unsure in replay to record your own decision. These checks do not place live orders.';body.appendChild(note);
 }
 function cslPhotonEventBound(events,time,inclusive=false) {
   let lo=0,hi=events.length;while(lo<hi){const mid=(lo+hi)>>1;if(inclusive?events[mid].availableAt<=time:events[mid].availableAt<time)lo=mid+1;else hi=mid;}return lo;
