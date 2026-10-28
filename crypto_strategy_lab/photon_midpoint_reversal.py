@@ -19,7 +19,7 @@ def prepare_midpoint_context(bars):
     return guides
 
 
-def midpoint_reversal_setups(bars, guides, *, minimum_r=1.):
+def midpoint_reversal_setups(bars, guides, *, minimum_r=1., fixed_1r=False):
     from .photon_trend import MODE
     if not isfinite(minimum_r) or minimum_r < 1:
         raise ValueError('Midpoint reversal requires at least 1R')
@@ -61,15 +61,15 @@ def midpoint_reversal_setups(bars, guides, *, minimum_r=1.):
         zone = dict(bottom=low, top=high, pivotTime=iso(bounds['lowTime']),
                     confirmedTime=iso(at), touchTime=iso(bar['time']), bounceTime=None)
         signals[i] = dict(version=1, strategy=MODE, side='LONG' if sign == 1 else 'SHORT',
-                          entry=entry, stop=stop, target=target,
+                          entry=entry, stop=stop, target=entry+sign*risk if fixed_1r else target,
                           entryModel='MIDPOINT_15M_REVERSAL', entryExecution='MARKET_OPEN',
                           stopSource='4H_STRONG_BOUNDARY', signalIndex=i,
                           signalTime=iso(bar['time']), signalAvailableAt=at,
                           alignmentAt=at, trendChange15m=deepcopy(change),
                           range4h=deepcopy(bounds), range15m=None,
-                          target4h=target, targetMode='4H_MIDPOINT',
+                          target4h=target, targetMode='FIXED_1R_BEFORE_MIDPOINT' if fixed_1r else '4H_MIDPOINT',
                           zone=zone, entryZone=None, opposingZone=None,
-                          minimumR=minimum_r, plannedR=reward/risk,
+                          minimumR=minimum_r, plannedR=1. if fixed_1r else reward/risk, midpointRoomR=reward/risk,
                           review=dict(status='PASSED', checks=[], mismatches=[]),
                           narrative={'4h': dict(trend=sign, availableAt=state['availableAt'])})
         live[i] = i
