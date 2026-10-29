@@ -91,4 +91,3 @@ def test_engine_next_open_stop_and_midpoint(monkeypatch,collision):
     assert row.long_tp==130
     assert row.long_final_exit_reason==('SL' if collision else 'TP')
     assert json.loads(row.supply_demand_setup)['entryModel']=='15M_DEMAND_PULLBACK'
-
