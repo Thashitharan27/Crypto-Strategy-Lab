@@ -14,6 +14,37 @@ function cslOpportunityBars(candles, interval) {
     output.push({time:bucket,open:group[0].open,high:Math.max(...group.map(b=>b.high)),low:Math.min(...group.map(b=>b.low)),close:group.at(-1).close});};
   for(const b of candles || []){const key=Math.floor(b.time/900)*900;if(key!==bucket){flush();group=[];bucket=key;}group.push(b);}flush();return output;
 }
+// Fixed research rubric. Points describe evidence, never a win probability.
+function cslOpportunityQuality(item) {
+  const f=item.qualityFacts || {},sign=item.side==='LONG'?1:-1,rows=[];
+  const add=(key,label,points,max,detail)=>rows.push({key,label,points,max,detail});
+  const trends=f.trends || {};
+  for(const [tf,label,max] of [['4h','4H alignment',15],['15m','15m alignment',10],['1d','Daily alignment',3],['1w','Weekly alignment',2]]) {
+    const trend=trends[tf];add(tf,label,trend===sign?max:0,max,trend===sign?'Aligned':trend===-sign?'Opposing':'Unknown — no points');
+  }
+  const confirmation=item.phase==='CONFIRMED_REACTION'?15:item.phase==='CONFIRMED_RECLAIM'?12:0;
+  add('confirmation','15m confirmation',confirmation,15,item.phase==='CONFIRMED_REACTION'?'Closed beyond the touch candle':item.phase==='CONFIRMED_RECLAIM'?'Completed sweep and reclaim':'Early watch / confirmation unavailable');
+  add('minute','1m internal confirmation',f.minuteInternal===sign?5:0,5,f.minuteInternal===sign?'Aligned at detection':f.minuteInternal===-sign?'Opposing at detection':'Unavailable — no points');
+  const rr=item.rewardRisk,room=Number.isFinite(rr)?rr>=2?20:rr>=1.5?15:rr>=1?10:0:0;
+  add('room','Target room',room,20,Number.isFinite(rr)?rr.toFixed(2)+'R to the suggested TP':'No valid forward target');
+  const zone=f.zoneKnown===true,zonePoints=zone?(f.zoneVisits<=1&&f.zoneAgeSeconds<=86400?10:5):0;
+  add('zone','Zone freshness',zonePoints,10,!zone?'No zone evidence':zonePoints===10?'First visit / unvisited; at most 24h old':'Previously visited or older zone');
+  add('value','15m premium / discount',f.inValue===true?10:0,10,f.inValue===true?'Long in discount / short in premium':f.inValue===false?'Outside preferred value half':'Range unavailable — no points');
+  const clear=f.opposingBeforeTarget===false&&item.target!=null;
+  add('obstruction','Path to target',clear?5:0,5,clear?'No known active opposing 15m zone before TP':f.opposingBeforeTarget?'Opposing zone before TP':'Target / zone evidence unavailable');
+  const cost=item.costRisk,costPoints=Number.isFinite(cost)&&cost>=0?(cost<=.1?5:cost<.2?3:0):0;
+  add('costs','Estimated costs',costPoints,5,Number.isFinite(cost)?(cost*100).toFixed(0)+'% of stop risk':'Costs unavailable — no points');
+  const geometry=[item.entry,item.stop,item.target].every(v=>Number.isFinite(v)&&v>0)&&sign*(item.entry-item.stop)>0&&sign*(item.target-item.entry)>0&&item.usable;
+  const rawScore=rows.reduce((sum,r)=>sum+r.points,0),caps=[];
+  if(item.phase==='WATCH')caps.push({max:59,reason:'Early watch without a confirmed reaction'});
+  if(trends['4h']===-sign||trends['15m']===-sign)caps.push({max:59,reason:'4H or 15m trend opposes the idea'});
+  if(Number.isFinite(rr)&&rr<1)caps.push({max:39,reason:'Less than 1R room to the suggested TP'});
+  if(Number.isFinite(cost)&&cost>=.2)caps.push({max:59,reason:'Estimated costs consume at least 20% of stop risk'});
+  if(Number.isFinite(f.stopAtr)&&f.stopAtr>3)caps.push({max:59,reason:'Stop is wider than 3 × 15m ATR'});
+  const score=geometry?Math.min(rawScore,...caps.map(c=>c.max)):0;
+  return {version:'STRUCTURE_QUALITY_V1',score,rawScore,max:100,grade:!geometry?'Incomplete':score>=80?'Strong':score>=60?'Moderate':score>=40?'Weak':'Low',rows,
+    geometryValid:Boolean(geometry),caps,basis:'Frozen at detection for the original suggested levels; not a probability or profitability forecast'};
+}
 function cslOpportunityPlan(pattern, sign, bar, context, boundary, atr, zone, costs) {
   const entry=bar.close,buffer=Math.max(atr*.05,entry*.000001),stop=boundary-sign*buffer,risk=sign*(entry-stop);
   const risks=[],targets=[],m=context['15m'],h=context['4h'];
@@ -69,7 +100,13 @@ function cslBuildOpportunities(source, interval, costs=null) {
       const opposing=[...active.values()].filter(z=>z.kind===(sign===1?'SUPPLY':'DEMAND')&&sign*((sign===1?z.lower:z.upper)-b.close)>0)
         .sort((a,c)=>sign*((sign===1?a.lower:a.upper)-(sign===1?c.lower:c.upper)))[0];
       if(opposing && item.target!=null && sign*((sign===1?opposing.lower:opposing.upper)-item.target)<=0)item.risks.push('Opposing 15m '+opposing.kind.toLowerCase()+' lies before or at TP');
-      item.id=pattern+':'+key+':'+at+':'+sign;item.phase=phase;item.evidence=evidence;out.push(item);
+      item.id=pattern+':'+key+':'+at+':'+sign;item.phase=phase;item.evidence=evidence;
+      const range=context['15m']?.range;
+      item.qualityFacts={trends:Object.fromEntries(['15m','4h','1d','1w'].map(tf=>[tf,context[tf]?.trend ?? null])),
+        minuteInternal:context['1m']?.internal ?? null,zoneKnown:Boolean(zone),zoneVisits:zone?.visits ?? null,
+        zoneAgeSeconds:zone?at-zone.availableAt:null,inValue:range?(sign===1?b.close<=range.equilibrium:b.close>=range.equilibrium):null,
+        stopAtr:atr>0?Math.abs(item.entry-item.stop)/atr:null,opposingBeforeTarget:item.target!=null&&guide.supplyDemand?Boolean(opposing&&sign*((sign===1?opposing.lower:opposing.upper)-item.target)<=0):null};
+      item.quality=cslOpportunityQuality(item);out.push(item);
     };
     for(const e of events.get(at)||[]){
       const sign=e.direction;if(![1,-1].includes(sign))continue;

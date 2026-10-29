@@ -334,6 +334,9 @@ body.photon-chart-focus #photon-context-strip{display:none}
     <section id="opportunity-panel" hidden aria-label="Possible trade ideas">
       <strong id="opportunity-title">Possible trade · manual decision</strong>
       <select id="opportunity-select" aria-label="Known possible trade"></select>
+      <p id="opportunity-quality" role="status"></p>
+      <small>Evidence checklist, not a win probability.</small>
+      <details id="opportunity-quality-detail"><summary>Why this score?</summary><div id="opportunity-quality-breakdown"></div></details>
       <p id="opportunity-evidence"></p><p id="opportunity-levels"></p>
       <ul id="opportunity-risks"></ul>
       <button id="opportunity-use">Use as editable plan</button><button id="opportunity-skip">Skip this idea</button>
@@ -1289,6 +1292,13 @@ body.photon-chart-focus #photon-context-strip{display:none}
     const item=selectedOpportunity(),body=$('opportunity-risks');body.replaceChildren();
     if(!item){$('opportunity-use').disabled=true;$('opportunity-skip').disabled=true;return;}
     opportunitySelection=item.id;
+    const quality=item.quality || cslOpportunityQuality(item);
+    $('opportunity-quality').textContent=(item.expired?'Expired idea · original ':'Signal quality at detection · ')+quality.score+'/100 · '+quality.grade;
+    $('opportunity-quality').dataset.grade=item.expired?'Expired':quality.grade;
+    const breakdown=$('opportunity-quality-breakdown');breakdown.replaceChildren();
+    for(const row of quality.rows){const line=document.createElement('p');line.textContent=row.label+': '+row.points+'/'+row.max+' — '+row.detail;breakdown.appendChild(line);}
+    for(const cap of quality.caps || []){const line=document.createElement('p');line.textContent='Score ceiling '+cap.max+': '+cap.reason;breakdown.appendChild(line);}
+    const basis=document.createElement('p');basis.textContent=quality.basis+'. Editing your manual SL/TP does not change this original signal score.'+(quality.geometryValid?'':' Invalid or incomplete entry / SL / TP geometry forces the score to zero.');breakdown.appendChild(basis);
     const age=Math.max(0,Math.floor((replayCutoff-item.availableAt)/60)),decision=opportunityChoice(item);
     $('opportunity-title').textContent='Possible '+item.side+' · '+opportunityNames[item.pattern]+' · '+(item.expired?'expired idea':item.phase.replaceAll('_',' ').toLowerCase());
     const evidence=item.touchAt!=null?item.evidence.replace(' at '+item.touchAt,' at '+fmtTime(item.touchAt)+' UTC'):item.evidence;
@@ -1313,13 +1323,13 @@ body.photon-chart-focus #photon-context-strip{display:none}
     opportunityLastCutoff=replayCutoff;
     const selector=$('opportunity-select'),selected=opportunitySelection;
     selector.replaceChildren();
-    for(const item of recent)selector.add(new Option(item.side+' · '+opportunityNames[item.pattern]+' · '+fmtTime(item.availableAt)+(opportunityChoice(item)?' · reviewed':''),item.id));
+    for(const item of recent)selector.add(new Option(item.side+' · '+opportunityNames[item.pattern]+' · '+(item.quality?.score ?? 0)+'/100 · '+fmtTime(item.availableAt)+(opportunityChoice(item)?' · reviewed':''),item.id));
     if(fresh.length){opportunitySelection=fresh.find(x=>x.phase!=='WATCH')?.id || fresh[0].id;}
     else if(recent.some(x=>x.id===selected))opportunitySelection=selected;
     else opportunitySelection=recent[0]?.id || null;
     if(opportunitySelection)selector.value=opportunitySelection;
     $('opportunity-status').textContent=recent.length?recent.length+' possible setup'+(recent.length===1?'':'s')+' in the last hour · manual decision':'No recent setup. Next possible setup advances to the next known observation.';
-    $('opportunity-title').textContent='No recent trade idea';$('opportunity-evidence').textContent='Watching 15m breaks, known zone touches, and sweeps. No automatic entries.';$('opportunity-levels').textContent='';
+    $('opportunity-quality').textContent='';$('opportunity-quality-breakdown').replaceChildren();$('opportunity-title').textContent='No recent trade idea';$('opportunity-evidence').textContent='Watching 15m breaks, known zone touches, and sweeps. No automatic entries.';$('opportunity-levels').textContent='';
     renderOpportunityDetails();
     if(fresh.length&&$('opportunity-pause').checked&&!currentReview()?.manualEntry){stopReplay();workspacePanels.show('plan');}
   }

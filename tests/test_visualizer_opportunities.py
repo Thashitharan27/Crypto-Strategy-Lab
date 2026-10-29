@@ -130,6 +130,10 @@ def test_replay_notification_controls_and_manual_handoff_are_wired():
     for identifier in ['opportunity-enabled','opportunity-pause','opportunity-pattern','opportunity-side','opportunity-watch','opportunity-next','opportunity-select','opportunity-use','opportunity-skip']:
         assert f'id="{identifier}"' in html
     assert 'opportunityDecisions,exportedAt:' in html
+    assert 'id="opportunity-quality"' in html
+    assert 'Why this score?' in html
+    assert 'not a win probability' in html
+    assert 'original signal score' in html
     assert 'record.opportunityOrigins=' in html
     assert 'No automatic entries.' in html
     handler=html.split("$('opportunity-use').addEventListener('click',()=>{",1)[1].split("$('opportunity-next')",1)[0]
@@ -140,3 +144,48 @@ def test_replay_notification_controls_and_manual_handoff_are_wired():
     if node:
         script=html.split('<script>',1)[1].split('</script>',1)[0]
         subprocess.run([node,'-e',"new(require('vm').Script)(require('fs').readFileSync(0,'utf8'))"],input=script,text=True,encoding='utf-8',capture_output=True,check=True)
+
+
+QUALITY_FIXTURE=r'''
+const good={side:'LONG',entry:100,stop:98,target:104,usable:true,rewardRisk:2,costRisk:.05,phase:'CONFIRMED_REACTION',
+qualityFacts:{trends:{'4h':1,'15m':1,'1d':1,'1w':1},minuteInternal:1,zoneKnown:true,zoneVisits:1,zoneAgeSeconds:900,inValue:true,opposingBeforeTarget:false,stopAtr:1}};
+'''
+
+
+def test_quality_full_breakdown_totals_one_hundred():
+    result=js(QUALITY_FIXTURE+'console.log(JSON.stringify(cslOpportunityQuality(good)));')
+    assert result['score']==100 and result['grade']=='Strong'
+    assert sum(x['max'] for x in result['rows'])==100
+    assert sum(x['points'] for x in result['rows'])==100
+    assert result['version']=='STRUCTURE_QUALITY_V1'
+    assert 'not a probability' in result['basis']
+
+
+@pytest.mark.parametrize('change,ceiling',[("good.phase='WATCH'",59),("good.qualityFacts.trends['4h']=-1",59),("good.rewardRisk=.9",39),("good.costRisk=.3",59),("good.qualityFacts.stopAtr=4",59),("good.usable=false",0)])
+def test_quality_risk_ceilings(change,ceiling):
+    result=js(QUALITY_FIXTURE+change+';console.log(JSON.stringify(cslOpportunityQuality(good)));')
+    assert result['score']<=ceiling
+    assert result['grade']!='Strong'
+
+
+def test_unknown_quality_evidence_never_earns_alignment_points():
+    result=js(QUALITY_FIXTURE+"good.qualityFacts={};good.costRisk=null;console.log(JSON.stringify(cslOpportunityQuality(good)));")
+    assert result['score']==35  # Known reaction + room only.
+    assert all(x['points']==0 for x in result['rows'] if x['key'] not in ['confirmation','room'])
+
+
+def test_quality_is_frozen_on_expiration_and_manual_level_edits_are_separate():
+    result=js(r'''
+const item=cslBuildOpportunities(source,900).find(x=>x.pattern==='ZONE_REACTION'&&x.phase==='CONFIRMED_REACTION');
+const original=JSON.stringify(item.quality);
+bars[3].low=90;const expired=cslOpportunityNow(item,source,900,3600);
+const manualPlan={entry:item.entry,stop:item.stop-5,target:item.target+10};
+console.log(JSON.stringify({expired:expired.expired,frozen:JSON.stringify(expired.quality)===original,originalUnchanged:JSON.stringify(item.quality)===original,manualPlan}));
+''')
+    assert result['expired'] and result['frozen'] and result['originalUnchanged']
+
+
+@pytest.mark.parametrize('change',["good.target=99","good.stop=101","good.entry=NaN","good.target=null"])
+def test_quality_rejects_invalid_geometry_even_with_stale_usable_flag(change):
+    result=js(QUALITY_FIXTURE+change+';console.log(JSON.stringify(cslOpportunityQuality(good)));')
+    assert result['score']==0 and result['grade']=='Incomplete'

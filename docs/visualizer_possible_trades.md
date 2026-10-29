@@ -52,3 +52,43 @@ expiration checks use only subsequent candles already closed at the current
 clock. Original trades, strategies, backtest outputs and exchange orders are
 unchanged. Multiple observations can describe one market move; counts are not
 counts of independent trades. This tool performs no profitability selection.
+
+## Signal quality score
+
+Each idea shows **Signal quality at detection · 0–100** and a **Why this score?**
+breakdown. The fixed `STRUCTURE_QUALITY_V1` checklist awards:
+
+| Evidence | Maximum points |
+| --- | ---: |
+| 4H alignment | 15 |
+| 15m alignment | 10 |
+| Daily alignment | 3 |
+| Weekly alignment | 2 |
+| Completed 15m reaction / reclaim | 15 |
+| Known aligned 1m internal structure | 5 |
+| Target room | 20 |
+| Zone freshness | 10 |
+| 15m premium / discount location | 10 |
+| Clear path before known opposing 15m zones | 5 |
+| Estimated fees / slippage relative to stop risk | 5 |
+
+A completed zone reaction earns 15 confirmation points; a completed reclaim earns
+12; an early watch earns zero. Room earns 20 at >=2R, 15 at >=1.5R, 10 at >=1R,
+otherwise zero. A known zone on its first visit or unvisited, <=24 hours old,
+earns 10; other known zones earn 5. Cost estimates <=10% of stop risk earn 5,
+above 10% but below 20% earn 3; otherwise zero. Unknown evidence earns no points.
+Premium/discount includes the midpoint. Path points require a known forward
+target with no active opposing 15m zone before or at it.
+
+The score is capped at 59 for early watches, opposing 4H/15m trends, costs >=20%
+of stop risk, or stops wider than 3 x 15m ATR. Less than 1R target room caps it at
+39. Missing/invalid entry-SL-TP geometry forces zero. The breakdown shows all
+applicable ceilings. Labels are Strong (80–100), Moderate (60–79), Weak (40–59),
+and Low (0–39); incomplete geometry is labelled Incomplete.
+
+Scores are frozen using evidence known at the observation's timestamp, and
+exported with the idea and its breakdown. An expired idea retains its original
+score and is explicitly labelled expired. Copying or editing a manual plan does
+not change the original signal score. This is a manually chosen evidence rubric,
+not a calibrated win probability, profit forecast, outcome-fitted model, or an
+automatic entry gate. Entry and Skip remain your decisions.
