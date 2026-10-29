@@ -158,6 +158,14 @@ class RiskExecutionWorkspace(QWidget):
         self.account["photon_demand_pullback"].setText("Long: bullish 4H → bullish 15m change → 15m demand pullback → 1m return; TP 15m 50%")
         self.sd_card.add_control("photon_demand_pullback", self.account["photon_demand_pullback"])
         self.account["photon_demand_pullback"].toggled.connect(self.refresh_visibility)
+        self.sd_card.add_field("photon_demand_entry_model", "Demand entry pattern", self.account["photon_demand_entry_model"])
+        model = self.account["photon_demand_entry_model"]
+        for value, label in (("ORIGINAL", "Original — 1m trend return / bullish bounce"),
+                             ("FIRST_PULLBACK", "First pullback — break the 1m pullback high"),
+                             ("SWEEP_RECLAIM", "Sweep and reclaim — bullish break + retest")):
+            model.setItemText(model.findData(value), label)
+        model.currentIndexChanged.connect(self.refresh_visibility)
+
         self.account["photon_midpoint_reversal"].setText("15m trend change in 4H value; require 1R to the 50% midpoint")
         self.sd_card.add_control("photon_midpoint_reversal", self.account["photon_midpoint_reversal"])
         self.account["photon_midpoint_reversal"].toggled.connect(self.refresh_visibility)
@@ -1072,6 +1080,7 @@ class RiskExecutionWorkspace(QWidget):
         mapping = self._signal_strategy_mode() == 'PHOTON_STRUCTURE_MAP'
         demand = photon and self.account["photon_demand_pullback"].isChecked()
         self.sd_card.set_row_visible("photon_demand_pullback", photon)
+        self.sd_card.set_row_visible("photon_demand_entry_model", demand)
         midpoint = photon and not demand and self.account["photon_midpoint_reversal"].isChecked()
         quarter = photon and (demand or midpoint or self.account["photon_quarter_range"].isChecked())
         self.lesson_card.setVisible(mapping or photon and not quarter and self.account['photon_zone_reversal'].isChecked())
@@ -1200,6 +1209,10 @@ class RiskExecutionWorkspace(QWidget):
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "PHOTON_4H_TREND":
             if execution.photon_demand_pullback:
+                if execution.photon_demand_entry_model != "ORIGINAL":
+                    pattern = ("First pullback: require demand created by the fresh bullish 15m break; take only its first later visit. Buy after 1m closes above the known pullback high with bullish internal structure." if execution.photon_demand_entry_model == "FIRST_PULLBACK" else "Sweep and reclaim: at 15m demand, wick below the 15m swing low known at alignment and close back above it. Require a later bullish 1m internal change and close above the pullback high, then a later retest that holds above that broken high.")
+                    self.summary_label.setText(pattern + " Bullish 4H and 15m required. Enter next 1m open; SL below demand plus ATR buffer; TP frozen at the 15m 50% midpoint. Minimum R checked again at fill. One attempt per bullish 15m change; confirmed candles only.")
+                    return
                 self.summary_label.setText("Long only. Require bullish 4H and a fresh bullish 15m trend change. Wait for a later touch of confirmed 15m demand. After a bearish 1m pullback require a bullish internal change; if 1m stays bullish require a later close above the demand zone and touch candle high. Enter next 1m open. SL below demand plus ATR buffer; TP frozen at the 15m range 50% midpoint. Minimum R rechecked at fill. One attempt per 15m change; cancel on lost alignment, invalidation, gap or expiry.")
                 return
             if execution.photon_midpoint_reversal:

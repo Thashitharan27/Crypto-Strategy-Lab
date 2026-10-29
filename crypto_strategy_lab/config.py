@@ -119,6 +119,7 @@ class BacktestConfig:
     photon_retest_minutes: int = 60
     photon_midpoint_fixed_1r: bool = False
     photon_demand_pullback: bool = False
+    photon_demand_entry_model: str = "ORIGINAL"
     photon_midpoint_reversal: bool = False
     photon_quarter_range: bool = False
     photon_target_4h: bool = False

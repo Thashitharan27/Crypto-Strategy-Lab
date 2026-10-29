@@ -6,8 +6,17 @@ import pandas as pd
 from .photon_structure import valid_bar
 
 
+ENTRY_MODELS = ('ORIGINAL', 'FIRST_PULLBACK', 'SWEEP_RECLAIM')
+
+
+def validate_entry_model(model):
+    if model not in ENTRY_MODELS:
+        raise ValueError('Photon demand entry model must be ORIGINAL, FIRST_PULLBACK or SWEEP_RECLAIM')
+
+
 def demand_pullback_setups(bars, atr_values, guides, *, confirmation_minutes=1440,
-                          stop_buffer_atr=.05, minimum_r=1.):
+                          stop_buffer_atr=.05, minimum_r=1., entry_model="ORIGINAL"):
+    validate_entry_model(entry_model)
     from .photon_trend import MODE, validate_settings
     validate_settings(confirmation_minutes, 1)
     if len(bars) != len(atr_values):
@@ -62,7 +71,9 @@ def demand_pullback_setups(bars, atr_values, guides, *, confirmation_minutes=144
             campaign = None
             continue
         if any(e['direction'] == 1 for e in changes[at]):
-            campaign = dict(alignmentAt=at, parent=None, bearish=False)
+            campaign = dict(alignmentAt=at, parent=None, bearish=False,
+                            sweepLevel=(m.get('low') or {}).get('price'),
+                            swept=False, sweepAt=None, shifted=False, breakAt=None)
             continue
         if campaign is None:
             continue
@@ -72,11 +83,19 @@ def demand_pullback_setups(bars, atr_values, guides, *, confirmation_minutes=144
         campaign['bearish'] |= internal == -1
         if campaign['parent'] is None:
             eligible = [z for z in touches if z['id'] in zones
+                        and (entry_model != 'FIRST_PULLBACK' or
+                             z['availableAt'] == campaign['alignmentAt'])
                         and b['low'] > z['lower']-stop_buffer_atr*float(atr_values[i])]
             if eligible and at > campaign['alignmentAt']:
                 parent = max(eligible, key=lambda z: (z['availableAt'], z['id']))
                 campaign.update(parent=deepcopy(parent), touchAt=at,
-                                touchTime=b['time'], touchHigh=b['high'])
+                                touchTime=b['time'], touchHigh=b['high'],
+                                pullbackHigh=max(b['high'], (minute.get('internalHigh') or {}).get('price', b['high'])))
+                level = campaign['sweepLevel']
+                campaign['swept'] = level is not None and b['low'] < level < b['close']
+                if campaign['swept']: campaign['sweepAt'] = at
+                if entry_model == 'SWEEP_RECLAIM' and level is None:
+                    campaign = None
             continue
         parent = campaign['parent']
         if parent['id'] not in zones or b['low'] < parent['lower']:
@@ -84,10 +103,30 @@ def demand_pullback_setups(bars, atr_values, guides, *, confirmation_minutes=144
             continue
         if at <= campaign['touchAt']:
             continue
-        # Bearish pullbacks need a new bullish internal shift. A continuously
-        # bullish 1m trend instead needs an observable upward departure.
-        returned = (internal == 1 and prior == -1 if campaign['bearish'] else
-                    internal == 1 and b['close'] > campaign['touchHigh'])
+        if entry_model == 'SWEEP_RECLAIM':
+            level = campaign['sweepLevel']
+            if campaign['breakAt'] is None:
+                if not campaign['swept'] and b['low'] < level < b['close'] and b['low'] <= parent['upper']:
+                    campaign['swept'] = True
+                    campaign['sweepAt'] = at
+                # A bullish change must follow the sweep, not precede it.
+                if campaign['swept'] and at > campaign['sweepAt'] and internal == 1 and prior == -1:
+                    campaign['shifted'] = True
+                if (campaign['swept'] and campaign['shifted'] and internal == 1
+                        and b['close'] > max(parent['upper'], campaign['pullbackHigh'])):
+                    campaign.update(breakAt=at, breakLevel=campaign['pullbackHigh'])
+                continue
+            level = campaign['breakLevel']
+            if b['close'] < level:
+                campaign = None
+                continue
+            returned = (internal == 1 and b['low'] <= level < b['close'])
+        elif entry_model == 'FIRST_PULLBACK':
+            returned = internal == 1 and b['close'] > campaign['pullbackHigh']
+        else:
+            # Original model keeps its existing trend-return behavior.
+            returned = (internal == 1 and prior == -1 if campaign['bearish'] else
+                        internal == 1 and b['close'] > campaign['touchHigh'])
         if not returned or b['close'] <= parent['upper']:
             continue
         av = float(atr_values[i])
@@ -104,7 +143,10 @@ def demand_pullback_setups(bars, atr_values, guides, *, confirmation_minutes=144
                     confirmedTime=iso(parent['availableAt']), touchTime=iso(campaign['touchTime']),
                     bounceTime=iso(b['time']))
         signals[i] = dict(version=1, strategy=MODE, side='LONG',
-            entryModel='15M_DEMAND_PULLBACK', entryExecution='MARKET_NEXT_OPEN',
+            entryModel='15M_DEMAND_PULLBACK' if entry_model == 'ORIGINAL' else entry_model,
+            demandEntryModel=entry_model, sweepLevel=campaign['sweepLevel'],
+            sweepConfirmed=campaign['swept'], pullbackHigh=campaign.get('pullbackHigh'),
+            breakAt=campaign['breakAt'], entryExecution='MARKET_NEXT_OPEN',
             entry=entry, stop=stop, target=target, stopSource='15M_ZONE',
             stopBoundary=parent['lower'], signalIndex=i, signalTime=iso(b['time']),
             signalAvailableAt=at, expiresAt=at+60,

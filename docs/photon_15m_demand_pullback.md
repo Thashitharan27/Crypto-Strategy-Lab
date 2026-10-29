@@ -29,3 +29,35 @@ short entries. It uses the app's existing close-confirmed Photon swing, internal
 structure, and mechanical full-wick demand definitions. It is a backtest option;
 no exchange orders are submitted. Sequence and engine tests validate behavior,
 but do not establish profitability.
+
+## Entry-pattern comparison
+
+Under the enabled demand-pullback checkbox, use **Demand entry pattern**:
+
+| Choice | Confirmation |
+| --- | --- |
+| Original | Existing 1m bearish-to-bullish return, or bullish bounce above the touch candle high. |
+| First pullback | Only demand created at the fresh bullish 15m trend break qualifies. After its first later touch, require bullish 1m internal structure and a close above the frozen pullback high. |
+| Sweep and reclaim | At demand, wick below the 15m swing low saved at alignment and close back above it. Then require a later bearish-to-bullish 1m internal change and close above the frozen pullback high. Wait for another candle to retest that high and close above it with bullish internal structure. |
+
+The frozen pullback high is the greater of the touch candle high and the latest
+known 1m internal high at touch. This explicit mechanical definition also covers
+pullbacks where 1m remains bullish. A sweep cannot break below demand's lower
+boundary after the touch; a failed retest closing below the broken high cancels
+the sweep setup. A missing known 15m low cannot be supplied retroactively.
+
+All choices use bullish 4H/15m context, next-1m-open fills, the same demand SL,
+15m midpoint TP, costs and minimum-R checks. Original remains the default for
+existing saved configurations. Each confirmed 15m change permits one signal
+attempt; a rejected fill does not create another attempt.
+
+Ready-to-load presets:
+
+- `Photon_15m_Demand_Pullback_1m.json` — Original.
+- `Photon_15m_First_Pullback_1m.json` — First pullback.
+- `Photon_15m_Sweep_Reclaim_1m.json` — Sweep and reclaim.
+
+Restart the app to load the new selector, then choose **Photon — Automated
+Trades / 1m Confirmation → Risk Execution → Supply & demand retest**, enable
+the long demand-pullback checkbox, and choose the pattern. These choices are
+inside that strategy, not separate signal-strategy dropdown items.
