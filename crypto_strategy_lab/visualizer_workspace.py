@@ -97,6 +97,13 @@ body.photon-structure #reviewbar>*{max-width:100%;flex-shrink:1}
 #fvg-review{font-size:12px;line-height:1.5;padding:10px 0;margin-top:10px;border:0;background:transparent}
 @media(max-width:1100px){#toolbar{gap:4px}.brand{display:none}#trade-panel{width:290px}#toolbar .toolbar-spacer{min-width:0}#workspace-clock{display:none}#timeframe-note{display:none}}
 @media(max-width:760px){#toolbar{overflow-x:auto}.chart-options-body{position:fixed;top:48px;right:8px}#toolbar .toolbar-spacer{display:none}#app{grid-template-rows:48px minmax(0,1fr) auto auto auto}#trade-panel{position:absolute;z-index:20;right:44px;top:0;bottom:0;width:min(310px,calc(100% - 92px));box-shadow:-8px 0 25px #0006}#reviewbar{padding:5px 8px}#replay-controls{justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto}#replay-controls>*{flex-shrink:0}#trade-panel .manual-plan input{width:110px}}
+
+#opportunity-controls[hidden],#opportunity-panel[hidden]{display:none}
+#opportunity-panel{padding:12px;border:1px solid #6b643c;border-radius:5px;background:#24251e;margin-bottom:12px;font-size:12px;line-height:1.5}
+#opportunity-panel select{display:block;width:100%;margin:8px 0}#opportunity-panel p{white-space:normal;margin:8px 0}
+#opportunity-risks{padding-left:18px;color:#f0cb7d;max-height:150px;overflow:auto}
+#opportunity-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px}
+#opportunity-status{color:#f0cb7d}#opportunity-panel button{margin:3px 2px}
 """
 
 WORKSPACE_HELPERS = r"""

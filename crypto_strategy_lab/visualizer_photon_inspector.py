@@ -12,6 +12,7 @@ function cslPhotonTextVisible(tf,event,events) {
 function initPhotonInspector() {
   const panel=$('photon-inspector'),layers=$('photon-inspector-layers'),details=$('photon-inspector-details');
   $('photon-context').before($('photon-context-strip'));
+  if($('opportunity-controls'))$('photon-context-strip').before($('opportunity-controls'));
   const narrative=document.createElement('div');narrative.id='photon-context-full';details.append(narrative);
   details.append($('photon-context'),$('photon-entry-review'),$('photon-status'));
   layers.append($('photon-labels-wrap'),$('photon-developing-wrap'),$('photon-value-controls'),$('photon-zone-filters'));
