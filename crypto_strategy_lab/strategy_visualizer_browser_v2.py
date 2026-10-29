@@ -2732,6 +2732,7 @@ body.photon-chart-focus #photon-context-strip{display:none}
       refreshReplay();
     } catch (error) {
       if (generation !== loadGeneration) return;
+      replayBusy=false;
       currentTimeframe = payload?.chartTimeframe || boot.run.timeframe;
       timeframeSelect.value = currentTimeframe;
       $('timeframe-note').textContent = 'Could not load ' + requestedTimeframe + ': ' + error.message;

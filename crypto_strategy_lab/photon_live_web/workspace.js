@@ -83,7 +83,9 @@
   async function syncMarket(){
     if(refreshing||replayBusy)return;
     refreshing=true;const tf=currentTimeframe;
+    lastMappingRefresh=Date.now();
     try{
+      if(!sourcePayload){await load();return;}
       const next=await getChartPayload(tf);
       if(tf!==currentTimeframe)return;
       if(replayActive){status.textContent='◷ Replay · live feed in background';return;}
