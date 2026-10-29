@@ -155,7 +155,7 @@ class RiskExecutionWorkspace(QWidget):
         for name,label in (("photon_confirmation_minutes","Photon context / confirmation expiry (minutes)"),("photon_retest_minutes","Photon origin retest expiry (minutes)")):
             self.sd_card.add_field(name,label,self.account[name])
             self.account[name].setRange(1,10080)
-        self.account["photon_candle_pullback"].setText("4H trend → 15m pullback / trend change → red short or green long; TP previous low / high")
+        self.account["photon_candle_pullback"].setText("4H trend → 15m pullback → first red short / first green long; TP previous low / high")
         self.sd_card.add_control("photon_candle_pullback", self.account["photon_candle_pullback"])
         self.account["photon_candle_pullback"].toggled.connect(self.refresh_visibility)
         self.sd_card.add_field("photon_candle_target_timeframe", "Previous low / high timeframe", self.account["photon_candle_target_timeframe"])
@@ -1226,7 +1226,7 @@ class RiskExecutionWorkspace(QWidget):
         if self._signal_strategy_mode() == "PHOTON_4H_TREND":
             if execution.photon_candle_pullback:
                 target=execution.photon_candle_target_timeframe.upper()
-                self.summary_label.setText(f"Both directions, actual 1m execution. Bearish 4H: wait for a green 15m pullback, a fresh confirmed bearish 15m swing change, then a closed red 15m candle. Bullish: reverse the colours and directions. The change candle itself qualifies if its colour matches. Fill next 1m open. Freeze the previous {target} swing low / high from before the pullback. SL beyond the entire observed pullback extreme plus the 1m ATR buffer. No zone touch or 1m confirmation required. Skip when TP is behind entry; one attempt per pullback. Minimum-R filter is optional and off by default.")
+                self.summary_label.setText(f"Both directions, actual 1m execution. Bearish 4H: wait for a green 15m pullback, then the first closed red 15m candle. Bullish: red pullback, then first closed green candle. No 15m swing change or 1m confirmation is required. Fill next 1m open. Freeze the previous {target} swing low / high from before the pullback. SL beyond the entire observed pullback extreme plus the 1m ATR buffer. No zone touch or 1m confirmation required. Skip when TP is behind entry; one attempt per pullback. Minimum-R filter is optional and off by default.")
                 return
             if execution.photon_demand_pullback:
                 if execution.photon_demand_entry_model != "ORIGINAL":

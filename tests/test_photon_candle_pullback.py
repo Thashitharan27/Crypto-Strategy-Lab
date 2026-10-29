@@ -42,11 +42,9 @@ def test_colour_change_target_stop_and_every_prefix(short,tf):
         assert candle_pullback_setups(bars[:n],np.ones(n),g,target_timeframe=tf)==(signals[:n],live[:n])
 
 
-@pytest.mark.parametrize('case',['no_change','bos_only','opposing_4h','no_pullback','unknown_target','stale','gap','target_behind','minimum_r'])
+@pytest.mark.parametrize('case',['opposing_4h','no_pullback','unknown_target','stale','gap','target_behind','minimum_r'])
 def test_rejects_incomplete_setups(case):
     bars,g=scenario();kwargs={}
-    if case=='no_change':g['15m']['events']=[]
-    if case=='bos_only':g['15m']['events'][0]['kind']='BOS'
     if case=='opposing_4h':g['4h']['snapshots'][0]['trend']=-1
     if case=='no_pullback':bars[14]['close']=111
     if case=='unknown_target':g['15m']['snapshots'][0]['range']=None
@@ -59,7 +57,7 @@ def test_rejects_incomplete_setups(case):
 
 def test_later_colour_confirmation_and_frozen_target():
     bars,g=scenario();t=bars[0]['time']
-    # Change candle is red despite a bullish structural change: wait for green.
+    # More red pullback candles: the first green candle triggers, regardless of swing events.
     bars[29]['close']=105.5
     for b in bars[30:]:b.update(open=106,high=115,low=105,close=106)
     bars[44]['close']=112
@@ -67,7 +65,8 @@ def test_later_colour_confirmation_and_frozen_target():
     signals,_=candle_pullback_setups(bars,np.ones(len(bars)),g)
     assert [i for i,s in enumerate(signals) if s]==[44]
     assert signals[44]['target']==120
-    assert signals[44]['alignmentAt']==t+1800
+    assert signals[44]['colourConfirmedAt']==t+2700
+    assert signals[44]['trendChange15m'] is None
 
 
 @pytest.mark.parametrize('short',[False,True])
@@ -123,3 +122,86 @@ def test_saved_setup_has_visualizer_evidence():
     evidence=CompletedRunVisualizer.supply_demand_derivation(model,0)
     assert evidence['status']=='AVAILABLE'
     assert evidence['target']==120
+
+
+@pytest.mark.parametrize('short',[False,True])
+@pytest.mark.parametrize('event_kind',[None,'BOS','TREND_CHANGE'])
+def test_colour_return_does_not_require_15m_swing_alignment_or_change(short,event_kind):
+    bars,g=scenario(short)
+    sign=-1 if short else 1
+    for s in g['15m']['snapshots']:s['trend']=-sign
+    g['15m']['events']=[] if event_kind is None else [dict(kind=event_kind,direction=-sign,availableAt=bars[29]['time']+60)]
+    signals,_=candle_pullback_setups(bars,np.ones(len(bars)),g)
+    assert signals[29]['entryRule']=='FIRST_COLOUR_RETURN'
+    assert signals[29]['entryRuleVersion']==2
+    assert signals[29]['trendChange15m'] is None
+
+
+def test_rejected_first_colour_is_not_retried_on_later_same_colour():
+    bars,g=scenario()
+    # First green offers less than 1R; later green would offer ample room.
+    bars[29]['close']=119
+    for b in bars[30:]:b.update(open=109,high=116,low=108,close=115)
+    signals,_=candle_pullback_setups(bars,np.ones(len(bars)),g,minimum_r=1)
+    assert not any(signals)
+
+
+def test_doji_does_not_trigger_and_later_first_green_does():
+    bars,g=scenario()
+    bars[29]['close']=bars[15]['open']
+    for b in bars[30:]:b.update(open=106,high=115,low=105,close=106)
+    bars[44]['close']=112
+    signals,_=candle_pullback_setups(bars,np.ones(len(bars)),g)
+    assert signals[29] is None and signals[44]
+
+
+def reported_case():
+    from pathlib import Path
+    data=json.loads((Path(__file__).parent/'fixtures/photon_june1_colour_entry.json').read_text())
+    return data['bars'],data['guides']
+
+
+def test_reported_red_candle_triggers_before_later_swing_change():
+    bars,g=reported_case()
+    signals,_=candle_pullback_setups(bars,np.ones(len(bars)),g,target_timeframe='4h')
+    s=next(x for x in signals if x)
+    assert pd.Timestamp(s['triggerCandle']['time'])==pd.Timestamp('2026-06-01T17:30Z')
+    assert s['signalAvailableAt']==int(pd.Timestamp('2026-06-01T17:45Z').timestamp())
+    assert s['signalAvailableAt']<g['15m']['events'][0]['availableAt']
+    assert s['stopBoundary']==71761.1  # The later 71788.5 peak is not known.
+    assert s['target']==71035.3
+
+
+def test_reported_entry_engine_fills_at_1745_and_not_1915(monkeypatch):
+    from crypto_strategy_lab.config import BacktestConfig
+    from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
+    from crypto_strategy_lab.strategy_profiles import StrategyProfile
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles,MARKET_PERMISSIONS
+    from crypto_strategy_lab.photon_trend import MODE
+    bars,g=reported_case()
+    pad=[dict(time=bars[0]['time']-(150-i)*60,open=71314.9,high=71324.9,low=71304.9,close=71314.9) for i in range(150)]
+    monkeypatch.setattr('crypto_strategy_lab.photon_midpoint_reversal.prepare_midpoint_context',lambda _:g)
+    p,_=compile_profiles(direction_mode=MODE,market_permissions=MARKET_PERMISSIONS)
+    config=BacktestConfig(strategy_timeframe_minutes=1,strategy_profiles={k:StrategyProfile(**asdict(v)) for k,v in p.items()},
+        photon_candle_pullback=True,photon_candle_target_timeframe='4h',use_intrabar_data=False,
+        enable_support_resistance_analysis=False,market_regime_method='ASSET_RETURN',enable_trade_telemetry=False)
+    frame=pd.DataFrame(pad+bars).rename(columns={'time':'timestamp'});frame['timestamp']=pd.to_datetime(frame.timestamp,unit='s',utc=True);frame['volume']=1.
+    e=RuleAwareDataLakeProductionBacktestEngine(frame,config);e.market_regime_values[:]='SIDEWAYS';trades=e.run()
+    assert len(trades)==1
+    row=trades.iloc[0]
+    assert pd.Timestamp(row.entry_time)==pd.Timestamp('2026-06-01T17:45Z')
+    assert row.entry_price==pytest.approx(71694.6*(1-config.slippage))
+    assert json.loads(row.supply_demand_setup)['stopBoundary']==71761.1
+
+
+def test_candle_chart_labels_distinguish_old_and_new_rules():
+    import shutil,subprocess
+    from crypto_strategy_lab.visualizer_photon import PHOTON_HELPERS
+    node=shutil.which('node')
+    if not node:pytest.skip('Node required')
+    script=PHOTON_HELPERS+'''\nconst base={pullbackAt:1,signalAvailableAt:2,side:'SHORT'};
+console.log(JSON.stringify({current:cslPhotonCandleLabels({...base,entryRule:'FIRST_COLOUR_RETURN'}),old:cslPhotonCandleLabels(base)}));'''
+    result=json.loads(subprocess.run([node],input=script,text=True,encoding='utf-8',capture_output=True,check=True).stdout)
+    assert result['current'][1][1]=='First red 15m close confirmed'
+    assert result['old'][1][1]=='15m swing change + colour confirmed'
+    assert 'CHoCH' not in json.dumps(result)
