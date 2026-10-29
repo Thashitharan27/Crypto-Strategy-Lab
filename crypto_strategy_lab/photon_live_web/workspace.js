@@ -72,7 +72,7 @@
       try{const k=JSON.parse(event.data).k;if(!k)return;
         lastMessage=Date.now();latest={time:k.t/1000,open:+k.o,high:+k.h,low:+k.l,close:+k.c};
         status.textContent=replayActive?'◷ Replay · feed connected':'● Live';
-        if(!replayActive&&candles&&liveReady){candles.update(latest);quote(latest);}
+        if(!replayActive&&!replayBusy&&payload?.chartTimeframe===currentTimeframe&&candles&&liveReady){candles.update(latest);quote(latest);}
         if(k.x)syncMarket();
       }catch(error){status.textContent='Feed error · reconnecting';socket.close();}
     };
@@ -112,7 +112,7 @@
   const ticker=setInterval(()=>{
     $('live-clock').textContent=new Date().toISOString().slice(11,19)+' UTC';
     if(currentTimeframe!==seenTimeframe){seenTimeframe=currentTimeframe;latest=null;liveReady=false;stream();}
-    if(payload&&!replayActive){liveReady=true;quote(latest||payload.candles?.at(-1));}
+    if(payload?.chartTimeframe===currentTimeframe&&!replayBusy&&!replayActive){liveReady=true;quote(latest||payload.candles?.at(-1));}
     if(lastMessage&&Date.now()-lastMessage>30000&&socket?.readyState===WebSocket.OPEN)socket.close();
     if(!replayActive&&Date.now()-lastMappingRefresh>15000)syncMarket();
   },1000);
