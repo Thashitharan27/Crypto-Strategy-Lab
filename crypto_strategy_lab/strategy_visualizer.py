@@ -2252,7 +2252,7 @@ class CompletedRunVisualizer:
             # Match the trading engine's minute source and exact warmup boundary.
             # A separately seeded 15m history can choose different swing anchors.
             from .photon_lesson import options
-            if config.execution.photon_midpoint_reversal:
+            if config.execution.photon_candle_pullback or config.execution.photon_midpoint_reversal:
                 from .photon_midpoint_reversal import prepare_midpoint_context
                 guides = prepare_midpoint_context(bars)
             elif config.execution.photon_quarter_range:
