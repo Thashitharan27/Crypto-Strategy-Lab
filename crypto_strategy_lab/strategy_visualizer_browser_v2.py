@@ -11,13 +11,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import secrets
 from threading import Event, Lock, Thread
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from urllib.parse import parse_qs, urlsplit
 
-from crypto_strategy_lab.strategy_visualizer import (
-    CompletedRunVisualizer,
-    LIGHTWEIGHT_CHARTS_URL,
-)
+from crypto_strategy_lab.chart_assets import LIGHTWEIGHT_CHARTS_URL
+if TYPE_CHECKING:
+    from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
 from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
 from crypto_strategy_lab.visualizer_drawings import DRAWING_HELPERS
 from crypto_strategy_lab.visualizer_structure import STRUCTURE_HELPERS
@@ -1496,7 +1495,7 @@ body.photon-chart-focus #photon-context-strip{display:none}
   }
 
   function fmtTime(time) {
-    if (time == null) return 'n/a';
+    if (time == null || !Number.isFinite(Number(time))) return 'n/a';
     return new Date(Number(time)*1000).toISOString().replace('.000Z','Z');
   }
 

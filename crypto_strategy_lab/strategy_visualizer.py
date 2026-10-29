@@ -29,11 +29,7 @@ from crypto_strategy_lab.strategy_rule_model import (
 )
 
 
-LIGHTWEIGHT_CHARTS_VERSION = "5.2.1"
-LIGHTWEIGHT_CHARTS_URL = (
-    "https://cdn.jsdelivr.net/npm/lightweight-charts@"
-    f"{LIGHTWEIGHT_CHARTS_VERSION}/dist/lightweight-charts.standalone.production.js"
-)
+from crypto_strategy_lab.chart_assets import LIGHTWEIGHT_CHARTS_VERSION, LIGHTWEIGHT_CHARTS_URL
 
 DEFAULT_VISIBLE_CANDLES = 240
 EMA_WARMUP_BARS = 220
