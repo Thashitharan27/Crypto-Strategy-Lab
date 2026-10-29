@@ -5,10 +5,20 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 
 from crypto_strategy_lab import photon_live as live
+
+
+def test_launcher_cannot_bind_a_second_server_to_the_same_port():
+    first = live.LiveHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+    try:
+        with pytest.raises(OSError):
+            live.LiveHTTPServer(first.server_address, BaseHTTPRequestHandler)
+    finally:
+        first.server_close()
 
 
 def row(t, close_time=None):

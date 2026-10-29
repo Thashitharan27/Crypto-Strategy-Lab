@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import secrets
+import socket
 import threading
 import time
 import tempfile
@@ -20,6 +21,15 @@ from .photon_zones import attach_ranges, build_zones
 
 INTERVALS = {"1m": 60, "15m": 900, "4h": 14400, "1d": 86400, "1w": 604800}
 CACHE_DIR = Path(__file__).resolve().parents[1] / "cache" / "photon_browser"
+
+
+class LiveHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def public_json(path, **params):
@@ -230,7 +240,7 @@ def serve(port=8917, symbol="BTCUSDT", open_browser=True):
             except (BrokenPipeError, ConnectionError):
                 pass  # Navigation can cancel an in-flight history request.
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        server = LiveHTTPServer(("127.0.0.1", port), Handler)
     except OSError:
         if not port:
             raise
