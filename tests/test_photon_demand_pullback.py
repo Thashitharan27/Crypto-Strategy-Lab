@@ -91,3 +91,11 @@ def test_engine_next_open_stop_and_midpoint(monkeypatch,collision):
     assert row.long_tp==130
     assert row.long_final_exit_reason==('SL' if collision else 'TP')
     assert json.loads(row.supply_demand_setup)['entryModel']=='15M_DEMAND_PULLBACK'
+
+
+def test_inactive_legacy_exit_options_do_not_block_new_model():
+    from crypto_strategy_lab.config import BacktestConfig
+    from crypto_strategy_lab.photon_lesson import validate
+    validate(BacktestConfig(photon_demand_pullback=True, photon_zone_reversal=True,
+        photon_fixed_target_enabled=True, photon_hold_tp_until_15m_reversal=True,
+        photon_exit_on_15m_change=True))
