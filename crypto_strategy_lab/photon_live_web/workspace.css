@@ -1,0 +1,26 @@
+/* Familiar chart-workspace placement, with Photon controls in the right inspector. */
+body.photon-live{color-scheme:light;background:#fff;color:#131722;font-family:Arial, sans-serif}
+body.photon-live #app{grid-template-rows:46px minmax(0,1fr) auto auto auto 32px;grid-template-areas:'top' 'chart' 'context' 'playback' 'diagnostics' 'livefooter'}
+body.photon-live #toolbar,body.photon-live #drawing-rail,body.photon-live #reviewbar,body.photon-live #replay-controls,body.photon-live #chart-wrap{background:#fff;border-color:#e0e3eb;color:#131722}
+body.photon-live button,body.photon-live select,body.photon-live input{background:#fff;color:#131722;border-color:#e0e3eb}
+body.photon-live button:hover{background:#f0f3fa;border-color:#c7cbd6}
+body.photon-live #toolbar{gap:6px;padding:5px 10px;overflow:visible;flex-wrap:nowrap}
+body.photon-live #toolbar>button,body.photon-live #toolbar>select{border-color:transparent}
+body.photon-live #live-symbol{font-weight:700;font-size:14px;background:#f0f3fa;border-radius:18px;padding:5px 16px}
+body.photon-live #drawing-rail{width:52px;border-right:1px solid #e0e3eb}
+body.photon-live #drawing-rail button{color:#131722}
+body.photon-live #live-footer{grid-area:livefooter;display:flex;align-items:center;gap:12px;padding:0 12px 0 64px;border-top:1px solid #e0e3eb;background:white;font-size:11px;overflow:hidden}
+.live-ranges{display:flex;gap:2px}.live-ranges button{border:0;padding:4px;min-height:24px;font-size:12px}
+#live-history{flex:1;color:#787b86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#live-clock{white-space:nowrap}
+#live-status{font-size:11px;color:#089981;white-space:nowrap}
+#live-ohlc{position:absolute;z-index:7;top:9px;left:12px;max-width:calc(100% - 100px);background:#ffffffdc;padding:4px 6px;font-size:12px;pointer-events:none;color:#131722}
+body.photon-live #indicators-btn,body.photon-live #active-indicators,body.photon-live #indicator-dialog,body.photon-live #opportunity-controls,body.photon-live #opportunity-panel,body.photon-live #timeframe-note,body.photon-live #photon-entry-review,body.photon-live #trade,body.photon-live label[for=trade],body.photon-live #center,body.photon-live #review-setup,body.photon-live #replay-toggle,body.photon-live #day-replay{display:none!important}
+body.photon-live #photon-inspector,body.photon-live #trade-panel,body.photon-live #drawing-settings,body.photon-live .chart-options-body,body.photon-live #position-tools-menu{background:#fff;color:#131722;border-color:#e0e3eb}
+body.photon-live #photon-inspector p,body.photon-live #photon-inspector label,body.photon-live #trade-panel p,body.photon-live #trade-panel label,body.photon-live .muted{color:#626776}
+body.photon-live #photon-context{background:#fff;color:#131722}
+body.photon-live #photon-context-strip{color:#131722}
+body.photon-live #reviewbar{max-height:100px;overflow:auto}
+body.photon-live #manual-plan-status,body.photon-live #journal-content input{background:#fff;color:#131722}
+body.photon-live dialog{border:1px solid #e0e3eb;border-radius:10px;box-shadow:0 12px 60px #0003;padding:24px;width:360px;color:#131722}
+body.photon-live dialog::backdrop{background:#13172255}body.photon-live dialog input{box-sizing:border-box;width:100%;padding:12px;margin:14px 0}body.photon-live dialog form>div{display:flex;justify-content:flex-end;gap:8px}
+@media(max-width:1000px){body.photon-live #toolbar{overflow-x:auto}#live-history{display:none}body.photon-live #live-footer{padding-left:56px}#live-status{display:none}}
