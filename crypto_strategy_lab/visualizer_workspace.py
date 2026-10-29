@@ -103,6 +103,10 @@ body.photon-structure #reviewbar>*{max-width:100%;flex-shrink:1}
 #opportunity-panel select{display:block;width:100%;margin:8px 0}#opportunity-panel p{white-space:normal;margin:8px 0}
 #opportunity-risks{padding-left:18px;color:#f0cb7d;max-height:150px;overflow:auto}
 #opportunity-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px}
+#opportunity-quality{font-weight:700;padding:7px;background:#30394a;border-radius:4px}
+#opportunity-quality[data-grade="Strong"]{color:#86efac}#opportunity-quality[data-grade="Moderate"]{color:#fde68a}
+#opportunity-quality[data-grade="Weak"],#opportunity-quality[data-grade="Low"],#opportunity-quality[data-grade="Incomplete"],#opportunity-quality[data-grade="Expired"]{color:#fca5a5}
+#opportunity-quality-breakdown p{font-size:11px;margin:5px 0}
 #opportunity-status{color:#f0cb7d}#opportunity-panel button{margin:3px 2px}
 """
 
