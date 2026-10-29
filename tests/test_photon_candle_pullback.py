@@ -80,7 +80,7 @@ def test_engine_both_sides_next_open_and_old_flags_ignored(monkeypatch,short,col
     from crypto_strategy_lab.strategy_rule_model import compile_profiles,MARKET_PERMISSIONS
     from crypto_strategy_lab.photon_trend import MODE
     bars,g=scenario(short)
-    if low_rr:g['15m']['snapshots'][0]['range']['low' if short else 'high']=110
+    if low_rr:g['15m']['snapshots'][0]['range']['low' if short else 'high']=109.5 if short else 110.5
     if collision:
         bars[30]['high' if short else 'low']=125 if short else 95
     pad=[dict(time=bars[0]['time']-(150-i)*60,open=110,high=111,low=109,close=110) for i in range(150)]
@@ -99,7 +99,7 @@ def test_engine_both_sides_next_open_and_old_flags_ignored(monkeypatch,short,col
     assert len(trades)==1
     row=trades.iloc[0];side='short' if short else 'long'
     assert pd.Timestamp(row.entry_time)==frame.timestamp.iloc[180]
-    assert row[side+'_tp']==(110 if low_rr else 100 if short else 120)
+    assert row[side+'_tp']==((109.5 if short else 110.5) if low_rr else 100 if short else 120)
     assert row[side+'_final_exit_reason']==('SL' if collision else 'TP')
     assert json.loads(row.supply_demand_setup)['entryModel']=='CANDLE_PULLBACK_PREVIOUS_EXTREME'
 
