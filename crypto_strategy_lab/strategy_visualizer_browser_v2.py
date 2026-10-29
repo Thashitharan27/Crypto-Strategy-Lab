@@ -1291,7 +1291,8 @@ body.photon-chart-focus #photon-context-strip{display:none}
     opportunitySelection=item.id;
     const age=Math.max(0,Math.floor((replayCutoff-item.availableAt)/60)),decision=opportunityChoice(item);
     $('opportunity-title').textContent='Possible '+item.side+' · '+opportunityNames[item.pattern]+' · '+(item.expired?'expired idea':item.phase.replaceAll('_',' ').toLowerCase());
-    $('opportunity-evidence').textContent=item.evidence+' Known '+fmtTime(item.availableAt)+' UTC'+(age?' · '+age+' minutes ago':'')+(decision?' · '+decision.decision:'');
+    const evidence=item.touchAt!=null?item.evidence.replace(' at '+item.touchAt,' at '+fmtTime(item.touchAt)+' UTC'):item.evidence;
+    $('opportunity-evidence').textContent=evidence+' Known '+fmtTime(item.availableAt)+' UTC'+(age?' · '+age+' minutes ago':'')+(decision?' · '+decision.decision:'');
     $('opportunity-levels').textContent='Suggested entry '+formatPrice(item.entry)+' · SL '+formatPrice(item.stop)+' · TP '+(item.target==null?'Choose manually':formatPrice(item.target))+' · '+(item.rewardRisk==null?'R:R unavailable':item.rewardRisk.toFixed(2)+'R')+' · Stop distance '+item.riskPercent.toFixed(2)+'%. '+item.stopBasis+'. TP: '+item.targetBasis+'.'+(item.targets.length>1?' Other known targets: '+item.targets.slice(1).map(t=>t.label+' '+formatPrice(t.price)).join('; ')+'.':'' );
     for(const message of [...(age?['This idea is '+age+' minutes old; recheck current structure and prices']:[]),...item.risks]){const li=document.createElement('li');li.textContent=message;body.appendChild(li);}
     const currentBar=(opportunitySource()?.candles || []).filter(b=>b.time+chartInterval()<=replayCutoff).at(-1);
