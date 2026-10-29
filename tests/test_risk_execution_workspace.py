@@ -1137,3 +1137,28 @@ def test_confluence_strategy_settings_and_visibility():
         assert w['tc_target_r'].isHidden()
     finally:
         window.close();window.deleteLater();app.processEvents()
+
+
+def test_photon_demand_pullback_control_roundtrip_and_summary():
+    app, window = _window()
+    try:
+        selector = window.rule_builder.direction_mode
+        index = selector.findData('PHOTON_4H_TREND')
+        selector.setCurrentIndex(index)
+        selector.activated.emit(index)
+        widgets = window.execution_form.widgets
+        assert not widgets['photon_demand_pullback'].isHidden()
+        widgets['photon_demand_pullback'].setChecked(True)
+        app.processEvents()
+        workspace = window.risk_execution_workspace
+        workspace.refresh_visibility()
+        assert widgets['photon_midpoint_reversal'].isHidden()
+        assert widgets['photon_zone_reversal'].isHidden()
+        assert not widgets['sd_stop_buffer_atr'].isHidden()
+        assert not widgets['photon_confirmation_minutes'].isHidden()
+        window.apply_config(window.build_config())
+        assert window.build_config().execution.photon_demand_pullback
+        assert 'TP frozen at the 15m range 50%' in workspace.summary_label.text()
+        assert '15m demand' in workspace.sd_card.rows['sd_stop_buffer_atr'][0].text()
+    finally:
+        window.close()
