@@ -30,3 +30,6 @@ parity_verification/
 
 # Separate non-production browser certification build; never ship with read-only dist.
 browser_ui/dist-certification/
+
+!config/data_lake/Photon_15m_First_Pullback_1m.json
+!config/data_lake/Photon_15m_Sweep_Reclaim_1m.json

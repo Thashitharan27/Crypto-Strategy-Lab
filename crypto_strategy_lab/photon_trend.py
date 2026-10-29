@@ -254,6 +254,7 @@ class PhotonTrendMixin:
             from .photon_demand_pullback import demand_pullback_setups
             self.photon_setups, self.photon_order_live = demand_pullback_setups(
                 bars, self.atr_values, prepare_context(bars, zone_reversal=True),
+                entry_model=self.config.photon_demand_entry_model,
                 confirmation_minutes=self.config.photon_confirmation_minutes,
                 stop_buffer_atr=self.config.sd_stop_buffer_atr, minimum_r=self.config.sd_minimum_r)
             return

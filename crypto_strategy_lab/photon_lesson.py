@@ -36,6 +36,8 @@ def enabled(opts):
 
 
 def validate(config):
+    from .photon_demand_pullback import validate_entry_model
+    validate_entry_model(getattr(config, "photon_demand_entry_model", "ORIGINAL"))
     if getattr(config, 'photon_zone_model', 'LEGACY') not in MODELS:
         raise ValueError('Photon zone model must be LEGACY, PIVOT, PIVOT_TWO or RANGE')
     n = getattr(config, 'photon_range_base_bars', 3)

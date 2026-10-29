@@ -1139,7 +1139,8 @@ def test_confluence_strategy_settings_and_visibility():
         window.close();window.deleteLater();app.processEvents()
 
 
-def test_photon_demand_pullback_control_roundtrip_and_summary():
+@pytest.mark.parametrize('model',['ORIGINAL','FIRST_PULLBACK','SWEEP_RECLAIM'])
+def test_photon_demand_pullback_control_roundtrip_and_summary(model):
     app, window = _window()
     try:
         selector = window.rule_builder.direction_mode
@@ -1149,6 +1150,8 @@ def test_photon_demand_pullback_control_roundtrip_and_summary():
         widgets = window.execution_form.widgets
         assert not widgets['photon_demand_pullback'].isHidden()
         widgets['photon_demand_pullback'].setChecked(True)
+        patterns=widgets['photon_demand_entry_model']
+        patterns.setCurrentIndex(patterns.findData(model))
         app.processEvents()
         workspace = window.risk_execution_workspace
         workspace.refresh_visibility()
@@ -1158,7 +1161,9 @@ def test_photon_demand_pullback_control_roundtrip_and_summary():
         assert not widgets['photon_confirmation_minutes'].isHidden()
         window.apply_config(window.build_config())
         assert window.build_config().execution.photon_demand_pullback
-        assert 'TP frozen at the 15m range 50%' in workspace.summary_label.text()
+        assert window.build_config().execution.photon_demand_entry_model==model
+        assert not patterns.isHidden()
+        assert ('TP frozen at the 15m range 50%' if model=='ORIGINAL' else 'TP frozen at the 15m 50%') in workspace.summary_label.text()
         assert '15m demand' in workspace.sd_card.rows['sd_stop_buffer_atr'][0].text()
     finally:
         window.close()
