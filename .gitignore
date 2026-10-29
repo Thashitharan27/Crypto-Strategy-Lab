@@ -33,3 +33,6 @@ browser_ui/dist-certification/
 
 !config/data_lake/Photon_15m_First_Pullback_1m.json
 !config/data_lake/Photon_15m_Sweep_Reclaim_1m.json
+
+!config/data_lake/Photon_15m_Candle_Pullback_15m_Target_1m.json
+!config/data_lake/Photon_15m_Candle_Pullback_4H_Target_1m.json

@@ -1167,3 +1167,27 @@ def test_photon_demand_pullback_control_roundtrip_and_summary(model):
         assert '15m demand' in workspace.sd_card.rows['sd_stop_buffer_atr'][0].text()
     finally:
         window.close()
+
+
+def test_candle_pullback_both_direction_controls_roundtrip():
+    app,window=_window()
+    try:
+        selector=window.rule_builder.direction_mode;index=selector.findData('PHOTON_4H_TREND')
+        selector.setCurrentIndex(index);selector.activated.emit(index)
+        w=window.execution_form.widgets
+        w['photon_candle_pullback'].setChecked(True)
+        app.processEvents();window.risk_execution_workspace.refresh_visibility()
+        assert not w['photon_candle_target_timeframe'].isHidden()
+        assert w['photon_demand_pullback'].isHidden()
+        assert w['photon_midpoint_reversal'].isHidden()
+        assert w['photon_zone_reversal'].isHidden()
+        assert w['sd_minimum_r'].isHidden()
+        w['photon_candle_target_timeframe'].setCurrentIndex(w['photon_candle_target_timeframe'].findData('4h'))
+        w['photon_candle_minimum_r_enabled'].setChecked(True)
+        window.apply_config(window.build_config());c=window.build_config()
+        assert c.execution.photon_candle_pullback and c.execution.photon_candle_target_timeframe=='4h'
+        assert c.execution.photon_candle_minimum_r_enabled
+        assert not w['sd_minimum_r'].isHidden()
+        assert 'closed red 15m candle' in window.risk_execution_workspace.summary_label.text()
+    finally:
+        window.close()
