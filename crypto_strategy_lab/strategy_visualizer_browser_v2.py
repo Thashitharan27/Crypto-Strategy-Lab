@@ -22,6 +22,7 @@ from crypto_strategy_lab.visualizer_replay import REPLAY_HELPERS
 from crypto_strategy_lab.visualizer_drawings import DRAWING_HELPERS
 from crypto_strategy_lab.visualizer_structure import STRUCTURE_HELPERS
 from crypto_strategy_lab.visualizer_photon import PHOTON_HELPERS
+from crypto_strategy_lab.visualizer_opportunities import OPPORTUNITY_HELPERS
 from crypto_strategy_lab.photon_structure import selected as photon_selected
 from crypto_strategy_lab.photon_trend import selected as photon_trading_selected
 from crypto_strategy_lab.visualizer_workspace import WORKSPACE_HELPERS, WORKSPACE_STYLES
@@ -330,7 +331,24 @@ body.photon-chart-focus #photon-context-strip{display:none}
       <summary id="photon-entry-review-label" role="status">Entry checks</summary>
       <div id="photon-entry-checks"></div>
     </details>
+    <section id="opportunity-panel" hidden aria-label="Possible trade ideas">
+      <strong id="opportunity-title">Possible trade · manual decision</strong>
+      <select id="opportunity-select" aria-label="Known possible trade"></select>
+      <p id="opportunity-evidence"></p><p id="opportunity-levels"></p>
+      <ul id="opportunity-risks"></ul>
+      <button id="opportunity-use">Use as editable plan</button><button id="opportunity-skip">Skip this idea</button>
+      <p id="opportunity-plan-note">Suggestions only. Edit Entry / SL / TP below, then Confirm manual entry or leave it unentered.</p>
+    </section>
     <section id="photon-context" aria-label="Multi-timeframe market narrative" hidden>
+      <div id="opportunity-controls">
+        <label><input id="opportunity-enabled" type="checkbox" checked> Possible trade alerts</label>
+        <select id="opportunity-pattern" aria-label="Trade idea pattern"><option value="ZONE_REACTION" selected>Supply / demand reaction</option><option value="STRUCTURE_BREAK">Structure break</option><option value="SWEEP_RECLAIM">Sweep and reclaim</option><option value="ALL">All patterns</option></select>
+        <select id="opportunity-side" aria-label="Trade idea direction"><option value="BOTH">Long + short</option><option value="LONG">Long only</option><option value="SHORT">Short only</option></select>
+        <label><input id="opportunity-watch" type="checkbox" checked> Include early watches</label>
+        <label><input id="opportunity-pause" type="checkbox" checked> Pause on new idea</label>
+        <button id="opportunity-open">Show ideas</button><button id="opportunity-next">Next possible setup</button>
+        <span id="opportunity-status" role="status" aria-live="polite"></span>
+      </div>
       <div id="photon-context-strip" aria-live="polite"></div>
       <div id="photon-value-controls">
         <label><input id="photon-range-show" type="checkbox" checked> Premium / discount</label>
@@ -526,10 +544,12 @@ body.photon-chart-focus #photon-context-strip{display:none}
   __DRAWING_HELPERS__
   __STRUCTURE_HELPERS__
   __PHOTON_HELPERS__
+  __OPPORTUNITY_HELPERS__
   __WORKSPACE_HELPERS__
   const boot = __BOOTSTRAP__;
   const $ = id => document.getElementById(id);
   $('chart-symbol').textContent = boot.run.symbol;
+  $('opportunity-controls').hidden=!boot.run.photonStructure;
   const indicatorDialog = $('indicator-dialog');
   const indicatorInputs = [...document.querySelectorAll('.ema-period, .rsi-line, #show-rsi')];
   if(boot.run.mappingOnly) {
@@ -674,6 +694,7 @@ body.photon-chart-focus #photon-context-strip{display:none}
   const diag = $('diag');
   const chartWrap = $('chart-wrap');
   const workspacePanels=cslOrganizeWorkspace($);
+  $("plan-content").prepend($("opportunity-panel"));
   const fibLayer = $('fib-layer');
   const tradeBoxLayer = $('trade-box-layer');
   const fvgLayer = $('fvg-layer');
@@ -1097,6 +1118,7 @@ body.photon-chart-focus #photon-context-strip{display:none}
       }
     }
     renderDiagnostics();
+    renderOpportunities();
     if(incremental && chart && replaySeries.length) updateReplayChart();
     else {defaultPriceRange=null;priceZoomFactor=1;pricePanOffset=0;buildChart();requestAnimationFrame(centerSelected);}
     chartWrap.style.visibility='visible';
@@ -1244,6 +1266,90 @@ body.photon-chart-focus #photon-context-strip{display:none}
     if(manualPlanLocked()) return;
     stopReplay();$('drawing-tool').value='cursor';drawingPoints=[];drawingHover=null;drawingControls();manualPick='candle';chartWrap.style.cursor='crosshair';refreshManualPlan();
   });
+  const opportunityCache=new WeakMap(),seenOpportunities=new Set();
+  const opportunityKey='csl-opportunity-decisions:'+boot.run.runId+':'+boot.run.symbol;
+  let opportunityDecisions=[],opportunityLastCutoff=null,opportunitySelection=null;
+  try {const saved=JSON.parse(localStorage.getItem(opportunityKey)||'[]');if(Array.isArray(saved))opportunityDecisions=saved;}catch{}
+  const opportunityNames={STRUCTURE_BREAK:'Structure break',ZONE_REACTION:'Supply / demand reaction',SWEEP_RECLAIM:'Sweep and reclaim'};
+  function opportunitySource() {return replayChartSource || marketPayload || sourcePayload;}
+  function opportunityItems() {
+    const source=opportunitySource(),interval=chartInterval();if(!source)return [];
+    let cached=opportunityCache.get(source);
+    if(!cached||cached.interval!==interval){cached={interval,items:cslBuildOpportunities(source,interval,boot.run.manualCosts)};opportunityCache.set(source,cached);}
+    return cached.items;
+  }
+  function opportunityMatches(item) {return ($('opportunity-pattern').value==='ALL'||item.pattern===$('opportunity-pattern').value)&&($('opportunity-side').value==='BOTH'||item.side===$('opportunity-side').value)&&($('opportunity-watch').checked||item.phase!=='WATCH');}
+  function opportunityChoice(item) {return opportunityDecisions.findLast?.(r=>r.id===item.id) || [...opportunityDecisions].reverse().find(r=>r.id===item.id);}
+  function recordOpportunity(item,decision) {
+    opportunityDecisions.push({id:item.id,decision,replayTime:replayCutoff,recordedAt:new Date().toISOString(),suggestion:item});
+    try{localStorage.setItem(opportunityKey,JSON.stringify(opportunityDecisions));}catch{manualEntryMessage='Idea saved for this session only; export reviews to retain it.';}
+  }
+  function selectedOpportunity() {const item=opportunityItems().find(x=>x.id===$('opportunity-select').value && x.availableAt<=replayCutoff);return item?cslOpportunityNow(item,opportunitySource(),chartInterval(),replayCutoff):null;}
+  function renderOpportunityDetails() {
+    const item=selectedOpportunity(),body=$('opportunity-risks');body.replaceChildren();
+    if(!item){$('opportunity-use').disabled=true;$('opportunity-skip').disabled=true;return;}
+    opportunitySelection=item.id;
+    const age=Math.max(0,Math.floor((replayCutoff-item.availableAt)/60)),decision=opportunityChoice(item);
+    $('opportunity-title').textContent='Possible '+item.side+' · '+opportunityNames[item.pattern]+' · '+(item.expired?'expired idea':item.phase.replaceAll('_',' ').toLowerCase());
+    const evidence=item.touchAt!=null?item.evidence.replace(' at '+item.touchAt,' at '+fmtTime(item.touchAt)+' UTC'):item.evidence;
+    $('opportunity-evidence').textContent=evidence+' Known '+fmtTime(item.availableAt)+' UTC'+(age?' · '+age+' minutes ago':'')+(decision?' · '+decision.decision:'');
+    $('opportunity-levels').textContent='Suggested entry '+formatPrice(item.entry)+' · SL '+formatPrice(item.stop)+' · TP '+(item.target==null?'Choose manually':formatPrice(item.target))+' · '+(item.rewardRisk==null?'R:R unavailable':item.rewardRisk.toFixed(2)+'R')+' · Stop distance '+item.riskPercent.toFixed(2)+'%. '+item.stopBasis+'. TP: '+item.targetBasis+'.'+(item.targets.length>1?' Other known targets: '+item.targets.slice(1).map(t=>t.label+' '+formatPrice(t.price)).join('; ')+'.':'' );
+    for(const message of [...(age?['This idea is '+age+' minutes old; recheck current structure and prices']:[]),...item.risks]){const li=document.createElement('li');li.textContent=message;body.appendChild(li);}
+    const currentBar=(opportunitySource()?.candles || []).filter(b=>b.time+chartInterval()<=replayCutoff).at(-1);
+    const eligible=Boolean(currentBar&&currentBar.time>=Math.max(replayDay ?? -Infinity,currentReview()?.tradeNotBefore ?? -Infinity));
+    $('opportunity-use').disabled=!dayMode||manualPlanLocked()||!item.usable||!eligible;
+    $('opportunity-use').title=!dayMode?'Use Structure / Day replay to create an independent manual plan.':manualPlanLocked()?'Close the entered position and choose New trade, or restart a revealed replay.':!item.usable?'Idea expired or no valid target / stop is known; enter your own prices in My plan.':!eligible?'Advance until a candle in this review period has closed.':'Copies suggested SL/TP and uses the current closed candle close; does not enter.';
+    $('opportunity-skip').disabled=replayRevealed||Boolean(decision?.decision==='Skipped');
+  }
+  function renderOpportunities() {
+    const enabled=boot.run.photonStructure&&replayActive&&!replayRevealed&&$('opportunity-enabled').checked;
+    $('opportunity-panel').hidden=!enabled;
+    $('opportunity-next').disabled=!enabled||replayBusy;
+    if(!enabled){$('opportunity-status').textContent='Start Structure / Day replay for possible-trade alerts.';opportunityLastCutoff=null;return;}
+    const items=opportunityItems(),recent=cslVisibleOpportunities(items,replayCutoff).filter(opportunityMatches);
+    if(opportunityLastCutoff!=null&&replayCutoff<opportunityLastCutoff)seenOpportunities.clear();
+    const fresh=recent.filter(x=>x.availableAt>(opportunityLastCutoff ?? replayCutoff-1)&&!seenOpportunities.has(x.id)&&!opportunityChoice(x));
+    for(const x of recent)seenOpportunities.add(x.id);
+    opportunityLastCutoff=replayCutoff;
+    const selector=$('opportunity-select'),selected=opportunitySelection;
+    selector.replaceChildren();
+    for(const item of recent)selector.add(new Option(item.side+' · '+opportunityNames[item.pattern]+' · '+fmtTime(item.availableAt)+(opportunityChoice(item)?' · reviewed':''),item.id));
+    if(fresh.length){opportunitySelection=fresh.find(x=>x.phase!=='WATCH')?.id || fresh[0].id;}
+    else if(recent.some(x=>x.id===selected))opportunitySelection=selected;
+    else opportunitySelection=recent[0]?.id || null;
+    if(opportunitySelection)selector.value=opportunitySelection;
+    $('opportunity-status').textContent=recent.length?recent.length+' possible setup'+(recent.length===1?'':'s')+' in the last hour · manual decision':'No recent setup. Next possible setup advances to the next known observation.';
+    $('opportunity-title').textContent='No recent trade idea';$('opportunity-evidence').textContent='Watching 15m breaks, known zone touches, and sweeps. No automatic entries.';$('opportunity-levels').textContent='';
+    renderOpportunityDetails();
+    if(fresh.length&&$('opportunity-pause').checked&&!currentReview()?.manualEntry){stopReplay();workspacePanels.show('plan');}
+  }
+  $('opportunity-select').addEventListener('change',renderOpportunityDetails);
+  $('opportunity-enabled').addEventListener('change',renderOpportunities);
+  for(const id of ['opportunity-pattern','opportunity-side','opportunity-watch'])$(id).addEventListener('change',()=>{opportunitySelection=null;renderOpportunities();});
+  $('opportunity-open').addEventListener('click',()=>{workspacePanels.show('plan');renderOpportunities();});
+  $('opportunity-skip').addEventListener('click',()=>{const item=selectedOpportunity();if(!item||replayRevealed)return;stopReplay();recordOpportunity(item,'Skipped');renderOpportunityDetails();});
+  $('opportunity-use').addEventListener('click',()=>{
+    const item=selectedOpportunity();if(!item||!dayMode||manualPlanLocked()||!item.usable)return;
+    stopReplay();
+    if($('day-side').value!==item.side){$('day-side').value=item.side;$('day-side').dispatchEvent(new Event('change'));}
+    const source=opportunitySource(),interval=chartInterval(),bar=(source.candles || []).filter(b=>b.time+interval<=replayCutoff).at(-1);
+    if(!bar||bar.time<Math.max(replayDay ?? -Infinity,currentReview()?.tradeNotBefore ?? -Infinity))return;
+    const checked=cslManualPlan(bar.close,item.stop,item.target,item.side);
+    if(checked.error){manualEntryMessage='Suggested levels no longer fit the current close. Adjust Entry / SL / TP manually.';refreshManualPlan();return;}
+    const record=ensureReview();record.positionBoxPlaced=true;record.positionBoxHidden=false;
+    loadManualPlan({...checked,entryTime:bar.time,interval,timeframe:currentTimeframe});
+    storeManualPlan();record.opportunityOrigins=[...(record.opportunityOrigins || []),{suggestion:item,appliedAt:replayCutoff}];
+    recordOpportunity(item,'Copied to draft');saveReviews();workspacePanels.show('plan');showManualBox();
+    manualEntryMessage='Idea copied as a draft. Adjust Entry / SL / TP, then Confirm manual entry if you choose.';refreshManualPlan();renderOpportunityDetails();
+  });
+  $('opportunity-next').addEventListener('click',()=>{
+    if(!replayActive||replayBusy||replayRevealed||!$('opportunity-enabled').checked)return;
+    const next=opportunityItems().find(x=>x.availableAt>replayCutoff&&x.availableAt<=replayEnd()&&opportunityMatches(x));
+    if(!next){$('opportunity-status').textContent='No later possible setup in the available replay period.';return;}
+    stopReplay();if(!manualPlanLocked()){refreshManualPlan();if(!manualPlanDraft.error)storeManualPlan();}
+    replayCutoff=next.availableAt;replayAdvanced=true;refreshReplay(true);
+  });
+
   $('manual-current').addEventListener('click',()=>{
     if(manualPlanLocked())return;stopReplay();
     const interval=chartInterval(),bar=((replayChartSource || sourcePayload)?.candles || []).filter(item=>item.time+interval<=replayCutoff).at(-1);
@@ -1314,7 +1420,7 @@ body.photon-chart-focus #photon-context-strip{display:none}
     const workflowSummary=cslManualWorkflowSummary(records);
     const scored=records.filter(record=>record.netR!=null && Number.isFinite(Number(record.netR)));
     const sum=list=>list.reduce((total,record)=>total+Number(record.netR),0);
-    const report={version:3,runId:boot.run.runId,symbol:boot.run.symbol,exportedAt:new Date().toISOString(),
+    const report={version:3,runId:boot.run.runId,symbol:boot.run.symbol,opportunityDecisions,exportedAt:new Date().toISOString(),
       manualDayReviews:records.filter(record=>record.reviewType==='manual-day').length,
       workflowSummary,
       summary:{reviewed:records.length,revealed:scored.length,automaticNetR:sum(scored),manualTakeNetR:sum(scored.filter(r=>r.decision==='Take')),skippedNetR:sum(scored.filter(r=>r.decision==='Skip')),unsureNetR:sum(scored.filter(r=>r.decision==='Unsure'))},
@@ -2664,7 +2770,7 @@ body.photon-chart-focus #photon-context-strip{display:none}
 </script>
 </body>
 </html>"""
-    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS).replace("__STRUCTURE_HELPERS__", STRUCTURE_HELPERS).replace("__PHOTON_HELPERS__", PHOTON_HELPERS).replace("__WORKSPACE_HELPERS__", WORKSPACE_HELPERS).replace("__WORKSPACE_STYLES__", WORKSPACE_STYLES)
+    return template.replace("__LIGHTWEIGHT_CHARTS_URL__", LIGHTWEIGHT_CHARTS_URL).replace("__BOOTSTRAP__", encoded).replace("__REPLAY_HELPERS__", REPLAY_HELPERS).replace("__DRAWING_HELPERS__", DRAWING_HELPERS).replace("__STRUCTURE_HELPERS__", STRUCTURE_HELPERS).replace("__PHOTON_HELPERS__", PHOTON_HELPERS).replace("__OPPORTUNITY_HELPERS__", OPPORTUNITY_HELPERS).replace("__WORKSPACE_HELPERS__", WORKSPACE_HELPERS).replace("__WORKSPACE_STYLES__", WORKSPACE_STYLES)
 
 
 class _LoopbackHTTPServer(ThreadingHTTPServer):
