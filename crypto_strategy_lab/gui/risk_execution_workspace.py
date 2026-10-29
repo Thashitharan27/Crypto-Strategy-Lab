@@ -155,6 +155,9 @@ class RiskExecutionWorkspace(QWidget):
         for name,label in (("photon_confirmation_minutes","Photon context / confirmation expiry (minutes)"),("photon_retest_minutes","Photon origin retest expiry (minutes)")):
             self.sd_card.add_field(name,label,self.account[name])
             self.account[name].setRange(1,10080)
+        self.account["photon_demand_pullback"].setText("Long: bullish 4H → bullish 15m change → 15m demand pullback → 1m return; TP 15m 50%")
+        self.sd_card.add_control("photon_demand_pullback", self.account["photon_demand_pullback"])
+        self.account["photon_demand_pullback"].toggled.connect(self.refresh_visibility)
         self.account["photon_midpoint_reversal"].setText("15m trend change in 4H value; require 1R to the 50% midpoint")
         self.sd_card.add_control("photon_midpoint_reversal", self.account["photon_midpoint_reversal"])
         self.account["photon_midpoint_reversal"].toggled.connect(self.refresh_visibility)
@@ -1067,19 +1070,22 @@ class RiskExecutionWorkspace(QWidget):
         sneaky = self._signal_strategy_mode() == "SNEAKY_PIVOT"
         photon = self._signal_strategy_mode() == "PHOTON_4H_TREND"
         mapping = self._signal_strategy_mode() == 'PHOTON_STRUCTURE_MAP'
-        midpoint = photon and self.account["photon_midpoint_reversal"].isChecked()
-        quarter = photon and (midpoint or self.account["photon_quarter_range"].isChecked())
+        demand = photon and self.account["photon_demand_pullback"].isChecked()
+        self.sd_card.set_row_visible("photon_demand_pullback", photon)
+        midpoint = photon and not demand and self.account["photon_midpoint_reversal"].isChecked()
+        quarter = photon and (demand or midpoint or self.account["photon_quarter_range"].isChecked())
         self.lesson_card.setVisible(mapping or photon and not quarter and self.account['photon_zone_reversal'].isChecked())
         self.lesson_card.set_row_visible('photon_range_base_bars', self.account['photon_zone_model'].currentData()=='RANGE')
         self.lesson_card.set_row_visible('photon_fixed_target_enabled', photon and self.account['photon_zone_reversal'].isChecked())
         self.lesson_card.set_row_visible('photon_fixed_target_r', photon and self.account['photon_zone_reversal'].isChecked() and self.account['photon_fixed_target_enabled'].isChecked())
         supply_demand = photon or self._signal_strategy_mode() in {"NY_OPENING_RANGE_REVERSAL","IMBALANCE_ORIGIN_RETEST", "SUPPLY_DEMAND_RETEST","LIQUIDITY_SWEEP_RETEST","SNEAKY_PIVOT","TJR_CONFLUENCE"}
         zone_reversal = photon and not quarter and self.account["photon_zone_reversal"].isChecked()
-        self.sd_card.set_row_visible("photon_midpoint_reversal", photon)
+        self.sd_card.set_row_visible("photon_midpoint_reversal", photon and not demand)
         self.sd_card.set_row_visible("photon_midpoint_fixed_1r", midpoint)
-        self.sd_card.set_row_visible("photon_quarter_range", photon and not midpoint)
+        self.sd_card.set_row_visible("photon_quarter_range", photon and not midpoint and not demand)
         for name in ("photon_confirmation_minutes", "photon_retest_minutes", "photon_zone_reversal"):
             self.sd_card.set_row_visible(name, photon and not quarter)
+        self.sd_card.set_row_visible("photon_confirmation_minutes", photon and (demand or not quarter))
         self.sd_card.set_row_visible("photon_exit_on_15m_change", zone_reversal)
         self.sd_card.set_row_visible("photon_hold_tp_until_15m_reversal", zone_reversal)
         self.sd_card.set_row_visible("photon_daily_zone_only", zone_reversal)
@@ -1109,9 +1115,12 @@ class RiskExecutionWorkspace(QWidget):
             self.sd_card.setTitle("Photon — 4H trend / 1m confirmation")
             self.sd_card.set_row_visible("sd_swing_strength",False)
             self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond 1m reaction extreme (ATR)")
-        if quarter:
+        if quarter and not demand:
             self.sd_card.setTitle("Photon — 4H premium / discount 25% / 75%")
             self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer beyond strong 4H boundary (1m ATR)")
+        if demand:
+            self.sd_card.setTitle("Photon — 15m demand pullback to 50%")
+            self.sd_card.rows["sd_stop_buffer_atr"][0].setText("Stop buffer below 15m demand (1m ATR)")
         if midpoint:
             self.sd_card.setTitle("Photon — 15m reversal to 4H midpoint")
             self.sd_card.set_row_visible("sd_stop_buffer_atr", False)
@@ -1190,6 +1199,9 @@ class RiskExecutionWorkspace(QWidget):
 
     def update_summary(self, execution, base) -> None:
         if self._signal_strategy_mode() == "PHOTON_4H_TREND":
+            if execution.photon_demand_pullback:
+                self.summary_label.setText("Long only. Require bullish 4H and a fresh bullish 15m trend change. Wait for a later touch of confirmed 15m demand. After a bearish 1m pullback require a bullish internal change; if 1m stays bullish require a later close above the demand zone and touch candle high. Enter next 1m open. SL below demand plus ATR buffer; TP frozen at the 15m range 50% midpoint. Minimum R rechecked at fill. One attempt per 15m change; cancel on lost alignment, invalidation, gap or expiry.")
+                return
             if execution.photon_midpoint_reversal:
                 if execution.photon_midpoint_fixed_1r:
                     self.summary_label.setText("Fresh confirmed 15m trend change aligned with the 4H range: buy discount / sell premium at the next 1m open. SL exactly at the strong 4H boundary. TP exactly 1R from actual entry and original SL. Long TP must be at or below the 50% midpoint; short TP at or above it. Recheck at actual fill including slippage; skip if the 1R target exceeds the midpoint. Later fresh changes can trade the same range again; one trade at a time. Execute entries and exits on 1m candles.")
