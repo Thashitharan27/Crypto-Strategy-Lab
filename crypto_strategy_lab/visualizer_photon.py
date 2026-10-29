@@ -4,6 +4,16 @@ from crypto_strategy_lab.visualizer_photon_zones import PHOTON_ZONE_HELPERS
 from crypto_strategy_lab.visualizer_photon_inspector import PHOTON_INSPECTOR_HELPERS
 
 PHOTON_HELPERS = PHOTON_INSPECTOR_HELPERS + PHOTON_ZONE_HELPERS + r"""
+function cslPhotonCandleLabels(sd) {
+  const first=sd.entryRule==='FIRST_COLOUR_RETURN';
+  return [[sd.pullbackAt,'15m pullback started'],
+    [sd.signalAvailableAt,first?'First '+(sd.side==='SHORT'?'red':'green')+' 15m close confirmed':'15m swing change + colour confirmed']];
+}
+function cslPhotonCandleDescription(sd) {
+  return sd.entryRule==='FIRST_COLOUR_RETURN'
+    ? '4H-aligned pullback. Enter next 1m open after the first closed red candle (short) or green candle (long). No fresh 15m swing break, zone touch or 1m shift is required. SL and TP use only levels known at confirmation.'
+    : 'Historical rule: 4H-aligned pullback plus a fresh 15m swing trend change and matching red/green candle. Enter next 1m open. SL beyond the pullback; TP frozen at the previous selected-timeframe low/high.';
+}
 function cslPhotonReviewView(sd,cutoff=Infinity) {
   if(sd?.strategy!=='PHOTON_4H_TREND' || sd.status!=='AVAILABLE' || sd.signalAvailableAt>cutoff)return null;
   const review=sd.review;
@@ -21,7 +31,7 @@ function renderPhotonEntryReview(sd,cutoff=Infinity) {
     const row=document.createElement('p');row.textContent=(check.passed?'\u2713 ':'\u26a0 ')+check.label+' — '+check.detail;
     row.style.color=check.passed?'#86efac':'#fbbf24';body.appendChild(row);
   }
-  const note=document.createElement('p');note.textContent=sd.entryModel==='CANDLE_PULLBACK_PREVIOUS_EXTREME'?'4H-aligned pullback. Confirm a 15m swing trend change and matching red/green candle; enter next 1m open. SL beyond the pullback extreme; TP frozen at the previous selected-timeframe low/high before the pullback. No supply/demand touch or 1m shift is required.':sd.targetMode==='FIXED_1R_BEFORE_MIDPOINT'?'TP is exactly 1R from actual entry and original SL; the 4H midpoint caps the target. Rechecked at actual fill including slippage.':view.entryModel==='MIDPOINT_15M_REVERSAL'?'Fresh completed 15m trend change in 4H value. Enter at the next 1m open only if the midpoint still offers at least 1R with SL at the strong boundary.':view.entryModel==='QUARTER_RANGE'?'Direct limit at 25% for longs or 75% for shorts. SL beyond the strong 4H boundary; TP at the opposite boundary. Saved at order creation; actual fill must occur on a later candle.':view.legacy?'Rerun to capture decision-time checks.':['HTF_ZONE_REVERSAL','HTF_ZONE_PULLBACK'].includes(view.entryModel)?'Checks were saved at the confirmed entry decision. SL uses the 15m zone or touch extreme; TP follows the saved target mode: fixed R when selected, otherwise the frozen 4H midpoint. Minimum reward/risk is checked again at the actual simulated fill.':'Checks were frozen when the 1m CHoCH armed this simulated candidate. Confirm manual entry, Skip or Unsure in replay to record your own decision. These checks do not place live orders.';body.appendChild(note);
+  const note=document.createElement('p');note.textContent=sd.entryModel==='CANDLE_PULLBACK_PREVIOUS_EXTREME'?cslPhotonCandleDescription(sd):sd.targetMode==='FIXED_1R_BEFORE_MIDPOINT'?'TP is exactly 1R from actual entry and original SL; the 4H midpoint caps the target. Rechecked at actual fill including slippage.':view.entryModel==='MIDPOINT_15M_REVERSAL'?'Fresh completed 15m trend change in 4H value. Enter at the next 1m open only if the midpoint still offers at least 1R with SL at the strong boundary.':view.entryModel==='QUARTER_RANGE'?'Direct limit at 25% for longs or 75% for shorts. SL beyond the strong 4H boundary; TP at the opposite boundary. Saved at order creation; actual fill must occur on a later candle.':view.legacy?'Rerun to capture decision-time checks.':['HTF_ZONE_REVERSAL','HTF_ZONE_PULLBACK'].includes(view.entryModel)?'Checks were saved at the confirmed entry decision. SL uses the 15m zone or touch extreme; TP follows the saved target mode: fixed R when selected, otherwise the frozen 4H midpoint. Minimum reward/risk is checked again at the actual simulated fill.':'Checks were frozen when the 1m CHoCH armed this simulated candidate. Confirm manual entry, Skip or Unsure in replay to record your own decision. These checks do not place live orders.';body.appendChild(note);
 }
 function cslPhotonEventBound(events,time,inclusive=false) {
   let lo=0,hi=events.length;while(lo<hi){const mid=(lo+hi)>>1;if(inclusive?events[mid].availableAt<=time:events[mid].availableAt<time)lo=mid+1;else hi=mid;}return lo;
