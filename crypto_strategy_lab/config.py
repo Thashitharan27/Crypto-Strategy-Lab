@@ -398,21 +398,3 @@ class BacktestConfig:
                 raise ValueError
         except Exception as exc:
             raise ValueError("daily_entry_time must be HH:MM in 24-hour time") from exc
-        if (hh * 60 + mm) % self.strategy_timeframe_minutes != 0:
-            raise ValueError("daily_entry_time must align to the strategy timeframe")
-        try:
-            ZoneInfo(self.daily_entry_timezone)
-        except ZoneInfoNotFoundError as exc:
-            raise ValueError("daily_entry_timezone must be a valid IANA timezone") from exc
-        if self.telemetry_interval_minutes <= 0:
-            raise ValueError("telemetry interval must be > 0")
-        if self.lifecycle_phases != 4:
-            raise ValueError("lifecycle_phases must currently be 4")
-        if self.lifecycle_minimum_bucket_sample <= 0 or self.lifecycle_flat_pattern_threshold_pct < 0:
-            raise ValueError("lifecycle settings are invalid")
-        if isinstance(self.lifecycle_early_checkpoints, list):
-            object.__setattr__(self, "lifecycle_early_checkpoints", tuple(int(v) for v in self.lifecycle_early_checkpoints))
-        if any(v <= 0 for v in self.lifecycle_early_checkpoints):
-            raise ValueError("lifecycle early checkpoints must be positive")
-        if self.telemetry_interval_minutes % self.strategy_timeframe_minutes != 0:
-            raise ValueError("telemetry interval must be a multiple of the strategy timeframe")
