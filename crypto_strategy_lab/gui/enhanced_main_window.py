@@ -309,3 +309,28 @@ class MainWindow(BaseMainWindow):
                 control.setEnabled(pressure_enabled)
             allowed = [
                 label
+                for control, label in (
+                    (self.di_pressure_allow_expanding, "Expanding"),
+                    (self.di_pressure_allow_contracting, "Contracting"),
+                    (self.di_pressure_allow_mixed, "Mixed"),
+                )
+                if control.isChecked()
+            ]
+            if not pressure_enabled:
+                status = "Analysis: DISABLED\nDI pressure does not filter entries."
+            elif len(allowed) == 3:
+                status = "Analysis Mode: RECORD ONLY\nAll pressure states are allowed; no trades are rejected by DI Pressure."
+            elif allowed:
+                status = f"Filter Mode: ACTIVE\nAllowed entry states: {', '.join(allowed)}"
+            else:
+                status = "Filter Mode: INVALID\nSelect at least one pressure state before running."
+            self.di_pressure_mode_label.setText(status)
+
+        if not hasattr(self, "mean_reversion_controls"):
+            return
+        enabled = self.enable_mean_reversion_analysis.isChecked()
+        for control in self.mean_reversion_controls:
+            control.setEnabled(enabled)
+        self.mean_reversion_track_motion.setEnabled(enabled and self.mean_reversion_track_atr_distance.isChecked())
+        if not self.mean_reversion_track_atr_distance.isChecked():
+            self.mean_reversion_track_motion.setChecked(False)

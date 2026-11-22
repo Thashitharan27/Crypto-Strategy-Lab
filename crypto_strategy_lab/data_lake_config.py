@@ -1141,3 +1141,61 @@ def default_data_lake_config() -> dict[str, Any]:
 
 def load_data_lake_config(path: str | Path) -> ResearchRunConfig:
     """Load only the authoritative nested v3 Data Lake contract."""
+    return _parse_research_run_config(json.loads(Path(path).read_text(encoding="utf-8-sig")))
+
+
+# ---------------------------------------------------------------------------
+# Bounded GUI v2 adapter. This is a real legacy consumer, not an accepted
+# native Data Lake file format. Remove it when the GUI is redesigned.
+# ---------------------------------------------------------------------------
+_GUI_EXCLUDED_FIELDS = {"input_csv", "intrabar_csv", "output_dir", "structural_regime_benchmark_csv"}
+
+
+def _gui_defaults() -> dict[str, Any]:
+    from crypto_strategy_lab.gui.enhanced_config import enhanced_default_gui_config
+    return enhanced_default_gui_config()
+
+
+DATA_LAKE_CONFIG_FIELDS = frozenset(_gui_defaults()) - _GUI_EXCLUDED_FIELDS
+
+
+def _normalize_gui_v2(values: dict[str, Any]) -> dict[str, Any]:
+    from crypto_strategy_lab.strategy_profiles import normalize_profiles, profiles_to_dict
+    if not isinstance(values, dict):
+        raise ValueError("Data Lake GUI configuration must contain an object")
+    unknown = sorted(set(values) - DATA_LAKE_CONFIG_FIELDS)
+    if unknown:
+        raise ValueError("Unknown Data Lake GUI settings: " + ", ".join(unknown))
+    merged = {key: value for key, value in _gui_defaults().items() if key in DATA_LAKE_CONFIG_FIELDS}
+    merged.update(values)
+    from crypto_strategy_lab.gui.config_logic import _migrate_legacy_sr_geometry
+    merged = _migrate_legacy_sr_geometry(merged)
+    if int(merged.get("config_version", -1)) != GUI_COMPAT_CONFIG_VERSION:
+        raise ValueError("Data Lake GUI compatibility configuration version 2 is required")
+    merged["strategy_profiles"] = profiles_to_dict(normalize_profiles(merged["strategy_profiles"]))
+    return merged
+
+
+def normalize_data_lake_config(values: dict[str, Any]):
+    """Normalize v3 natively, or v2 only for the existing GUI compatibility path."""
+    if isinstance(values, dict) and values.get("config_version") == GUI_COMPAT_CONFIG_VERSION:
+        return _normalize_gui_v2(values)
+    return _parse_research_run_config(values)
+
+
+def build_data_lake_backtest_config(values: dict[str, Any]):
+    """Build v3 native config, or the bounded v2 GUI engine adapter."""
+    if isinstance(values, dict) and values.get("config_version") == GUI_COMPAT_CONFIG_VERSION:
+        from crypto_strategy_lab.gui.enhanced_config import (
+            build_enhanced_backtest_config,
+            enhanced_default_gui_config,
+        )
+        cleaned = _normalize_gui_v2(values)
+        bridge = enhanced_default_gui_config()
+        bridge.update(cleaned)
+        bridge["input_csv"] = "__DATA_LAKE_STRATEGY__"
+        bridge["intrabar_csv"] = None
+        bridge["output_dir"] = "output"
+        bridge["structural_regime_benchmark_csv"] = None
+        return build_enhanced_backtest_config(bridge, require_paths=False)
+    return _parse_research_run_config(values)
