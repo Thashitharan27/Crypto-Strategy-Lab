@@ -416,4 +416,3 @@ class BacktestConfig:
             raise ValueError("lifecycle early checkpoints must be positive")
         if self.telemetry_interval_minutes % self.strategy_timeframe_minutes != 0:
             raise ValueError("telemetry interval must be a multiple of the strategy timeframe")
-
