@@ -628,3 +628,32 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         use_intrabar_data=bool(merged["use_intrabar_data"]), trading_start_date=merged.get("trading_start_date"), trading_end_date=merged.get("trading_end_date"),
         max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
         max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
+        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]),
+        run_name=str(merged.get("run_name", "")),
+        enable_trade_telemetry=bool(merged["enable_trade_telemetry"]), save_full_telemetry_csv=bool(merged["save_full_telemetry_csv"]),
+        save_trade_journey_summary=bool(merged["save_trade_journey_summary"]), save_trade_journey_charts=bool(merged["save_trade_journey_charts"]),
+        telemetry_interval_minutes=int(merged["telemetry_interval_minutes"]),
+        enable_indicator_lifecycle_analysis=bool(merged["enable_indicator_lifecycle_analysis"]), lifecycle_phases=int(merged["lifecycle_phases"]),
+        lifecycle_early_checkpoints=tuple(int(v) for v in merged["lifecycle_early_checkpoints"]),
+        lifecycle_minimum_bucket_sample=int(merged["lifecycle_minimum_bucket_sample"]), create_lifecycle_charts=bool(merged["create_lifecycle_charts"]),
+        lifecycle_flat_pattern_threshold_pct=float(merged["lifecycle_flat_pattern_threshold_pct"]),
+        save_feature_analysis_reports=bool(merged["save_feature_analysis_reports"]),
+        save_indicator_analysis_reports=bool(merged["save_indicator_analysis_reports"]),
+        create_standard_charts=bool(merged["create_standard_charts"]),
+    )
+
+
+def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
+    merged = _merged_current(values)
+    return {key: merged[key] for key in DEFAULT_GUI_CONFIG}
+
+
+def save_config_json(path: str | Path, values: dict[str, Any]) -> None:
+    Path(path).write_text(json.dumps(canonical_config_values(values), indent=2, default=str), encoding="utf-8")
+
+
+def load_config_json(path: str | Path) -> dict[str, Any]:
+    loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError("Configuration JSON must contain an object.")
+    return _merged_current(loaded)
