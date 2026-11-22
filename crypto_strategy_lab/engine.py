@@ -2439,3 +2439,115 @@ class BacktestEngine(DILadderExecutionMixin):
         active_quantity=pos.remaining_quantity if (pos.partial_tp_enabled or pos.partial_sl_enabled) else pos.quantity
         gross = (close - pos.entry_price) * active_quantity if pos.side == Side.LONG else (pos.entry_price - close) * active_quantity
         return float(gross - pos.fees)
+
+    def _record_active_telemetry(self, i):
+        if not self.config.enable_trade_telemetry:
+            return
+        for pair in self.active_pairs:
+            self._record_pair_telemetry(pair, i)
+
+    def _record_pair_telemetry(self, pair, i):
+        if not self.config.enable_trade_telemetry:
+            return
+        ts = pd.Timestamp(self.times[i]) + self.entry_delta
+        entry = pd.Timestamp(pair.strategy_entry_time)
+        if ts < entry or not pair.is_open:
+            return
+        elapsed = (ts - entry).total_seconds() / 60
+        if elapsed < 0 or elapsed % self.config.telemetry_interval_minutes != 0:
+            return
+        if self.telemetry_rows and self.telemetry_rows[-1].get("pair_id") == pair.pair_id and pd.Timestamp(self.telemetry_rows[-1].get("timestamp")) == ts:
+            return
+        close = float(self.close[i]); high = float(self.high[i]); low = float(self.low[i])
+        long_open = pair.long.is_open if pair.long is not None else False; short_open = pair.short.is_open if pair.short is not None else False
+        long_pnl = self._unrealized(pair.long, close) if pair.long is not None else 0.0; short_pnl = self._unrealized(pair.short, close) if pair.short is not None else 0.0
+        def distances(pos, is_long):
+            if not pos.is_open:
+                return (np.nan, np.nan, np.nan, np.nan)
+            sl_d = close - pos.sl if is_long else pos.sl - close
+            if pos.r_step_trailing_enabled and pos.r_step_maximum_r == 0:
+                tp_d = np.nan
+            else:
+                tp_d = pos.tp - close if is_long else close - pos.tp
+            return (float(sl_d), float(tp_d), float(sl_d / pos.risk) if pos.risk else np.nan, float(tp_d / pos.risk) if pos.risk else np.nan)
+        lsl, ltp, lslr, ltpr = distances(pair.long, True) if pair.long is not None else (np.nan, np.nan, np.nan, np.nan); ssl, stp, sslr, stpr = distances(pair.short, False) if pair.short is not None else (np.nan, np.nan, np.nan, np.nan)
+        row={"pair_id":pair.pair_id,"long_leg_id":f"{pair.pair_id}_LONG","short_leg_id":f"{pair.pair_id}_SHORT","timestamp":ts,"elapsed_minutes":elapsed,"elapsed_strategy_bars":int(elapsed / self.config.strategy_timeframe_minutes),"close":close,"high":high,"low":low,"atr":self._num(self.atr_values,i),"adx":self._num(self.adx_values,i),"plus_di":self._num(self.plus_di_values,i),"minus_di":self._num(self.minus_di_values,i),"di_spread":self._num(self.di_spread,i),"di_ratio":self._num(self.di_ratio,i),"bb_middle":self._num(self.bb_middle,i),"bb_upper":self._num(self.bb_upper,i),"bb_lower":self._num(self.bb_lower,i),"bb_width":self._num(self.bb_width,i),"bb_width_pct":self._num(self.bb_width_pct,i),"long_is_open":long_open,"short_is_open":short_open,"long_unrealized_pnl":long_pnl,"short_unrealized_pnl":short_pnl,"pair_unrealized_pnl":long_pnl+short_pnl,"long_distance_to_sl":lsl,"long_distance_to_tp":ltp,"short_distance_to_sl":ssl,"short_distance_to_tp":stp,"long_distance_to_sl_r":lslr,"long_distance_to_tp_r":ltpr,"short_distance_to_sl_r":sslr,"short_distance_to_tp_r":stpr,"long_current_sl":pair.long.sl if pair.long is not None and pair.long.is_open else np.nan,"short_current_sl":pair.short.sl if pair.short is not None and pair.short.is_open else np.nan,"long_tp":(np.nan if pair.long is not None and pair.long.r_step_trailing_enabled and pair.long.r_step_maximum_r==0 else (pair.long.tp if pair.long is not None else np.nan)),"short_tp":pair.short.tp if pair.short is not None else np.nan}
+        for prefix, pos, is_long in (("long", pair.long, True), ("short", pair.short, False)):
+            enabled = bool(pos and pos.trailing_enabled)
+            active = bool(pos and pos.trailing_active)
+            row.update({f"{prefix}_trailing_enabled":enabled, f"{prefix}_trailing_active":active, f"{prefix}_trailing_activation_price":pos.trailing_activation_price if enabled else np.nan, f"{prefix}_current_trailing_stop":pos.trailing_stop if active else np.nan, f"{prefix}_current_active_stop":pos.sl if pos and pos.is_open else np.nan, f"{prefix}_{'highest' if is_long else 'lowest'}_price_since_entry":pos.favourable_price if enabled else np.nan, f"{prefix}_distance_to_activation_r":((pos.trailing_activation_price-close) if is_long else (close-pos.trailing_activation_price))/pos.risk if enabled and pos.risk else np.nan, f"{prefix}_distance_to_trailing_stop_r":((close-pos.trailing_stop) if is_long else (pos.trailing_stop-close))/pos.risk if active and pos.risk else np.nan, f"{prefix}_unrealized_profit_r":((close-pos.entry_price) if is_long else (pos.entry_price-close))/pos.risk if pos and pos.is_open and pos.risk else np.nan, f"{prefix}_original_quantity":pos.original_quantity if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_remaining_quantity":pos.remaining_quantity if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_tp1_hit":bool(pos and pos.tp1_hit), f"{prefix}_tp2_hit":bool(pos and pos.tp2_hit), f"{prefix}_tp1_price":pos.tp1_price if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_tp2_price":pos.tp2_price if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_realized_pnl":pos.realized_pnl-pos.entry_fee if pos and pos.partial_tp_enabled else 0.0, f"{prefix}_total_current_pnl":(pos.realized_pnl-pos.entry_fee+self._unrealized(pos,close)+pos.fees if pos and pos.partial_tp_enabled else row.get(f"{prefix}_unrealized_pnl",0.0))})
+        self.telemetry_rows.append(row)
+
+    def _planned_gross_stop_loss(self, pos):
+        """Gross PnL loss if the configured initial stop plan fully executes."""
+        if pos.partial_sl_enabled:
+            first = float(pos.sl1_quantity)
+            remainder = float(pos.original_quantity) - first
+            first_distance = abs(float(pos.entry_price) - float(pos.sl1_price))
+            final_distance = abs(float(pos.entry_price) - float(pos.sl2_price))
+            return first_distance * first + final_distance * remainder
+        return float(pos.risk) * float(pos.quantity)
+
+    def _estimated_stop_loss(self,pos):
+        if pos.partial_sl_enabled:
+            first=pos.sl1_quantity; remainder=pos.original_quantity-first
+            sl1_exit=pos.sl1_price*(1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage)
+            sl2_exit=pos.sl2_price*(1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage)
+            gross=((pos.entry_price-sl1_exit)*first+(pos.entry_price-sl2_exit)*remainder) if pos.side==Side.LONG else ((sl1_exit-pos.entry_price)*first+(sl2_exit-pos.entry_price)*remainder)
+            exit_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
+            return gross+pos.entry_fee+(sl1_exit*first+sl2_exit*remainder)*exit_rate
+        if pos.side==Side.LONG:
+            stop_exit=pos.sl*(1-self.config.slippage); gross=(pos.entry_price-stop_exit)*pos.quantity
+        else:
+            stop_exit=pos.sl*(1+self.config.slippage); gross=(stop_exit-pos.entry_price)*pos.quantity
+        exit_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
+        return gross + pos.entry_fee + stop_exit*pos.quantity*exit_rate
+    def _partial_sl_cols(self,prefix,pos):
+        return {
+            f"{prefix}_partial_sl_enabled":pos.partial_sl_enabled,
+            f"{prefix}_sl1_price":pos.sl1_price,
+            f"{prefix}_sl2_price":pos.sl2_price,
+            f"{prefix}_sl1_quantity":pos.sl1_quantity,
+            f"{prefix}_sl1_hit":pos.sl1_hit,
+            f"{prefix}_sl1_exit_time":pos.sl1_exit_time,
+            f"{prefix}_sl1_exit_price":pos.sl1_exit_price,
+            f"{prefix}_sl1_gross_pnl":pos.sl1_gross_pnl,
+            f"{prefix}_sl1_fees":pos.sl1_fees,
+            f"{prefix}_sl1_net_pnl":pos.sl1_net_pnl,
+        }
+
+    def _sr_event_labels(self,pos):
+        """Entry-time S/R event classification derived from stored Position snapshot fields (no recalculation)."""
+        if not self.config.enable_support_resistance_analysis:
+            return None
+        return self._classify_sr_event_labels(pos.sr_near_support,pos.sr_near_resistance,pos.sr_support_held,pos.sr_resistance_held,pos.sr_support_state,pos.sr_resistance_state)
+
+    @staticmethod
+    def _classify_sr_event_labels(near_support,near_resistance,support_held,resistance_held,support_state,resistance_state):
+        labels=[]
+        if near_support: labels.append("NEAR_SUPPORT")
+        if near_resistance: labels.append("NEAR_RESISTANCE")
+        if support_held: labels.append("SUPPORT_BOUNCE")
+        if resistance_held: labels.append("RESISTANCE_REJECTION")
+        if str(resistance_state)=="RESISTANCE_BROKEN": labels.append("RESISTANCE_BREAKOUT")
+        if str(support_state)=="SUPPORT_BROKEN": labels.append("SUPPORT_BREAKDOWN")
+        if not labels: labels.append("NO_NEARBY_SR")
+        return labels
+
+    def _pos_cols(self,prefix,pos):
+        est_stop_loss=self._estimated_stop_loss(pos)
+        cols={f"{prefix}_original_quantity":pos.original_quantity if pos.partial_tp_enabled else pos.quantity,f"{prefix}_remaining_quantity":pos.remaining_quantity if pos.partial_tp_enabled else 0.0,f"{prefix}_tp1_quantity":pos.tp1_quantity if pos.partial_tp_enabled else None,f"{prefix}_tp2_quantity":pos.tp2_quantity if pos.partial_tp_enabled else None,f"{prefix}_tp1_price":pos.tp1_price,f"{prefix}_tp2_price":pos.tp2_price,f"{prefix}_sl_price":pos.original_sl,f"{prefix}_tp1_hit":pos.tp1_hit,f"{prefix}_tp1_exit_time":pos.tp1_exit_time,f"{prefix}_tp1_exit_price":pos.tp1_exit_price,f"{prefix}_tp1_gross_pnl":pos.tp1_gross_pnl,f"{prefix}_tp1_fees":pos.tp1_fees,f"{prefix}_tp1_net_pnl":pos.tp1_net_pnl,f"{prefix}_tp2_hit":pos.tp2_hit,f"{prefix}_tp2_exit_time":pos.tp2_exit_time,f"{prefix}_tp2_exit_price":pos.tp2_exit_price,f"{prefix}_tp2_gross_pnl":pos.tp2_gross_pnl,f"{prefix}_tp2_fees":pos.tp2_fees,f"{prefix}_tp2_net_pnl":pos.tp2_net_pnl,f"{prefix}_stop_exit_time":pos.stop_exit_time,f"{prefix}_stop_exit_price":pos.stop_exit_price,f"{prefix}_stop_exit_quantity":pos.stop_exit_quantity,f"{prefix}_stop_gross_pnl":pos.stop_gross_pnl,f"{prefix}_stop_fees":pos.stop_fees,f"{prefix}_stop_net_pnl":pos.stop_net_pnl,f"{prefix}_total_gross_pnl":pos.gross_pnl,f"{prefix}_total_net_pnl":pos.net_pnl,f"{prefix}_final_exit_reason":pos.final_exit_reason or (pos.exit_reason.value if pos.exit_reason else None),f"{prefix}_trade_r_price_distance":pos.risk,f"{prefix}_distance_unit_price":pos.distance_unit,f"{prefix}_trailing_enabled":pos.trailing_enabled,f"{prefix}_trailing_activated":pos.trailing_active,f"{prefix}_trailing_activation_time":pos.trailing_activation_time,f"{prefix}_trailing_activation_price":pos.trailing_activation_price,f"{prefix}_{'highest' if pos.side==Side.LONG else 'lowest'}_favourable_price":pos.favourable_price if pos.trailing_active else None,f"{prefix}_final_trailing_stop":pos.trailing_stop,f"{prefix}_final_active_stop":pos.final_active_stop,f"{prefix}_trailing_exit_price":pos.trailing_exit_price,f"{prefix}_trailing_profit_r":pos.trailing_profit_r,f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_configured_account_risk_percentage":self.config.risk_per_leg,f"{prefix}_estimated_all_in_stop_risk_percentage":est_stop_loss/pos.risk_amount*self.config.risk_per_leg if pos.risk_amount else 0,f"{prefix}_original_sl":pos.original_sl,f"{prefix}_current_sl":pos.sl,f"{prefix}_sl":pos.sl,f"{prefix}_tp":(None if pos.r_step_trailing_enabled and pos.r_step_maximum_r==0 else pos.tp),f"{prefix}_be_enabled":pos.be_enabled,f"{prefix}_be_triggered":pos.be_triggered,f"{prefix}_be_trigger_time":pos.be_trigger_time,f"{prefix}_be_triggered_by_side":pos.be_triggered_by_side.value if pos.be_triggered_by_side else None,f"{prefix}_be_mode":pos.be_mode,f"{prefix}_be_offset_r":pos.be_offset_r,f"{prefix}_be_stop_price":pos.be_stop_price,f"{prefix}_be_exit_reason":pos.be_exit_reason.value if pos.be_exit_reason else None,f"{prefix}_be_same_candle_ambiguous":pos.be_same_candle_ambiguous,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
+        cols.update({f"{prefix}_atr_checkpoint_enabled":pos.atr_checkpoint_extension_enabled or pos.atr_checkpoint_count>0,f"{prefix}_atr_checkpoint_count":pos.atr_checkpoint_count,f"{prefix}_atr_checkpoint_pass_count":pos.atr_checkpoint_pass_count,f"{prefix}_atr_checkpoint_fail_count":pos.atr_checkpoint_fail_count,f"{prefix}_atr_checkpoint_last_time":pos.atr_checkpoint_last_time,f"{prefix}_atr_checkpoint_last_r":pos.atr_checkpoint_last_r,f"{prefix}_atr_checkpoint_last_di_spread":pos.atr_checkpoint_last_di_spread,f"{prefix}_atr_checkpoint_last_bb_width":pos.atr_checkpoint_last_bb_width,f"{prefix}_atr_checkpoint_last_passed":pos.atr_checkpoint_last_passed,f"{prefix}_atr_checkpoint_initial_tp":pos.atr_checkpoint_initial_tp,f"{prefix}_atr_checkpoint_final_tp_r":pos.atr_checkpoint_final_tp_r,f"{prefix}_atr_checkpoint_profit_lock_r":pos.atr_checkpoint_profit_lock_r})
+        cols.update({f"{prefix}_r_step_trailing_enabled":pos.r_step_trailing_enabled,f"{prefix}_r_step_trailing_active":pos.r_step_trailing_active,f"{prefix}_r_step_checkpoint_count":pos.r_step_checkpoint_count,f"{prefix}_r_step_last_checkpoint_r":pos.r_step_last_checkpoint_r,f"{prefix}_r_step_last_checkpoint_time":pos.r_step_last_checkpoint_time,f"{prefix}_r_step_locked_r":pos.r_step_locked_r,f"{prefix}_r_step_initial_tp":pos.r_step_initial_tp,f"{prefix}_r_step_activation_partial_taken":pos.r_step_activation_partial_taken,f"{prefix}_r_step_activation_close_pct":pos.r_step_activation_close_pct,f"{prefix}_r_step_activation_quantity":pos.r_step_activation_quantity,f"{prefix}_r_step_runner_quantity":pos.r_step_runner_quantity})
+        cols.update({f"{prefix}_sr_nearest_support":pos.sr_nearest_support,f"{prefix}_sr_nearest_resistance":pos.sr_nearest_resistance,f"{prefix}_sr_support_distance_atr":pos.sr_support_distance_atr,f"{prefix}_sr_resistance_distance_atr":pos.sr_resistance_distance_atr,f"{prefix}_sr_support_distance_price":pos.sr_support_distance_price,f"{prefix}_sr_resistance_distance_price":pos.sr_resistance_distance_price,f"{prefix}_sr_near_support":pos.sr_near_support,f"{prefix}_sr_near_resistance":pos.sr_near_resistance,f"{prefix}_sr_inside_support_zone":pos.sr_inside_support_zone,f"{prefix}_sr_inside_resistance_zone":pos.sr_inside_resistance_zone,f"{prefix}_sr_location":pos.sr_location,f"{prefix}_sr_trade_location_rating":pos.sr_trade_location_rating,f"{prefix}_sr_room_in_direction_atr":pos.sr_room_in_direction_atr})
+        cols.update({f"{prefix}_sr_support_state":pos.sr_support_state, f"{prefix}_sr_resistance_state":pos.sr_resistance_state, f"{prefix}_sr_support_tested":pos.sr_support_tested, f"{prefix}_sr_resistance_tested":pos.sr_resistance_tested, f"{prefix}_sr_support_held":pos.sr_support_held, f"{prefix}_sr_resistance_held":pos.sr_resistance_held, f"{prefix}_sr_support_rejection_atr":pos.sr_support_rejection_atr, f"{prefix}_sr_resistance_rejection_atr":pos.sr_resistance_rejection_atr, f"{prefix}_sr_support_test_count":pos.sr_support_test_count, f"{prefix}_sr_resistance_test_count":pos.sr_resistance_test_count, f"{prefix}_sr_bars_since_support_test":pos.sr_bars_since_support_test, f"{prefix}_sr_bars_since_resistance_test":pos.sr_bars_since_resistance_test, f"{prefix}_sr_support_last_test_index":pos.sr_support_last_test_index, f"{prefix}_sr_resistance_last_test_index":pos.sr_resistance_last_test_index, f"{prefix}_sr_support_last_test_time":pos.sr_support_last_test_time, f"{prefix}_sr_resistance_last_test_time":pos.sr_resistance_last_test_time, f"{prefix}_sr_confirmation_rating":pos.sr_confirmation_rating})
+        cols.update({f"{prefix}_sr_support_zone_low":pos.sr_support_zone_low, f"{prefix}_sr_support_zone_high":pos.sr_support_zone_high, f"{prefix}_sr_resistance_zone_low":pos.sr_resistance_zone_low, f"{prefix}_sr_resistance_zone_high":pos.sr_resistance_zone_high, f"{prefix}_sr_level_price":pos.sr_level_price, f"{prefix}_sr_zone_low":pos.sr_zone_low, f"{prefix}_sr_zone_high":pos.sr_zone_high})
+        sr_event_labels=self._sr_event_labels(pos)
+        cols.update({
+            f"{prefix}_sr_support_bounce":bool(sr_event_labels and "SUPPORT_BOUNCE" in sr_event_labels),
+            f"{prefix}_sr_resistance_rejection":bool(sr_event_labels and "RESISTANCE_REJECTION" in sr_event_labels),
+            f"{prefix}_sr_resistance_breakout":bool(sr_event_labels and "RESISTANCE_BREAKOUT" in sr_event_labels),
+            f"{prefix}_sr_support_breakdown":bool(sr_event_labels and "SUPPORT_BREAKDOWN" in sr_event_labels),
+            f"{prefix}_sr_context":"|".join(sr_event_labels) if sr_event_labels else None,
+        })
+        return cols
