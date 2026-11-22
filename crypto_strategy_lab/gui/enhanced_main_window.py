@@ -91,6 +91,13 @@ class MainWindow(BaseMainWindow):
         rule.setWordWrap(True)
         direction_form.addRow("", self.enable_di_direction_selection)
         direction_form.addRow("", rule)
+        self.market_structure_filter_enabled = QCheckBox("Require BOS / CHoCH direction and protected-swing stop alignment")
+        self.market_structure_filter_enabled.setToolTip(
+            "Use the latest close-confirmed BOS or trend-changing CHoCH as the direction gate. "
+            "For LONG trades the ATR stop must be below the protected swing low; for SHORT trades "
+            "it must be above the protected swing high. Trades without a confirmed structure are skipped."
+        )
+        direction_form.addRow("", self.market_structure_filter_enabled)
         form.addWidget(direction_box)
 
         pressure_box = QGroupBox("DI Pressure Analysis")
@@ -226,6 +233,7 @@ class MainWindow(BaseMainWindow):
         values = super().values()
         values.update(
             {
+                "market_structure_filter_enabled": self.market_structure_filter_enabled.isChecked(),
                 "di_pressure_allow_expanding": self.di_pressure_allow_expanding.isChecked(),
                 "di_pressure_allow_contracting": self.di_pressure_allow_contracting.isChecked(),
                 "di_pressure_allow_mixed": self.di_pressure_allow_mixed.isChecked(),
@@ -250,6 +258,7 @@ class MainWindow(BaseMainWindow):
             **values,
         }
         super().apply_values(merged)
+        self.market_structure_filter_enabled.setChecked(bool(merged.get("market_structure_filter_enabled", False)))
         self.di_pressure_allow_expanding.setChecked(bool(merged["di_pressure_allow_expanding"]))
         self.di_pressure_allow_contracting.setChecked(bool(merged["di_pressure_allow_contracting"]))
         self.di_pressure_allow_mixed.setChecked(bool(merged["di_pressure_allow_mixed"]))

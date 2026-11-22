@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from crypto_strategy_core.candles import directional_di_ratio
 from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.adx import adx
-from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, DailyEntryMissedPolicy
+from crypto_strategy_lab.config import BacktestConfig, EntryMode, EntryTimingMode, IntrabarMissingPolicy, RiskMode, TiePolicy, DailyEntryMissedPolicy
 from crypto_strategy_lab.di_ladder import DILadderExecutionMixin
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
 from crypto_strategy_lab.mean_reversion import ema, distance_from_mean_atr, classify_state, classify_motion, classify_alignment, classify_strength
@@ -62,6 +62,24 @@ class BacktestEngine(DILadderExecutionMixin):
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array()
         self._configure_signal_features()
         self.signal_strategy_mode=self._infer_signal_strategy_mode()
+        self.market_structure_events = []
+        if self.config.market_structure_filter_enabled:
+            from crypto_strategy_lab.photon_structure import map_structure
+            interval_seconds = int(self.config.strategy_timeframe_minutes) * 60
+            bars = []
+            for timestamp, open_, high, low, close in zip(
+                self.times, self.open, self.high, self.low, self.close
+            ):
+                ts = pd.Timestamp(timestamp)
+                ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+                bars.append({
+                    "time": int(ts.timestamp()),
+                    "open": float(open_), "high": float(high),
+                    "low": float(low), "close": float(close),
+                })
+            self.market_structure_events = map_structure(
+                bars, interval=interval_seconds, qualification="CHOCH_PULLBACK"
+            )["events"]
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.strategy_rule_trace_rows=[]; self._strategy_rule_trace_keys=set(); self._strategy_rule_trace_active=None; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_next_open_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self._initialize_di_ladder_state()
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
@@ -160,6 +178,94 @@ class BacktestEngine(DILadderExecutionMixin):
             "market_structure_breakout_confirmed_by_close":bool((direction=="LONG" and self.close[i]>previous_high) or (direction=="SHORT" and self.close[i]<previous_low)),
         })
         return result
+
+
+    def _confirmed_bos_choch_snapshot(self, i):
+        """Return the latest close-confirmed BOS/CHoCH state available at bar close."""
+        if not hasattr(self, "market_structure_events"):
+            from crypto_strategy_lab.photon_structure import map_structure
+            interval_seconds = int(self.config.strategy_timeframe_minutes) * 60
+            bars = []
+            for timestamp, open_, high, low, close in zip(
+                self.times, self.open, self.high, self.low, self.close
+            ):
+                ts = pd.Timestamp(timestamp)
+                ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+                bars.append({
+                    "time": int(ts.timestamp()),
+                    "open": float(open_), "high": float(high),
+                    "low": float(low), "close": float(close),
+                })
+            self.market_structure_events = map_structure(
+                bars, interval=interval_seconds, qualification="CHOCH_PULLBACK"
+            )["events"]
+        interval = int(self.config.strategy_timeframe_minutes) * 60
+        timestamp = pd.Timestamp(self.times[i])
+        timestamp = timestamp.tz_localize("UTC") if timestamp.tzinfo is None else timestamp.tz_convert("UTC")
+        available_by = int(timestamp.timestamp()) + interval
+        breaks = [
+            event for event in self.market_structure_events
+            if event.get("kind") in ("BOS", "TREND_CHANGE")
+            and int(event.get("availableAt", 0)) <= available_by
+        ]
+        if not breaks:
+            return {"direction": "ABSTAIN", "reason": "NO_CONFIRMED_BOS_OR_CHOCH"}
+        latest = breaks[-1]
+        swings = [
+            event for event in self.market_structure_events
+            if event.get("kind") == "SWING"
+            and event.get("direction") == latest.get("direction")
+            and event.get("availableAt") == latest.get("availableAt")
+        ]
+        if not swings:
+            return {"direction": "ABSTAIN", "reason": "NO_PROTECTED_BOS_SWING"}
+        return {
+            "direction": "LONG" if latest["direction"] == 1 else "SHORT",
+            "reason": latest["kind"],
+            "break_available_at": latest["availableAt"],
+            "protected_swing": float(swings[-1]["price"]),
+            "break_price": float(latest["price"]),
+        }
+
+    def _market_structure_rejection(self, i, execution_i=None):
+        if not self.config.market_structure_filter_enabled:
+            return None
+        context = self._profile_context(i)
+        if context is None:
+            return "MARKET_STRUCTURE_DIRECTION_UNAVAILABLE"
+        _, original_direction, _, profile = context
+        direction = original_direction
+        flipped = bool(
+            profile.flip_direction
+            or (profile.entry_rules and self._strategy_profile_rule_group_match(
+                i, original_direction, profile, "FLIP", profile.flip_rule_match_mode
+            ))
+        )
+        if flipped:
+            direction = "SHORT" if direction == "LONG" else "LONG"
+        structure = self._confirmed_bos_choch_snapshot(i)
+        if structure["direction"] == "ABSTAIN":
+            return f"MARKET_STRUCTURE_{structure['reason']}"
+        if direction != structure["direction"]:
+            return "MARKET_STRUCTURE_DIRECTION_MISMATCH"
+
+        raw = float(self.close[i])
+        if execution_i is not None and self.config.entry_timing_mode == EntryTimingMode.NEXT_CANDLE_OPEN:
+            raw = float(self.open[execution_i])
+        if self.config.enable_daily_entry_schedule or self.config.entry_timing_mode == EntryTimingMode.NEXT_CANDLE_OPEN:
+            raw = float(self.open[execution_i if execution_i is not None else i])
+        entry = raw * (1 + self.config.slippage) if direction == "LONG" else raw * (1 - self.config.slippage)
+        stop_multiple = profile.sl2_r if profile.partial_stop_enabled else profile.stop_loss_multiple
+        stop_distance = stop_multiple * float(self.risk[i])
+        if not np.isfinite(stop_distance) or stop_distance <= 0:
+            return "MARKET_STRUCTURE_STOP_UNAVAILABLE"
+        stop_price = entry - stop_distance if direction == "LONG" else entry + stop_distance
+        swing = float(structure["protected_swing"])
+        if direction == "LONG" and stop_price >= swing:
+            return "MARKET_STRUCTURE_STOP_NOT_BELOW_BOS_SWING_LOW"
+        if direction == "SHORT" and stop_price <= swing:
+            return "MARKET_STRUCTURE_STOP_NOT_ABOVE_BOS_SWING_HIGH"
+        return None
 
     def _analyze_support_resistance(self, i, direction):
         """Analyze price location relative to support/resistance levels."""
@@ -585,6 +691,9 @@ class BacktestEngine(DILadderExecutionMixin):
         profile_result = self._strategy_profile_filter_result(i, execution_i)
         if not profile_result[0]:
             return profile_result
+        market_structure_rejection = self._market_structure_rejection(i, execution_i)
+        if market_structure_rejection:
+            return False, market_structure_rejection
         if self.config.enable_support_resistance_analysis:
             direction = self._selected_direction(i)
             sr_reject, sr_reason = self._should_reject_for_sr(i, direction, None)

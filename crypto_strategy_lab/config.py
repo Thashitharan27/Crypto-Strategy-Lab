@@ -181,6 +181,7 @@ class BacktestConfig:
     di_pressure_lookback: int = 3
     enable_mean_reversion_analysis: bool = True
     mean_reversion_period: int = 20
+    market_structure_filter_enabled: bool = False
 
     enable_support_resistance_analysis: bool = False
     sr_pivot_left: int = 5

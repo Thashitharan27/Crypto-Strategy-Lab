@@ -46,7 +46,7 @@ STRATEGY_GROUPS = (
     ("Direction", (
         "enable_di_direction_selection", "enable_di_pressure_analysis",
         "di_pressure_allow_expanding", "di_pressure_allow_contracting",
-        "di_pressure_allow_mixed",
+        "di_pressure_allow_mixed", "market_structure_filter_enabled",
     ), None),
     ("Entry Filters", (
         "enable_mean_reversion_analysis", "sr_filter_mode",

@@ -376,6 +376,7 @@ class StrategyConfig:
     di_pressure_allow_contracting: bool = True
     di_pressure_allow_mixed: bool = True
     enable_mean_reversion_analysis: bool = True
+    market_structure_filter_enabled: bool = False
     sr_filter_mode: str = "ANALYSIS_ONLY"
     sr_long_avoid_near_resistance: bool = False
     sr_long_require_near_support: bool = False
