@@ -1,1 +1,400 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíïÍýN‹Z–‹­¦ëeŠw¬Ôˆˆ‰ÕÉÉ•¹Ð½¹™¥ÕÉ…Ñ¥½¸½¹ÑË¿5öÚ$z{-®éÜj×F†R7G&FVw’F–ÖVg&ÖR"Ð 
+"""Current configuration contract for Crypto Strategy Lab."""
+from __future__ import annotations
+
+import math
+
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from crypto_strategy_lab.strategy_profiles import StrategyProfile, default_profiles, normalize_profiles
+
+
+class RiskMode(str, Enum):
+    FIXED = "FIXED"; PERCENT = "PERCENT"; ATR = "ATR"; SR_STRUCTURE = "SR_STRUCTURE"
+class EntryMode(str, Enum):
+    WAIT_UNTIL_CLOSED = "WAIT_UNTIL_CLOSED"; EVERY_N_CANDLES = "EVERY_N_CANDLES"
+class EntryTimingMode(str, Enum):
+    SIGNAL_CLOSE = "SIGNAL_CLOSE"; NEXT_CANDLE_OPEN = "NEXT_CANDLE_OPEN"
+class TiePolicy(str, Enum):
+    PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"; INTRABAR = "INTRABAR"
+class IntrabarMissingPolicy(str, Enum):
+    ERROR = "ERROR"; WARN_AND_USE_15M = "WARN_AND_USE_15M"; WARN_AND_CONTINUE = "WARN_AND_CONTINUE"
+class DailyEntryMissedPolicy(str, Enum):
+    SKIP_DAY = "SKIP_DAY"; NEXT_AVAILABLE_CANDLE = "NEXT_AVAILABLE_CANDLE"
+
+
+@dataclass(frozen=True)
+class BacktestConfig:
+    """Only settings belonging to the current GUI/Strategy Profile contract.
+
+    Retired global strategy switches do not exist in this contract. Old JSON or
+    direct constructor arguments therefore cannot reactivate removed behavior.
+    """
+
+    input_csv: Path = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv")
+    intrabar_csv: Optional[Path] = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_1m.csv")
+    output_dir: Path = Path("output")
+    timestamp_unit: Optional[str] = "ms"
+    strategy_timeframe_minutes: int = 15
+    intrabar_timeframe_minutes: int = 1
+    use_intrabar_data: bool = True
+    data_start_date: Optional[str] = None
+    trading_start_date: Optional[str] = None
+    trading_end_date: Optional[str] = None
+    max_effective_leverage_per_leg: Optional[float] = None
+    max_combined_effective_leverage: Optional[float] = None
+    intrabar_missing_policy: IntrabarMissingPolicy = IntrabarMissingPolicy.WARN_AND_USE_15M
+    zero_cost_comparison: bool = False
+
+    strategy_profile_run_mode: str = "COMBINED_SHARED_CAPITAL"
+    strategy_profiles: dict[str, StrategyProfile] = field(default_factory=default_profiles)
+
+    initial_equity: float = 1000.0
+    risk_mode: RiskMode = RiskMode.ATR
+    fixed_r: float = 100.0
+    percent_r: float = 0.01
+    atr_period: int = 14
+    atr_multiplier: float = 1.0
+    risk_per_leg: float = 0.005
+    adx_period: int = 14
+    bb_period: int = 20
+    bb_stddevs: float = 2.0
+
+    entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
+    entry_timing_mode: EntryTimingMode = EntryTimingMode.SIGNAL_CLOSE
+    ema_920_trade_plan: str = "PULLBACK_1R"
+    ema_320_flip_signals: bool = False
+    ema_320_exit_mode: str = "BOTH"
+    ema_320_candle_confirmation_enabled: bool = False
+    ema_320_candle_strong_close: bool = True
+    ema_320_candle_engulfing: bool = True
+    ema_320_candle_wick_rejection: bool = True
+    ema_320_candle_star: bool = True
+    ema_cross_cost_cycle_enabled: bool = False
+    ema_cross_initial_phantom_enabled: bool = False
+    ema_cross_reentry_widening_enabled: bool = False
+    ema_cross_entry_confirmation_enabled: bool = False
+    ema_cross_entry_confirmation_r: float = 1.0
+    fvg_confirmation_enabled: bool = False
+    fvg_confirmation_minutes: int = 1
+    fvg_target_mode: str = "FIXED_R"
+    ema_reversal_min_entry_ema300_atr: float = 0.5
+    ny_range_target_r: float = 2.0
+    ny_range_overshoot_policy: str = "DEFAULT"
+    ny_range_max_extension_pct: float = 0.0
+    ny_range_sr_buffer_atr: float = 0.05
+    io_entry_model: str = "ORIGIN_REJECTION"
+    io_context_minutes: int = 60
+    ls_equal_tolerance_atr: float = 0.15
+    ls_displacement_atr: float = 1.0
+    ls_base_bars: int = 3
+    tc_require_live_confirmations: bool = True
+    tc_min_sweep_atr: float = 0.1
+    tc_require_structure: bool = True
+    tc_require_ifvg: bool = True
+    tc_require_equilibrium: bool = True
+    tc_displacement_atr: float = 0.5
+    tc_max_wait_bars: int = 30
+    tc_fvg_lookback: int = 64
+    tc_min_reversal_body_percent: float = 50.0
+    tc_target_r: float = 3.0
+    sp_minimum_r_enabled: bool = False
+    sp_recent_swings_enabled: bool = False
+    sp_require_level_reclaim: bool = False
+    sp_cost_cover_enabled: bool = False
+    sp_cost_cover_close_pct: float = 10.0
+    sp_level_tolerance_atr: float = 0.3
+    sp_body_atr: float = 0.5
+    sp_min_body_percent: float = 50.0
+    sp_confirmation_bars: int = 3
+    sp_hold_minutes: int = 1440
+    ls_max_wait_bars: int = 20
+    sd_swing_strength: int = 2
+    sd_stop_buffer_atr: float = 0.05
+    sd_minimum_r: float = 1.0
+    photon_confirmation_minutes: int = 1440
+    photon_retest_minutes: int = 60
+    photon_midpoint_fixed_1r: bool = False
+    photon_candle_pullback: bool = False
+    photon_candle_target_timeframe: str = "15m"
+    photon_candle_minimum_r_enabled: bool = False
+    photon_demand_pullback: bool = False
+    photon_demand_entry_model: str = "ORIGINAL"
+    photon_midpoint_reversal: bool = False
+    photon_quarter_range: bool = False
+    photon_target_4h: bool = False
+    photon_flexible_entries: bool = False
+    photon_zone_reversal: bool = False
+    photon_daily_zone_only: bool = False
+    photon_zone_model: str = "LEGACY"
+    photon_range_base_bars: int = 3
+    photon_fresh_zone_only: bool = False
+    photon_require_zone_bos: bool = False
+    photon_require_flip: bool = False
+    photon_require_sweep: bool = False
+    photon_require_inducement: bool = False
+    photon_require_stacking: bool = False
+    photon_require_zone_value: bool = False
+    photon_require_4h_alignment: bool = False
+    photon_require_daily_alignment: bool = False
+    photon_require_weekly_alignment: bool = False
+    photon_require_15m_internal_alignment: bool = False
+    photon_fixed_target_enabled: bool = False
+    photon_fixed_target_r: float = 3
+    photon_legacy_entry_and_stop: bool = False
+    photon_exit_on_15m_change: bool = False
+    photon_hold_tp_until_15m_reversal: bool = False
+    ema_reversal_target_r: float = 1.0
+    ema_reversal_min_gap_atr: float = 0.5
+    fvg_reject_ema100_in_tp: bool = False
+    fvg_target_timeframe_minutes: int = 240
+    fvg_target_minimum_r: float = 1.5
+    fvg_target_no_level_policy: str = "REJECT_TRADE"
+    fvg_target_buffer_atr: float = 0.05
+    fvg_context_enabled: bool = False
+    fvg_context_timeframe_minutes: int = 240
+    fvg_structure_swing_strength: int = 2
+    fvg_min_clear_bars: int = 3
+    fvg_min_move_away_atr: float = 0.5
+    fib_half_swing_mode: bool = False
+    fib_third_retest_entry: bool = False
+    fib_ema_trend_gate: bool = False
+    fib_candidate_context_selection: bool = False
+    fib_candle_confirmation_enabled: bool = False
+    fib_candle_strong_close: bool = True
+    fib_candle_engulfing: bool = True
+    fib_candle_wick_rejection: bool = True
+    fib_candle_star: bool = True
+    fib_first_zone_hold_entry: bool = False
+    fib_stop_buffer_atr: float = 0.05
+    fib_entry_50_618_only: bool = False
+    fib_target_mode: str = "IMPULSE_EXTREME"
+    fib_fixed_target_r: float = 2.0
+    fib_target_buffer_atr: float = 0.05
+    fib_minimum_target_r: float = 2.0
+    entry_interval: int = 1
+    enable_di_direction_selection: bool = True
+    enable_di_pressure_analysis: bool = True
+    di_pressure_lookback: int = 3
+    enable_mean_reversion_analysis: bool = True
+    mean_reversion_period: int = 20
+    market_structure_filter_enabled: bool = False
+
+    enable_support_resistance_analysis: bool = False
+    sr_pivot_left: int = 5
+    sr_pivot_right: int = 5
+    sr_lookback_bars: int = 200
+    sr_zone_width_atr: float = 0.15
+    sr_zone_padding_atr: float = 0.10
+    sr_zone_max_cluster_span_atr: float = 0.50
+    sr_min_rejection_atr: float = 0.50
+    sr_near_distance_atr: float = 0.50
+    enable_sr_hold_confirmation: bool = True
+    sr_hold_confirmation_bars: int = 3
+    sr_hold_confirmation_atr: float = 0.25
+    sr_break_tolerance_atr: float = 0.25
+    sr_break_basis: str = "CLOSE"
+    sr_filter_mode: str = "ANALYSIS_ONLY"
+    sr_long_avoid_near_resistance: bool = False
+    sr_long_require_near_support: bool = False
+    sr_long_block_broken_support: bool = False
+    sr_long_min_room_to_resistance_atr: float = 0.0
+    sr_short_avoid_near_support: bool = False
+    sr_short_require_near_resistance: bool = False
+    sr_short_block_broken_resistance: bool = False
+    sr_short_min_room_to_support_atr: float = 0.0
+
+    market_regime_method: str = "ASSET_RETURN"
+    structural_regime_sma_days: int = 200
+    structural_regime_slope_lookback_days: int = 30
+    structural_regime_benchmark_csv: Optional[Path] = None
+    bull_regime_lookback_days: int = 90
+    bull_regime_return_threshold: float = 0.20
+
+    enable_daily_entry_schedule: bool = False
+    daily_entry_time: str = "00:00"
+    daily_entry_timezone: str = "UTC"
+    daily_entry_missed_policy: DailyEntryMissedPolicy = DailyEntryMissedPolicy.SKIP_DAY
+
+    maker_fee: float = 0.0002
+    taker_fee: float = 0.0005
+    use_maker_entry: bool = False
+    use_maker_exit: bool = False
+    slippage: float = 0.0001
+    tie_policy: TiePolicy = TiePolicy.PESSIMISTIC
+    max_active_pairs: int = 1
+    run_name: str = ""
+    output_run_dir: Optional[Path] = None
+
+    enable_trade_telemetry: bool = True
+    save_full_telemetry_csv: bool = True
+    save_trade_journey_summary: bool = True
+    save_trade_journey_charts: bool = True
+    telemetry_interval_minutes: int = 15
+    enable_indicator_lifecycle_analysis: bool = True
+    lifecycle_phases: int = 4
+    lifecycle_early_checkpoints: tuple[int, ...] = (15, 30, 60)
+    lifecycle_minimum_bucket_sample: int = 20
+    create_lifecycle_charts: bool = True
+    lifecycle_flat_pattern_threshold_pct: float = 5.0
+    save_feature_analysis_reports: bool = True
+    save_indicator_analysis_reports: bool = True
+    create_standard_charts: bool = True
+
+    def __post_init__(self) -> None:
+        from .photon_lesson import validate as validate_lesson
+        validate_lesson(self)
+        from crypto_strategy_lab.photon_trend import selected as photon_selected, validate_settings as validate_photon
+        validate_photon(self.photon_confirmation_minutes,self.photon_retest_minutes,self.strategy_timeframe_minutes,photon_selected(self.strategy_profiles))
+        from crypto_strategy_lab.supply_demand_retest import validate_settings
+        validate_settings(self.sd_swing_strength,self.sd_stop_buffer_atr,self.sd_minimum_r)
+        from crypto_strategy_lab.sneaky_pivot import validate_settings as validate_sneaky
+        validate_sneaky(self.sp_level_tolerance_atr,self.sp_body_atr,self.sp_confirmation_bars,self.sp_hold_minutes,self.sp_min_body_percent)
+        from crypto_strategy_lab.tjr_confluence import validate_settings as validate_confluence
+        validate_confluence(self.tc_displacement_atr,self.tc_max_wait_bars,self.tc_fvg_lookback,self.tc_min_reversal_body_percent,self.tc_target_r,self.tc_min_sweep_atr)
+        from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
+        validate_liquidity(self.ls_equal_tolerance_atr,self.ls_displacement_atr,self.ls_base_bars,self.ls_max_wait_bars)
+        from .ny_opening_range import validate_target, validate_timeframe, validate_policy, requires_sr
+        validate_target(self.ny_range_target_r)
+        validate_policy(self.ny_range_overshoot_policy,self.ny_range_max_extension_pct,self.ny_range_sr_buffer_atr)
+        if requires_sr(self.strategy_profiles,self.ny_range_overshoot_policy) and not self.enable_support_resistance_analysis:
+            raise ValueError("New York S/R-stop option requires support/resistance analysis")
+        validate_timeframe(self.strategy_profiles,self.strategy_timeframe_minutes)
+        from .imbalance_inducement import validate_model
+        validate_model(self.io_entry_model,self.io_context_minutes,self.strategy_timeframe_minutes, active=any(r.get("_strategy_direction_mode")=="IMBALANCE_ORIGIN_RETEST" for p in self.strategy_profiles.values() for r in getattr(p,"entry_rules",())))
+        if not math.isfinite(self.ema_reversal_min_gap_atr) or self.ema_reversal_min_gap_atr < 0:
+            raise ValueError("EMA minimum gap must be finite and non-negative")
+        if not math.isfinite(self.ema_reversal_target_r) or self.ema_reversal_target_r <= 0:
+            raise ValueError("EMA reward/risk must be finite and positive")
+        if not math.isfinite(self.ema_reversal_min_entry_ema300_atr) or self.ema_reversal_min_entry_ema300_atr < 0:
+            raise ValueError("EMA 300 entry distance must be finite and non-negative")
+        object.__setattr__(self, "strategy_profiles", normalize_profiles(self.strategy_profiles))
+        from crypto_strategy_lab.sneaky_pivot import validate_cost_cover
+        validate_cost_cover(self.sp_cost_cover_enabled,self.sp_cost_cover_close_pct,
+            (p for p in self.strategy_profiles.values() if any(r.get("_strategy_direction_mode")=="SNEAKY_PIVOT" for r in p.entry_rules)))
+        from crypto_strategy_lab.di_partial_cost import validate_di_partial_risk_mode
+        for di_profile in self.strategy_profiles.values():
+            validate_di_partial_risk_mode(di_profile, self.risk_mode, di_profile.entry_rules, getattr(self, "sr_take_profit_mode", "FIXED_R"))
+        ema_cost_cycle_selected = (
+            self.ema_cross_cost_cycle_enabled
+            and self.ema_920_trade_plan.startswith("EMA_20_100_CROSS")
+            and any(
+                rule.get("_strategy_direction_mode") == "EMA_9_20_PULLBACK"
+                for profile in self.strategy_profiles.values()
+                for rule in profile.entry_rules
+            )
+        )
+        if ema_cost_cycle_selected:
+            if self.ema_cross_initial_phantom_enabled and self.ema_cross_entry_confirmation_enabled:
+                raise ValueError("Initial phantom mode replaces EMA cross entry confirmation; disable confirmation distance")
+            if self.enable_daily_entry_schedule or self.max_active_pairs != 1 or getattr(self, "di_ladder_enabled", False):
+                raise ValueError("EMA cost-cover cycles require one active trade, no daily schedule and no DI ladder")
+        if self.strategy_profile_run_mode not in ("ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"):
+            raise ValueError("invalid strategy_profile_run_mode")
+        if self.initial_equity <= 0:
+            raise ValueError("initial_equity must be positive")
+        if self.strategy_timeframe_minutes <= 0 or self.intrabar_timeframe_minutes <= 0:
+            raise ValueError("timeframes must be positive")
+        if self.use_intrabar_data and self.intrabar_timeframe_minutes >= self.strategy_timeframe_minutes:
+            raise ValueError("intrabar timeframe must be less than strategy timeframe")
+        if self.ema_cross_entry_confirmation_enabled and self.ema_cross_entry_confirmation_r <= 0:
+            raise ValueError("EMA cross entry confirmation R must be positive")
+        if self.fvg_structure_swing_strength < 1 or self.fvg_structure_swing_strength > 50:
+            raise ValueError("FVG structure swing strength must be between 1 and 50")
+        if not math.isfinite(self.fvg_min_clear_bars) or int(self.fvg_min_clear_bars) != self.fvg_min_clear_bars or not 0 <= self.fvg_min_clear_bars <= 10000:
+            raise ValueError("FVG minimum clear candles must be an integer between 0 and 10000")
+        if not math.isfinite(self.fvg_min_move_away_atr) or self.fvg_min_move_away_atr < 0:
+            raise ValueError("FVG minimum move-away ATR must be finite and nonnegative")
+        fib_target_mode = str(self.fib_target_mode).upper()
+        object.__setattr__(self, "fib_target_mode", fib_target_mode)
+        if fib_target_mode not in {"IMPULSE_EXTREME", "FIXED_R"}:
+            raise ValueError("Fib target mode must be IMPULSE_EXTREME or FIXED_R")
+        if self.fib_fixed_target_r <= 0:
+            raise ValueError("Fib fixed target R must be positive")
+        if self.fib_stop_buffer_atr < 0 or self.fib_target_buffer_atr < 0:
+            raise ValueError("Fib ATR buffers cannot be negative")
+        if self.fib_minimum_target_r <= 0:
+            raise ValueError("Fib minimum target room must be positive")
+        if self.fvg_context_enabled:
+            if self.fvg_context_timeframe_minutes <= self.strategy_timeframe_minutes:
+                raise ValueError("FVG context timeframe must be larger than strategy timeframe")
+            if self.fvg_context_timeframe_minutes % self.strategy_timeframe_minutes:
+                raise ValueError("FVG context timeframe must be an exact multiple of strategy timeframe")
+        from crypto_strategy_lab.fvg_htf_targets import validate_target_settings
+        validate_target_settings(self.fvg_target_mode, self.fvg_target_timeframe_minutes,
+                                 self.fvg_target_minimum_r, self.fvg_target_no_level_policy,
+                                 self.strategy_timeframe_minutes)
+        if not math.isfinite(self.fvg_target_buffer_atr) or self.fvg_target_buffer_atr < 0:
+            raise ValueError("FVG target buffer must be finite and nonnegative")
+        if self.fvg_confirmation_enabled:
+            if not self.use_intrabar_data:
+                raise ValueError("FVG confirmation requires intrabar data")
+            if self.fvg_confirmation_minutes <= 0 or self.fvg_confirmation_minutes >= self.strategy_timeframe_minutes:
+                raise ValueError("FVG confirmation timeframe must be positive and smaller than strategy timeframe")
+            if self.fvg_confirmation_minutes % self.intrabar_timeframe_minutes:
+                raise ValueError("FVG confirmation timeframe must be an exact multiple of intrabar timeframe")
+            if self.enable_daily_entry_schedule:
+                raise ValueError("FVG confirmation does not support scheduled daily entries")
+        if not 0 < self.risk_per_leg < 1:
+            raise ValueError("risk_per_leg must be between 0 and 1")
+        if self.atr_period <= 0 or self.atr_multiplier <= 0:
+            raise ValueError("ATR settings must be positive")
+        if self.adx_period <= 0 or self.bb_period <= 0 or self.bb_stddevs <= 0:
+            raise ValueError("indicator periods/settings must be positive")
+        if self.entry_interval <= 0 or self.max_active_pairs <= 0:
+            raise ValueError("entry_interval and max_active_pairs must be positive")
+        if self.fixed_r <= 0 or self.percent_r <= 0:
+            raise ValueError("risk distances must be positive")
+        if self.maker_fee < 0 or self.taker_fee < 0 or self.slippage < 0:
+            raise ValueError("fees and slippage must be non-negative")
+        if self.max_effective_leverage_per_leg is not None and self.max_effective_leverage_per_leg <= 0:
+            raise ValueError("max leverage per trade must be positive")
+        if self.max_combined_effective_leverage is not None and self.max_combined_effective_leverage <= 0:
+            raise ValueError("max portfolio leverage must be positive")
+        if not 1 <= self.di_pressure_lookback <= 100:
+            raise ValueError("di_pressure_lookback must be between 1 and 100")
+        if self.mean_reversion_period <= 0:
+            raise ValueError("mean_reversion_period must be positive")
+        if self.market_regime_method not in ("ASSET_RETURN", "BTC_STRUCTURAL", "ASSET_STRUCTURAL"):
+            raise ValueError("invalid market_regime_method")
+        if self.structural_regime_sma_days < 2 or self.structural_regime_slope_lookback_days < 1:
+            raise ValueError("structural regime periods are invalid")
+        if self.bull_regime_lookback_days <= 0 or self.bull_regime_return_threshold <= -1:
+            raise ValueError("asset-return regime settings are invalid")
+        if self.sr_pivot_left < 1 or self.sr_pivot_right < 1 or self.sr_lookback_bars < 1:
+            raise ValueError("support/resistance lookbacks must be positive")
+        if min(
+            self.sr_zone_width_atr,
+            self.sr_zone_padding_atr,
+            self.sr_zone_max_cluster_span_atr,
+            self.sr_min_rejection_atr,
+            self.sr_near_distance_atr,
+            self.sr_hold_confirmation_atr,
+            self.sr_break_tolerance_atr,
+        ) < 0:
+            raise ValueError("support/resistance ATR distances must be non-negative")
+        if self.sr_filter_mode not in ("ANALYSIS_ONLY", "APPLY_ENTRY_RULES"):
+            raise ValueError("invalid sr_filter_mode")
+        if self.sr_break_basis not in ("CLOSE", "WICK"):
+            raise ValueError("invalid sr_break_basis")
+        if isinstance(self.intrabar_missing_policy, str):
+            object.__setattr__(self, "intrabar_missing_policy", IntrabarMissingPolicy(self.intrabar_missing_policy))
+        if isinstance(self.risk_mode, str):
+            object.__setattr__(self, "risk_mode", RiskMode(self.risk_mode))
+        if isinstance(self.entry_mode, str):
+            object.__setattr__(self, "entry_mode", EntryMode(self.entry_mode))
+        if isinstance(self.entry_timing_mode, str):
+            object.__setattr__(self, "entry_timing_mode", EntryTimingMode(self.entry_timing_mode))
+        if isinstance(self.tie_policy, str):
+            object.__setattr__(self, "tie_policy", TiePolicy(self.tie_policy))
+        if isinstance(self.daily_entry_missed_policy, str):
+            object.__setattr__(self, "daily_entry_missed_policy", DailyEntryMissedPolicy(self.daily_entry_missed_policy))
+        try:
+            hh, mm = [int(part) for part in str(self.daily_entry_time).split(":", 1)]
+            if not (0 <= hh <= 23 and 0 <= mm <= 59):
+                raise ValueError
+        except Exception as exc:
+            raise ValueError("daily_entry_time must be HH:MM in 24-hour time") from exc

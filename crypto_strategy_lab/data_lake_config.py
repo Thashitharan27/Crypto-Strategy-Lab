@@ -1,1 +1,1143 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíÛ^wÕ:-jZ.¶›­–)Þ³R""%7G&–7B6ö×÷6—F–öâÖ÷&–VçFVMµç]m¢G§²ÚîÆ­yÒesearch_run_config(values)
+"""Strict composition-oriented configuration for native Data Lake research runs.
+
+The authoritative Data Lake file format is the nested v3 ResearchRunConfig.
+The existing GUI still emits the mature flat v2 contract; a bounded adapter is
+kept here for that real consumer until the later GUI redesign. The native CLI,
+benchmark, cache identity, and ResearchRunner never accept v2 through
+``load_data_lake_config``.
+"""
+from __future__ import annotations
+
+import math
+
+from dataclasses import asdict, dataclass, field
+import json
+from pathlib import Path
+from typing import Any, Mapping, get_type_hints
+
+from crypto_strategy_lab.mean_reversion_v2 import normalize_mean_type
+
+
+CONFIG_VERSION = 3
+GUI_COMPAT_CONFIG_VERSION = 2
+PROFILE_KEYS = (
+    "bull_long", "bull_short", "bear_long", "bear_short", "sideways_long", "sideways_short"
+)
+
+
+@dataclass(frozen=True)
+class DataConfig:
+    strategy_timeframe_minutes: int = 15
+    intrabar_timeframe_minutes: int = 1
+    use_intrabar_data: bool = True
+    intrabar_missing_policy: str = "ERROR"
+
+
+@dataclass(frozen=True)
+class FeatureConfig:
+    fib_inherited_first_held: bool = False
+    fib_first_0786_held: bool = False
+    fib_structure_quality_mode: str = "BASELINE"
+    fib_half_swing_mode: bool = False
+    fib_third_retest_entry: bool = False
+    fib_ema_trend_gate: bool = False
+    fib_candidate_context_selection: bool = False
+    ema_320_candle_confirmation_enabled: bool = False
+    ema_320_candle_strong_close: bool = True
+    ema_320_candle_engulfing: bool = True
+    ema_320_candle_wick_rejection: bool = True
+    ema_320_candle_star: bool = True
+    fib_candle_confirmation_enabled: bool = False
+    fib_candle_strong_close: bool = True
+    fib_candle_engulfing: bool = True
+    fib_candle_wick_rejection: bool = True
+    fib_candle_star: bool = True
+    fib_first_zone_hold_entry: bool = False
+    atr_period: int = 14
+    adx_period: int = 14
+    di_pressure_lookback: int = 3
+    bb_period: int = 20
+    bb_stddevs: float = 2.0
+    mean_reversion_period: int = 20
+    mean_reversion_mean_type: str = "AUTO_TIMEFRAME"
+    mean_reversion_bb_stddevs: float = 2.0
+    mean_reversion_rsi_period: int = 14
+    mean_reversion_rsi_oversold: float = 30.0
+    mean_reversion_rsi_overbought: float = 70.0
+    mean_reversion_require_reentry: bool = True
+    mean_reversion_track_atr_distance: bool = True
+    mean_reversion_track_motion: bool = True
+    ichimoku_enabled: bool = False
+    ichimoku_conversion_period: int = 9
+    ichimoku_base_period: int = 26
+    ichimoku_span_b_period: int = 52
+    ichimoku_displacement: int = 26
+    ichimoku_include_higher_timeframes: bool = True
+    enable_support_resistance_analysis: bool = False
+    sr_timeframe_minutes: int = 0
+    sr_pivot_left: int = 5
+    sr_pivot_right: int = 5
+    sr_lookback_bars: int = 200
+    # Per-timeframe detection overrides. 0 means inherit the shared values above,
+    # preserving historical configs while allowing each S/R context to have an
+    # appropriate structural horizon.
+    sr_15m_pivot_left: int = 0
+    sr_15m_pivot_right: int = 0
+    sr_15m_lookback_bars: int = 672   # ~7 days
+    sr_1h_pivot_left: int = 0
+    sr_1h_pivot_right: int = 0
+    sr_1h_lookback_bars: int = 720    # ~30 days
+    sr_4h_pivot_left: int = 0
+    sr_4h_pivot_right: int = 0
+    sr_4h_lookback_bars: int = 540    # ~90 days
+    sr_1d_pivot_left: int = 0
+    sr_1d_pivot_right: int = 0
+    sr_1d_lookback_bars: int = 365    # ~1 year
+    # v6 rejection-zone geometry. Historical field names remain in the persisted
+    # config contract, but the GUI labels describe their v6 meaning.
+    sr_zone_width_atr: float = 0.15  # maximum gap between zones that may merge
+    sr_zone_padding_atr: float = 0.10  # minimum wick/body zone width
+    sr_zone_max_cluster_span_atr: float = 0.50  # maximum zone/cluster width
+    sr_min_rejection_atr: float = 0.50
+    sr_near_distance_atr: float = 0.50
+    # Retained in the native config for old files/API compatibility. The GUI no
+    # longer exposes this switch and normal research keeps confirmation enabled.
+    enable_sr_hold_confirmation: bool = True
+    sr_hold_confirmation_bars: int = 3
+    sr_hold_confirmation_atr: float = 0.25
+    sr_break_tolerance_atr: float = 0.25
+    sr_break_basis: str = "CLOSE"
+    market_regime_method: str = "ASSET_RETURN"
+    structural_regime_sma_days: int = 200
+    structural_regime_slope_lookback_days: int = 30
+    bull_regime_lookback_days: int = 90
+    bull_regime_return_threshold: float = 0.20
+    trade_flow_enabled: bool = False
+    trade_flow_source: str = "AGG_TRADES"
+    trade_flow_base_interval: str = "1m"
+    trade_flow_windows: tuple[str, ...] = ("1m", "5m", "15m", "1h")
+    large_trade_quote_threshold: float | None = None
+    order_book_enabled: bool = False
+    order_book_base_interval: str = "1m"
+    book_ticker_max_age_seconds: float = 5.0
+    book_depth_max_age_seconds: float = 90.0
+    taker_flow_interval: str = "5m"
+    oi_zscore_window_days: float = 7.0
+    oi_zscore_min_samples: int = 20
+    funding_zscore_window_days: float = 7.0
+    funding_zscore_min_samples: int = 6
+    funding_extreme_zscore: float = 2.0
+    basis_zscore_window_days: float = 7.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "mean_reversion_mean_type",
+            normalize_mean_type(self.mean_reversion_mean_type),
+        )
+
+    def sr_detection_parameters(self, timeframe_minutes: int) -> dict[str, int]:
+        """Resolve causal pivot settings and a timeframe-aware structural horizon."""
+        result = {
+            "sr_pivot_left": int(self.sr_pivot_left),
+            "sr_pivot_right": int(self.sr_pivot_right),
+            "sr_lookback_bars": int(self.sr_lookback_bars),
+        }
+        label = {15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(
+            int(timeframe_minutes)
+        )
+        if label is None:
+            return result
+
+        auto_lookback = {
+            "15m": 672,
+            "1h": 720,
+            "4h": 540,
+            "1d": 365,
+        }[label]
+        for key in ("pivot_left", "pivot_right", "lookback_bars"):
+            override = int(getattr(self, f"sr_{label}_{key}"))
+            if override < 0:
+                raise ValueError(
+                    f"sr_{label}_{key} must be zero (automatic/inherit) or positive"
+                )
+            if key == "lookback_bars":
+                result["sr_lookback_bars"] = override or auto_lookback
+            elif override:
+                result[f"sr_{key}"] = override
+        return result
+
+    def sr_detection_override_parameters(self) -> dict[str, int]:
+        """Return raw per-timeframe overrides for feature-cache identity."""
+        return {
+            f"sr_{label}_{key}": int(getattr(self, f"sr_{label}_{key}"))
+            for label in ("15m", "1h", "4h", "1d")
+            for key in ("pivot_left", "pivot_right", "lookback_bars")
+        }
+
+    def registry_parameters(self, *, strategy_timeframe_minutes: int | None = None) -> dict[str, dict[str, Any]]:
+        """Authoritative registered-feature parameters owned by FeatureConfig."""
+        directional = {
+            "atr_period": int(self.atr_period),
+            "adx_period": int(self.adx_period),
+            "di_pressure_lookback": int(self.di_pressure_lookback),
+        }
+        context = {
+            "bb_period": int(self.bb_period),
+            "bb_stddevs": float(self.bb_stddevs),
+            "mean_reversion_period": int(self.mean_reversion_period),
+            "mean_reversion_mean_type": str(self.mean_reversion_mean_type).upper(),
+            "mean_reversion_bb_stddevs": float(self.mean_reversion_bb_stddevs),
+            "mean_reversion_rsi_period": int(self.mean_reversion_rsi_period),
+            "mean_reversion_rsi_oversold": float(self.mean_reversion_rsi_oversold),
+            "mean_reversion_rsi_overbought": float(self.mean_reversion_rsi_overbought),
+            "mean_reversion_require_reentry": bool(self.mean_reversion_require_reentry),
+        }
+        result = {
+            "atr_context": {"atr_period": int(self.atr_period)},
+            "core_directional": directional,
+            "production_market_context": context,
+        }
+        if self.ichimoku_enabled:
+            result["ichimoku_context"] = {
+                "timeframe_minutes": 0,
+                "conversion_period": int(self.ichimoku_conversion_period),
+                "base_period": int(self.ichimoku_base_period),
+                "span_b_period": int(self.ichimoku_span_b_period),
+                "displacement": int(self.ichimoku_displacement),
+                "atr_period": int(self.atr_period),
+            }
+        result["futures_positioning"] = {
+            "oi_zscore_window_days": float(self.oi_zscore_window_days),
+            "oi_zscore_min_samples": int(self.oi_zscore_min_samples),
+        }
+        result["funding_context"] = {
+            "funding_zscore_window_days": float(self.funding_zscore_window_days),
+            "funding_zscore_min_samples": int(self.funding_zscore_min_samples),
+            "funding_extreme_zscore": float(self.funding_extreme_zscore),
+        }
+        result["taker_flow_context"] = {"taker_flow_interval": str(self.taker_flow_interval)}
+        result["basis_context"] = {"basis_zscore_window_days": float(self.basis_zscore_window_days)}
+        if self.trade_flow_enabled:
+            source = str(self.trade_flow_source).upper()
+            if source not in {"AGG_TRADES", "TRADES"}:
+                raise ValueError("trade_flow_source must be AGG_TRADES or TRADES")
+            if self.trade_flow_base_interval != "1m":
+                raise ValueError("trade_flow_base_interval must be 1m")
+            if self.large_trade_quote_threshold is not None and self.large_trade_quote_threshold <= 0:
+                raise ValueError("large_trade_quote_threshold must be positive or null")
+            result["trade_flow_context"] = {
+                "trade_flow_source": source,
+                "trade_flow_windows": tuple(self.trade_flow_windows),
+            }
+        if self.order_book_enabled:
+            if self.order_book_base_interval != "1m":
+                raise ValueError("order_book_base_interval must be 1m")
+            if self.book_ticker_max_age_seconds < 0 or self.book_depth_max_age_seconds < 0:
+                raise ValueError("order-book maximum ages must be non-negative")
+            result["order_book_context"] = {
+                "book_ticker_max_age_seconds": float(self.book_ticker_max_age_seconds),
+                "book_depth_max_age_seconds": float(self.book_depth_max_age_seconds),
+            }
+        if self.enable_support_resistance_analysis:
+            if strategy_timeframe_minutes is None:
+                raise ValueError("strategy timeframe is required for S/R feature parameters")
+            effective_sr = int(self.sr_timeframe_minutes or strategy_timeframe_minutes)
+            result["support_resistance"] = {
+                "atr_period": int(self.atr_period),
+                "sr_timeframe_minutes": effective_sr,
+                **self.sr_detection_parameters(effective_sr),
+                **self.sr_detection_override_parameters(),
+                "sr_zone_width_atr": float(self.sr_zone_width_atr),
+                "sr_zone_padding_atr": float(self.sr_zone_padding_atr),
+                "sr_zone_max_cluster_span_atr": float(self.sr_zone_max_cluster_span_atr),
+                "sr_min_rejection_atr": float(self.sr_min_rejection_atr),
+                "sr_near_distance_atr": float(self.sr_near_distance_atr),
+                "enable_sr_hold_confirmation": bool(self.enable_sr_hold_confirmation),
+                "sr_hold_confirmation_bars": int(self.sr_hold_confirmation_bars),
+                "sr_hold_confirmation_atr": float(self.sr_hold_confirmation_atr),
+                "sr_break_tolerance_atr": float(self.sr_break_tolerance_atr),
+                "sr_break_basis": str(self.sr_break_basis).upper(),
+            }
+        return result
+
+
+@dataclass(frozen=True)
+class StrategyProfileConfig:
+    enabled: bool = True
+    flip_direction: bool = False
+    entry_rules: tuple = ()
+    flip_rule_match_mode: str = "ANY"
+    reject_rule_match_mode: str = "ANY"
+    rsi_period: int = 14
+    momentum_lookback_hours: int = 24
+
+
+@dataclass(frozen=True)
+class ExecutionProfileConfig:
+    reward_risk_ratio: float = 1.0
+    risk_multiplier: float = 1.0
+    stop_loss_multiple: float = 2.0
+    position_sizing_stop_override_enabled: bool = False
+    position_sizing_stop_multiple: float = 1.0
+    ema_cross_stop_buffer_atr: float = 0.05
+    ema_cross_stop_multiplier: float = 1.0
+    partial_stop_enabled: bool = False
+    sl1_r: float = 0.5
+    sl1_close_pct: float = 50.0
+    sl2_r: float = 2.0
+    di_partial_1r_enabled: bool = False
+    di_partial_1r_close_pct: float = 10.0
+    di_partial_cost_atr_enabled: bool = False
+    partial_profit_enabled: bool = False
+    tp1_r: float = 1.0
+    tp1_close_pct: float = 50.0
+    tp2_r: float = 2.0
+    trailing_enabled: bool = False
+    trailing_activation_r: float = 3.0
+    trailing_distance_r: float = 1.0
+    break_even_enabled: bool = False
+    break_even_activation_r: float = 1.0
+    break_even_offset_r: float = 0.0
+    timeout_enabled: bool = False
+    timeout_minutes: int = 480
+    r_step_trailing_enabled: bool = False
+    r_step_activation_r: float = 2.0
+    r_step_distance_r: float = 2.0
+    r_step_size_r: float = 1.0
+    r_step_maximum_r: float = 0.0
+    r_step_activation_close_pct: float = 0.0
+    atr_checkpoint_tp_extension_enabled: bool = False
+    atr_checkpoint_di_spread_minimum: float = 30.0
+    atr_checkpoint_bb_width_minimum: float = 0.03
+    atr_checkpoint_profit_lock_start: float = 3.0
+    atr_checkpoint_profit_lock_distance: float = 1.0
+
+
+def _strategy_profiles() -> dict[str, StrategyProfileConfig]:
+    return {key: StrategyProfileConfig() for key in PROFILE_KEYS}
+
+
+def _execution_profiles() -> dict[str, ExecutionProfileConfig]:
+    return {key: ExecutionProfileConfig() for key in PROFILE_KEYS}
+
+
+def _default_di_ladder_layers() -> tuple[dict[str, Any], ...]:
+    """Default opposite-side ladder expressed in initial-trade sizing-R levels."""
+    return (
+        {
+            "name": "S1",
+            "enabled": True,
+            "entry_level": -1.0,
+            "target_level": -2.0,
+            "stop_level": 1.0,
+            "filter_match_mode": "ALL",
+            "entry_rules": [],
+        },
+        {
+            "name": "S2",
+            "enabled": True,
+            "entry_level": -2.0,
+            "target_level": -3.0,
+            "stop_level": 1.0,
+            "filter_match_mode": "ALL",
+            "entry_rules": [],
+        },
+        {
+            "name": "S3",
+            "enabled": True,
+            "entry_level": -3.0,
+            "target_level": -4.0,
+            "stop_level": 1.0,
+            "filter_match_mode": "ALL",
+            "entry_rules": [],
+        },
+        {
+            "name": "S4",
+            "enabled": True,
+            "entry_level": -4.0,
+            "target_level": -5.0,
+            "stop_level": 1.0,
+            "filter_match_mode": "ALL",
+            "entry_rules": [],
+        },
+    )
+
+
+@dataclass(frozen=True)
+class StrategyConfig:
+    profiles: Mapping[str, StrategyProfileConfig] = field(default_factory=_strategy_profiles)
+    strategy_profile_run_mode: str = "COMBINED_SHARED_CAPITAL"
+    entry_mode: str = "WAIT_UNTIL_CLOSED"
+    entry_interval: int = 1
+    enable_di_direction_selection: bool = True
+    enable_di_pressure_analysis: bool = True
+    di_pressure_allow_expanding: bool = True
+    di_pressure_allow_contracting: bool = True
+    di_pressure_allow_mixed: bool = True
+    enable_mean_reversion_analysis: bool = True
+    market_structure_filter_enabled: bool = False
+    sr_filter_mode: str = "ANALYSIS_ONLY"
+    sr_long_avoid_near_resistance: bool = False
+    sr_long_require_near_support: bool = False
+    sr_long_block_broken_support: bool = False
+    sr_long_min_room_to_resistance_atr: float = 0.0
+    sr_short_avoid_near_support: bool = False
+    sr_short_require_near_resistance: bool = False
+    sr_short_block_broken_resistance: bool = False
+    sr_short_min_room_to_support_atr: float = 0.0
+    enable_daily_entry_schedule: bool = False
+    daily_entry_time: str = "00:00"
+    daily_entry_timezone: str = "UTC"
+    daily_entry_missed_policy: str = "SKIP_DAY"
+
+
+@dataclass(frozen=True)
+class ExecutionConfig:
+    profiles: Mapping[str, ExecutionProfileConfig] = field(default_factory=_execution_profiles)
+    entry_timing_mode: str = "SIGNAL_CLOSE"
+    ema_920_trade_plan: str = "PULLBACK_1R"
+    ema_320_flip_signals: bool = False
+    ema_320_exit_mode: str = "BOTH"
+    ema_cross_cost_cycle_enabled: bool = False
+    ema_cross_initial_phantom_enabled: bool = False
+    ema_cross_reentry_widening_enabled: bool = False
+    ema_cross_entry_confirmation_enabled: bool = False
+    ema_cross_entry_confirmation_r: float = 1.0
+    fvg_confirmation_enabled: bool = False
+    fvg_confirmation_minutes: int = 1
+    fvg_target_mode: str = "FIXED_R"
+    ema_reversal_min_entry_ema300_atr: float = 0.5
+    ny_range_target_r: float = 2.0
+    ny_range_overshoot_policy: str = "DEFAULT"
+    ny_range_max_extension_pct: float = 0.0
+    ny_range_sr_buffer_atr: float = 0.05
+    io_entry_model: str = "ORIGIN_REJECTION"
+    io_context_minutes: int = 60
+    ls_equal_tolerance_atr: float = 0.15
+    ls_displacement_atr: float = 1.0
+    ls_base_bars: int = 3
+    tc_require_live_confirmations: bool = True
+    tc_min_sweep_atr: float = 0.1
+    tc_require_structure: bool = True
+    tc_require_ifvg: bool = True
+    tc_require_equilibrium: bool = True
+    tc_displacement_atr: float = 0.5
+    tc_max_wait_bars: int = 30
+    tc_fvg_lookback: int = 64
+    tc_min_reversal_body_percent: float = 50.0
+    tc_target_r: float = 3.0
+    sp_minimum_r_enabled: bool = False
+    sp_recent_swings_enabled: bool = False
+    sp_require_level_reclaim: bool = False
+    sp_cost_cover_enabled: bool = False
+    sp_cost_cover_close_pct: float = 10.0
+    sp_level_tolerance_atr: float = 0.3
+    sp_body_atr: float = 0.5
+    sp_min_body_percent: float = 50.0
+    sp_confirmation_bars: int = 3
+    sp_hold_minutes: int = 1440
+    ls_max_wait_bars: int = 20
+    sd_swing_strength: int = 2
+    sd_stop_buffer_atr: float = 0.05
+    sd_minimum_r: float = 1.0
+    photon_confirmation_minutes: int = 1440
+    photon_retest_minutes: int = 60
+    photon_midpoint_fixed_1r: bool = False
+    photon_candle_pullback: bool = False
+    photon_candle_target_timeframe: str = "15m"
+    photon_candle_minimum_r_enabled: bool = False
+    photon_demand_pullback: bool = False
+    photon_demand_entry_model: str = "ORIGINAL"
+    photon_midpoint_reversal: bool = False
+    photon_quarter_range: bool = False
+    photon_target_4h: bool = False
+    photon_flexible_entries: bool = False
+    photon_zone_reversal: bool = False
+    photon_daily_zone_only: bool = False
+    photon_zone_model: str = "LEGACY"
+    photon_range_base_bars: int = 3
+    photon_fresh_zone_only: bool = False
+    photon_require_zone_bos: bool = False
+    photon_require_flip: bool = False
+    photon_require_sweep: bool = False
+    photon_require_inducement: bool = False
+    photon_require_stacking: bool = False
+    photon_require_zone_value: bool = False
+    photon_require_4h_alignment: bool = False
+    photon_require_daily_alignment: bool = False
+    photon_require_weekly_alignment: bool = False
+    photon_require_15m_internal_alignment: bool = False
+    photon_fixed_target_enabled: bool = False
+    photon_fixed_target_r: float = 3
+    photon_legacy_entry_and_stop: bool = False
+    photon_exit_on_15m_change: bool = False
+    photon_hold_tp_until_15m_reversal: bool = False
+    ema_reversal_target_r: float = 1.0
+    ema_reversal_min_gap_atr: float = 0.5
+    fvg_reject_ema100_in_tp: bool = False
+    fvg_target_timeframe_minutes: int = 240
+    fvg_target_minimum_r: float = 1.5
+    fvg_target_no_level_policy: str = "REJECT_TRADE"
+    fvg_context_enabled: bool = False
+    fvg_context_timeframe_minutes: int = 240
+    fvg_structure_swing_strength: int = 2
+    fvg_min_clear_bars: int = 3
+    fvg_min_move_away_atr: float = 0.5
+    fib_stop_buffer_atr: float = 0.05
+    fib_entry_50_618_only: bool = False
+    fib_target_mode: str = "IMPULSE_EXTREME"
+    fib_fixed_target_r: float = 2.0
+    fib_target_buffer_atr: float = 0.05
+    fib_minimum_target_r: float = 2.0
+    initial_equity: float = 1000.0
+    risk_mode: str = "ATR"
+    fixed_r: float = 100.0
+    percent_r: float = 0.002
+    atr_multiplier: float = 1.0
+    sr_stop_timeframe_minutes: int = 0
+    sr_stop_buffer_atr: float = 0.25
+    sr_stop_maximum_atr: float = 3.0
+    sr_stop_no_level_policy: str = "USE_ATR_STOP"
+    risk_per_leg: float = 0.01
+    max_effective_leverage_per_leg: float | None = 3.0
+    max_combined_effective_leverage: float | None = 5.0
+    maker_fee: float = 0.0002
+    taker_fee: float = 0.0005
+    use_maker_entry: bool = False
+    use_maker_exit: bool = False
+    slippage: float = 0.0005
+    tie_policy: str = "PESSIMISTIC"
+    max_active_pairs: int = 1
+    zero_cost_comparison: bool = False
+    di_ladder_enabled: bool = False
+    di_ladder_mode: str = "PRICE_LEVELS"
+    di_ladder_level_r: float = 0.20
+    di_reversal_target_r: float = 0.20
+    di_ladder_layers: tuple = field(default_factory=_default_di_ladder_layers)
+    sr_take_profit_timeframe_minutes: int = -1
+    sr_take_profit_mode: str = "FIXED_R"
+    sr_take_profit_maximum_r: float = 3.0
+    sr_take_profit_minimum_r: float = 1.5
+    sr_take_profit_buffer_r: float = 0.20
+    fvg_target_buffer_atr: float = 0.05
+    sr_take_profit_no_level_policy: str = "USE_FIXED_TP"
+
+
+@dataclass(frozen=True)
+class ReportingConfig:
+    run_name: str = ""
+    output_dir: str = "output/data_lake_v2"
+    analysis_level: str = "STANDARD"
+    research_sampling_mode: str = "PORTFOLIO"
+    research_sampling_interval_candles: int = 1
+    enable_trade_telemetry: bool = False
+    save_full_telemetry_csv: bool = False
+    save_trade_journey_summary: bool = False
+    save_trade_journey_charts: bool = False
+    telemetry_interval_minutes: int = 15
+    enable_indicator_lifecycle_analysis: bool = False
+    lifecycle_phases: int = 4
+    lifecycle_early_checkpoints: tuple = (15, 30, 60)
+    lifecycle_minimum_bucket_sample: int = 20
+    create_lifecycle_charts: bool = False
+    lifecycle_flat_pattern_threshold_pct: float = 5.0
+    save_feature_analysis_reports: bool = False
+    save_indicator_analysis_reports: bool = True
+    create_standard_charts: bool = True
+
+
+@dataclass(frozen=True)
+class ResearchRunConfig:
+    data: DataConfig = field(default_factory=DataConfig)
+    features: FeatureConfig = field(default_factory=FeatureConfig)
+    strategy: StrategyConfig = field(default_factory=StrategyConfig)
+    execution: ExecutionConfig = field(default_factory=ExecutionConfig)
+    reporting: ReportingConfig = field(default_factory=ReportingConfig)
+    config_version: int = CONFIG_VERSION
+
+    def validate(self, request=None) -> None:
+        from .photon_lesson import validate as validate_lesson
+        validate_lesson(self.execution)
+        from crypto_strategy_lab.photon_trend import selected as photon_selected, validate_settings as validate_photon
+        validate_photon(self.execution.photon_confirmation_minutes,self.execution.photon_retest_minutes,self.data.strategy_timeframe_minutes,photon_selected(self.strategy.profiles))
+        from crypto_strategy_lab.supply_demand_retest import validate_settings
+        validate_settings(self.execution.sd_swing_strength,self.execution.sd_stop_buffer_atr,self.execution.sd_minimum_r)
+        from crypto_strategy_lab.sneaky_pivot import validate_settings as validate_sneaky
+        validate_sneaky(self.execution.sp_level_tolerance_atr,self.execution.sp_body_atr,self.execution.sp_confirmation_bars,self.execution.sp_hold_minutes,self.execution.sp_min_body_percent)
+        from crypto_strategy_lab.sneaky_pivot import validate_cost_cover
+        validate_cost_cover(self.execution.sp_cost_cover_enabled,self.execution.sp_cost_cover_close_pct,())
+        for key, profile in self.strategy.profiles.items():
+            if profile.enabled and any(r.get("_strategy_direction_mode")=="SNEAKY_PIVOT" for r in profile.entry_rules):
+                validate_cost_cover(self.execution.sp_cost_cover_enabled,self.execution.sp_cost_cover_close_pct,(self.execution.profiles[key],))
+        from crypto_strategy_lab.tjr_confluence import validate_settings as validate_confluence
+        validate_confluence(self.execution.tc_displacement_atr,self.execution.tc_max_wait_bars,self.execution.tc_fvg_lookback,self.execution.tc_min_reversal_body_percent,self.execution.tc_target_r,self.execution.tc_min_sweep_atr)
+        from crypto_strategy_lab.liquidity_sweep_retest import validate_settings as validate_liquidity
+        validate_liquidity(self.execution.ls_equal_tolerance_atr,self.execution.ls_displacement_atr,self.execution.ls_base_bars,self.execution.ls_max_wait_bars)
+        from .ny_opening_range import validate_target, validate_timeframe, validate_policy, requires_sr
+        validate_target(self.execution.ny_range_target_r)
+        validate_policy(self.execution.ny_range_overshoot_policy,self.execution.ny_range_max_extension_pct,self.execution.ny_range_sr_buffer_atr)
+        if requires_sr(self.strategy.profiles,self.execution.ny_range_overshoot_policy) and not self.features.enable_support_resistance_analysis:
+            raise ValueError("New York S/R-stop option requires support/resistance analysis")
+        validate_timeframe(self.strategy.profiles,self.data.strategy_timeframe_minutes)
+        from .imbalance_inducement import validate_model
+        validate_model(self.execution.io_entry_model,self.execution.io_context_minutes,self.data.strategy_timeframe_minutes, active=any(r.get("_strategy_direction_mode")=="IMBALANCE_ORIGIN_RETEST" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())))
+        if any(r.get("_strategy_direction_mode")=="SUPPLY_DEMAND_RETEST" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())) and self.data.strategy_timeframe_minutes!=60:
+            raise ValueError("Supply/demand retest uses the 1h strategy timeframe")
+        if not math.isfinite(self.execution.ema_reversal_min_gap_atr) or self.execution.ema_reversal_min_gap_atr < 0:
+            raise ValueError("EMA minimum gap must be finite and non-negative")
+        if not math.isfinite(self.execution.ema_reversal_target_r) or self.execution.ema_reversal_target_r <= 0:
+            raise ValueError("EMA reward/risk must be finite and positive")
+        if not math.isfinite(self.execution.ema_reversal_min_entry_ema300_atr) or self.execution.ema_reversal_min_entry_ema300_atr < 0:
+            raise ValueError("EMA 300 entry distance must be finite and non-negative")
+        if any(r.get("_strategy_direction_mode")=="SNEAKY_PIVOT" for p in self.strategy.profiles.values() for r in getattr(p,"entry_rules",())):
+            if self.data.strategy_timeframe_minutes!=15 or not self.data.use_intrabar_data or self.data.intrabar_timeframe_minutes!=1:
+                raise ValueError("Sneaky Pivot requires 15m strategy candles and 1m execution data")
+        data, features, strategy, execution, reporting = (
+            self.data, self.features, self.strategy, self.execution, self.reporting
+        )
+        if data.strategy_timeframe_minutes <= 0 or data.intrabar_timeframe_minutes <= 0:
+            raise ValueError("timeframes must be positive")
+        if data.use_intrabar_data and data.intrabar_timeframe_minutes >= data.strategy_timeframe_minutes:
+            raise ValueError("intrabar timeframe must be smaller than strategy timeframe")
+        if data.intrabar_missing_policy not in {"ERROR", "WARN_AND_USE_15M", "WARN_AND_CONTINUE"}:
+            raise ValueError("invalid intrabar missing policy")
+        if request is not None:
+            if request.strategy_interval != f"{data.strategy_timeframe_minutes}m":
+                raise ValueError("DataRequest strategy interval disagrees with DataConfig")
+            expected_intrabar = f"{data.intrabar_timeframe_minutes}m" if data.use_intrabar_data else None
+            if request.intrabar_interval != expected_intrabar:
+                raise ValueError("DataRequest intrabar interval disagrees with DataConfig")
+        for value, label in (
+            (features.atr_period, "ATR period"), (features.adx_period, "ADX period"),
+            (features.di_pressure_lookback, "DI pressure lookback"),
+            (features.bb_period, "BB period"), (features.mean_reversion_period, "MR period"),
+            (features.mean_reversion_rsi_period, "MR RSI period"),
+            (features.ichimoku_conversion_period, "Ichimoku conversion period"),
+            (features.ichimoku_base_period, "Ichimoku base period"),
+            (features.ichimoku_span_b_period, "Ichimoku Span B period"),
+            (features.ichimoku_displacement, "Ichimoku displacement"),
+        ):
+            if int(value) <= 0:
+                raise ValueError(f"{label} must be positive")
+        if features.bb_stddevs <= 0 or features.mean_reversion_bb_stddevs <= 0:
+            raise ValueError("standard deviations must be positive")
+        if not 0 <= features.mean_reversion_rsi_oversold < features.mean_reversion_rsi_overbought <= 100:
+            raise ValueError("MR RSI thresholds are invalid")
+        if features.market_regime_method not in {"ASSET_RETURN", "BTC_STRUCTURAL", "ASSET_STRUCTURAL"}:
+            raise ValueError("invalid market regime method")
+        if features.trade_flow_source not in {"AGG_TRADES", "TRADES"}:
+            raise ValueError("trade_flow_source must be AGG_TRADES or TRADES")
+        if features.trade_flow_base_interval != "1m":
+            raise ValueError("trade_flow_base_interval must be 1m")
+        if not features.trade_flow_windows or not set(features.trade_flow_windows) <= {"1m", "5m", "15m", "1h"}:
+            raise ValueError("invalid trade_flow_windows")
+        if features.large_trade_quote_threshold is not None and features.large_trade_quote_threshold <= 0:
+            raise ValueError("large_trade_quote_threshold must be positive or null")
+        if features.order_book_base_interval != "1m":
+            raise ValueError("order_book_base_interval must be 1m")
+        if features.book_ticker_max_age_seconds < 0 or features.book_depth_max_age_seconds < 0:
+            raise ValueError("order-book maximum ages must be non-negative")
+        if features.bull_regime_lookback_days <= 0 or features.bull_regime_return_threshold <= -1:
+            raise ValueError("asset-return regime settings are invalid")
+        if min(
+            features.sr_zone_width_atr,
+            features.sr_zone_padding_atr,
+            features.sr_zone_max_cluster_span_atr,
+            features.sr_min_rejection_atr,
+            features.sr_near_distance_atr,
+            features.sr_hold_confirmation_atr,
+            features.sr_break_tolerance_atr,
+        ) < 0:
+            raise ValueError("S/R ATR distances must be non-negative")
+        if features.sr_break_basis not in {"CLOSE", "WICK"}:
+            raise ValueError("invalid S/R break basis")
+        if features.sr_timeframe_minutes:
+            if features.sr_timeframe_minutes < data.strategy_timeframe_minutes:
+                raise ValueError("S/R timeframe cannot be lower than strategy timeframe")
+            if features.sr_timeframe_minutes % data.strategy_timeframe_minutes:                raise ValueError("S/R timeframe must be an integer multiple of strategy timeframe")
+        if set(strategy.profiles) != set(PROFILE_KEYS) or set(execution.profiles) != set(PROFILE_KEYS):
+            raise ValueError("strategy and execution profile keys must match the current profile contract")
+        if strategy.strategy_profile_run_mode not in {"ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"}:
+            raise ValueError("invalid strategy profile run mode")
+        if strategy.entry_mode not in {"WAIT_UNTIL_CLOSED", "EVERY_N_CANDLES"} or strategy.entry_interval <= 0:
+            raise ValueError("invalid entry cadence")
+        if strategy.sr_filter_mode not in {"ANALYSIS_ONLY", "APPLY_ENTRY_RULES"}:
+            raise ValueError("invalid S/R strategy policy")
+        if strategy.enable_di_pressure_analysis and not any((
+            strategy.di_pressure_allow_expanding,
+            strategy.di_pressure_allow_contracting,
+            strategy.di_pressure_allow_mixed,
+        )):
+            raise ValueError("at least one DI pressure state must be allowed")
+        for key, profile in strategy.profiles.items():
+            execution_profile = execution.profiles[key]
+            from crypto_strategy_lab.di_partial_cost import validate_di_partial
+            validate_di_partial(execution_profile)
+            from crypto_strategy_lab.di_partial_cost import validate_di_partial_risk_mode
+            if profile.enabled:
+                validate_di_partial_risk_mode(execution_profile, execution.risk_mode, profile.entry_rules, execution.sr_take_profit_mode)
+            if execution_profile.stop_loss_multiple <= 0:
+                raise ValueError(f"{key}: stop-loss multiple must be positive")
+            if execution_profile.position_sizing_stop_multiple <= 0:
+                raise ValueError(
+                    f"{key}: position-sizing stop multiple must be positive"
+                )
+            if execution_profile.position_sizing_stop_override_enabled:
+                ema_cross_profile = (
+                    execution.ema_920_trade_plan
+                    in {
+                        "EMA_20_100_CROSS",
+                        "EMA_20_100_CROSS_SHORT",
+                        "EMA_20_100_CROSS_BOTH",
+                    }
+                    and any(
+                        isinstance(rule, dict)
+                        and str(rule.get("_strategy_direction_mode", "")).upper()
+                        == "EMA_9_20_PULLBACK"
+                        for rule in profile.entry_rules
+                    )
+                )
+                incompatible = [
+                    name
+                    for name, enabled in (
+                        ("partial stop", execution_profile.partial_stop_enabled),
+                        (
+                            "partial take-profit",
+                            execution_profile.partial_profit_enabled
+                            and not ema_cross_profile,
+                        ),
+                        ("break-even", execution_profile.break_even_enabled),
+                        ("trailing stop", execution_profile.trailing_enabled),
+                        ("R-step trailing", execution_profile.r_step_trailing_enabled),
+                        (
+                            "ATR checkpoint extension",
+                            execution_profile.atr_checkpoint_tp_extension_enabled,
+                        ),
+                    )
+                    if enabled
+                ]
+                if incompatible:
+                    raise ValueError(
+                        f"{key}: separate position-sizing stop currently supports only "
+                        "simple fixed stop/target execution; disable "
+                        + ", ".join(incompatible)
+                    )
+            if profile.rsi_period <= 0 or profile.momentum_lookback_hours <= 0:
+                raise ValueError(f"{key}: profile feature periods must be positive")
+            if profile.rsi_period != features.mean_reversion_rsi_period:
+                raise ValueError(f"{key}: profile RSI period must match prepared MR RSI period")
+            for rule in profile.entry_rules:
+                if not isinstance(rule, dict):
+                    continue
+                raw_sr_timeframe = rule.get("_builder_sr_timeframe_minutes")
+                if raw_sr_timeframe is None:
+                    continue
+                try:
+                    sr_rule_minutes = int(raw_sr_timeframe)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(
+                        f"{key}: context rule timeframe is invalid"
+                    ) from exc
+                if sr_rule_minutes not in {0, 60, 240, 1440}:
+                    raise ValueError(
+                        f"{key}: context rule timeframe must be Strategy TF, 1h, 4h or 1d"
+                    )
+                effective_rule_minutes = (
+                    data.strategy_timeframe_minutes
+                    if sr_rule_minutes == 0
+                    else sr_rule_minutes
+                )
+                if (
+                    effective_rule_minutes < data.strategy_timeframe_minutes
+                    or effective_rule_minutes % data.strategy_timeframe_minutes
+                ):
+                    raise ValueError(
+                        f"{key}: S/R rule timeframe must be the strategy timeframe "
+                        "or a compatible higher timeframe"
+                    )
+        if execution.entry_timing_mode not in {"SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"}:
+            raise ValueError("invalid entry timing mode")
+        if execution.ema_cross_entry_confirmation_enabled and execution.ema_cross_entry_confirmation_r <= 0:
+            raise ValueError("EMA cross entry confirmation R must be positive")
+        if execution.fvg_structure_swing_strength < 1 or execution.fvg_structure_swing_strength > 50:
+            raise ValueError("FVG structure swing strength must be between 1 and 50")
+        if not math.isfinite(execution.fvg_min_clear_bars) or int(execution.fvg_min_clear_bars) != execution.fvg_min_clear_bars or not 0 <= execution.fvg_min_clear_bars <= 10000:
+            raise ValueError("FVG minimum clear candles must be an integer between 0 and 10000")
+        if not math.isfinite(execution.fvg_min_move_away_atr) or execution.fvg_min_move_away_atr < 0:
+            raise ValueError("FVG minimum move-away ATR must be finite and nonnegative")
+        if execution.fib_target_mode not in {"IMPULSE_EXTREME", "FIXED_R"}:
+            raise ValueError("Fib target mode must be IMPULSE_EXTREME or FIXED_R")
+        if execution.fib_fixed_target_r <= 0:
+            raise ValueError("Fib fixed target R must be positive")
+        if execution.fib_stop_buffer_atr < 0 or execution.fib_target_buffer_atr < 0:
+            raise ValueError("Fib ATR buffers cannot be negative")
+        if execution.fib_minimum_target_r <= 0:
+            raise ValueError("Fib minimum target room must be positive")
+        if execution.fvg_context_enabled:
+            if execution.fvg_context_timeframe_minutes <= data.strategy_timeframe_minutes:
+                raise ValueError("FVG context timeframe must be larger than strategy timeframe")
+            if execution.fvg_context_timeframe_minutes % data.strategy_timeframe_minutes:
+                raise ValueError("FVG context timeframe must be an exact multiple of strategy timeframe")
+        from crypto_strategy_lab.fvg_htf_targets import validate_target_settings
+        validate_target_settings(execution.fvg_target_mode, execution.fvg_target_timeframe_minutes,
+                                 execution.fvg_target_minimum_r, execution.fvg_target_no_level_policy,
+                                 data.strategy_timeframe_minutes)
+        if execution.fvg_confirmation_enabled:
+            if not data.use_intrabar_data:
+                raise ValueError("FVG confirmation requires intrabar data")
+            if execution.fvg_confirmation_minutes <= 0 or execution.fvg_confirmation_minutes >= data.strategy_timeframe_minutes:
+                raise ValueError("FVG confirmation timeframe must be positive and smaller than strategy timeframe")
+            if execution.fvg_confirmation_minutes % data.intrabar_timeframe_minutes:
+                raise ValueError("FVG confirmation timeframe must be an exact multiple of intrabar timeframe")
+            if strategy.enable_daily_entry_schedule:
+                raise ValueError("FVG confirmation does not support scheduled daily entries")
+        ema_cross_plans = {
+            "EMA_20_100_CROSS",
+            "EMA_20_100_CROSS_SHORT",
+            "EMA_20_100_CROSS_BOTH",
+        }
+        if execution.ema_920_trade_plan not in {"PULLBACK_1R", *ema_cross_plans}:
+            raise ValueError("invalid EMA 9/20 trade plan")
+        ema_cross_selected = (
+            execution.ema_920_trade_plan in ema_cross_plans
+            and any(
+                rule.get("_strategy_direction_mode") == "EMA_9_20_PULLBACK"
+                for profile in strategy.profiles.values()
+                for rule in profile.entry_rules
+            )
+        )
+        if ema_cross_selected and execution.ema_cross_cost_cycle_enabled:
+            if execution.ema_cross_initial_phantom_enabled and execution.ema_cross_entry_confirmation_enabled:
+                raise ValueError("Initial phantom mode replaces EMA cross entry confirmation; disable confirmation distance")
+            if strategy.enable_daily_entry_schedule or execution.max_active_pairs != 1 or execution.di_ladder_enabled:
+                raise ValueError("EMA cost-cover cycles require one active trade, no daily schedule and no DI ladder")
+        if execution.ema_320_exit_mode not in {"BOTH", "EMA_ONLY", "FIXED_TP_ONLY"}:
+            raise ValueError("invalid EMA 320 exit mode")
+        ema320_selected = any(
+            rule.get("_strategy_direction_mode") == "EMA_320_CLOSE_CROSS"
+            for profile in strategy.profiles.values()
+            for rule in profile.entry_rules
+        )
+        if ema320_selected and execution.entry_timing_mode != "NEXT_CANDLE_OPEN":
+            raise ValueError("EMA 320 price close crossover requires next-candle-open entry fills")
+        if ema320_selected:
+            if execution.ema_320_exit_mode == "EMA_ONLY":
+                for key, profile in execution.profiles.items():
+                    if not strategy.profiles[key].enabled:
+                        continue
+                    disallowed = [
+                        label for label, enabled in (
+                            ("partial profit-taking", profile.partial_profit_enabled),
+                            ("R-step trailing", profile.r_step_trailing_enabled),
+                            ("ATR-checkpoint TP extension", profile.atr_checkpoint_tp_extension_enabled),
+                            ("trailing stop", profile.trailing_enabled),
+                            ("break-even", profile.break_even_enabled),
+                            ("partial stop", profile.partial_stop_enabled),
+                        ) if enabled
+                    ]
+                    if disallowed:
+                        raise ValueError(
+                            f"{key}: EMA-only exit requires disabling " + ", ".join(disallowed)
+                        )
+            for key, profile in strategy.profiles.items():
+                if profile.enabled and (
+                    profile.flip_direction or any(
+                        rule.get("action") == "FLIP"
+                        and rule.get("_builder_group_enabled", True)
+                        for rule in profile.entry_rules
+                    )
+                ):
+                    raise ValueError(f"{key}: EMA 320 crossover uses native direction; disable direction FLIP rules")
+        if (ema_cross_selected
+                and execution.entry_timing_mode != "NEXT_CANDLE_OPEN"):
+            raise ValueError("EMA 20/100 crossover requires next-candle-open entry fills")
+        if ema_cross_selected:
+            for key, profile in strategy.profiles.items():
+                if profile.enabled and (
+                    profile.flip_direction or any(
+                        rule.get("action") == "FLIP"
+                        and rule.get("_builder_group_enabled", True)
+                        for rule in profile.entry_rules
+                    )
+                ):
+                    raise ValueError(f"{key}: EMA 20/100 crossover uses native direction; disable direction FLIP rules")
+            for key, profile in execution.profiles.items():
+                if strategy.profiles[key].enabled and any((
+                    profile.partial_stop_enabled,
+                    profile.r_step_trailing_enabled,
+                    profile.atr_checkpoint_tp_extension_enabled,
+                )):
+                    raise ValueError(
+                        f"{key}: EMA 20/100 crossover supports one partial take-profit runner, "
+                        "but staged stops and target extensions remain disabled"
+                    )
+                if strategy.profiles[key].enabled and profile.ema_cross_stop_buffer_atr < 0:
+                    raise ValueError(
+                        f"{key}: EMA cross stop buffer cannot be negative"
+                    )
+                if strategy.profiles[key].enabled and profile.ema_cross_stop_multiplier <= 0:
+                    raise ValueError(
+                        f"{key}: EMA cross stop multiplier must be positive"
+                    )
+        if execution.initial_equity <= 0 or execution.fixed_r <= 0 or execution.percent_r <= 0:
+            raise ValueError("execution equity/risk settings must be positive")
+        if not 0 < execution.risk_per_leg < 1:
+            raise ValueError("risk per leg must be between 0 and 1")
+        if execution.risk_mode not in {"FIXED", "PERCENT", "ATR", "SR_STRUCTURE"}:
+            raise ValueError("invalid risk mode")
+        if execution.sr_stop_timeframe_minutes not in {0, 60, 240, 1440}:
+            raise ValueError("invalid S/R stop timeframe")
+        if execution.sr_take_profit_timeframe_minutes not in {-1, 0, 60, 240, 1440}:
+            raise ValueError("invalid S/R target timeframe")
+        for value, label in (
+            (execution.sr_stop_timeframe_minutes, "S/R stop"),
+            (execution.sr_take_profit_timeframe_minutes, "S/R target"),
+        ):
+            if value <= 0:
+                continue
+            if value < data.strategy_timeframe_minutes or value % data.strategy_timeframe_minutes:
+                raise ValueError(f"{label} timeframe must be the strategy timeframe or a compatible higher timeframe")
+        if execution.sr_stop_buffer_atr < 0 or execution.sr_stop_maximum_atr <= 0:
+            raise ValueError("invalid S/R structural stop settings")
+        if execution.sr_stop_no_level_policy not in {"USE_ATR_STOP", "REJECT_TRADE"}:
+            raise ValueError("invalid S/R stop no-level policy")
+        if execution.sr_take_profit_mode not in {"FIXED_R", "SR_CAPPED_R", "SR_LEVEL"}:
+            raise ValueError("invalid S/R take-profit mode")
+        if execution.sr_take_profit_no_level_policy not in {"USE_FIXED_TP", "REJECT_TRADE"}:
+            raise ValueError("invalid S/R take-profit no-level policy")
+        if execution.sr_take_profit_minimum_r <= 0 or execution.sr_take_profit_maximum_r <= 0:
+            raise ValueError("S/R take-profit R values must be positive")
+        if execution.sr_take_profit_minimum_r > execution.sr_take_profit_maximum_r:
+            raise ValueError("S/R minimum TP cannot exceed maximum TP")
+        if execution.sr_take_profit_buffer_r < 0:
+            raise ValueError("S/R take-profit buffer cannot be negative")
+        if not math.isfinite(execution.fvg_target_buffer_atr) or execution.fvg_target_buffer_atr < 0:
+            raise ValueError("FVG target buffer must be finite and nonnegative")
+        structural_stop = execution.risk_mode == "SR_STRUCTURE"
+        sr_target = execution.sr_take_profit_mode in {"SR_CAPPED_R", "SR_LEVEL"}
+        separate_sizing = any(
+            strategy.profiles[key].enabled
+            and execution.profiles[key].position_sizing_stop_override_enabled
+            for key in execution.profiles
+        )
+        if separate_sizing and (structural_stop or sr_target):
+            raise ValueError(
+                "separate position-sizing stop requires a fixed-distance stop basis "
+                "and FIXED_R take-profit mode"
+            )
+        if (structural_stop or sr_target) and not features.enable_support_resistance_analysis:
+            raise ValueError("S/R analysis must be enabled by structural S/R execution policies")
+        if sr_target and any(
+            strategy.profiles[key].enabled and execution.profiles[key].partial_profit_enabled
+            for key in strategy.profiles
+        ):
+            raise ValueError("S/R take profit is not compatible with partial take-profit profiles")
+        if execution.tie_policy not in {"PESSIMISTIC", "OPTIMISTIC", "INTRABAR"}:
+            raise ValueError("invalid tie policy")
+        if execution.max_active_pairs <= 0:
+            raise ValueError("max active pairs must be positive")
+        if min(execution.maker_fee, execution.taker_fee, execution.slippage) < 0:
+            raise ValueError("fees/slippage must be non-negative")
+        if execution.di_ladder_mode not in {"PRICE_LEVELS", "DI_REVERSAL"}:
+            raise ValueError("DI ladder mode must be PRICE_LEVELS or DI_REVERSAL")
+        if execution.di_ladder_level_r <= 0:
+            raise ValueError("DI ladder level size must be positive")
+        if execution.di_reversal_target_r <= 0:
+            raise ValueError("DI reversal target R must be positive")
+        if execution.di_ladder_enabled:
+            required_intrabar = 15 if execution.di_ladder_mode == "DI_REVERSAL" else 1
+            if not data.use_intrabar_data or data.intrabar_timeframe_minutes != required_intrabar:
+                raise ValueError(
+                    f"DI {execution.di_ladder_mode.lower()} execution requires "
+                    f"{required_intrabar}-minute intrabar data"
+                )
+            if execution.di_ladder_mode == "DI_REVERSAL" and data.strategy_timeframe_minutes <= 15:
+                raise ValueError("DI reversal hedge requires a parent timeframe larger than 15 minutes")
+            if strategy.entry_mode != "WAIT_UNTIL_CLOSED":
+                raise ValueError("DI ladder execution currently requires WAIT_UNTIL_CLOSED")
+            if strategy.enable_daily_entry_schedule:
+                raise ValueError("DI ladder execution does not support scheduled daily entries")
+            if execution.entry_timing_mode != "SIGNAL_CLOSE":
+                raise ValueError("DI ladder execution currently requires SIGNAL_CLOSE entry timing")
+            if execution.fvg_confirmation_enabled:
+                raise ValueError("DI ladder execution does not support FVG intrabar confirmation")
+            if execution.risk_mode == "SR_STRUCTURE" or execution.sr_take_profit_mode != "FIXED_R":
+                raise ValueError("DI ladder execution requires fixed-distance stop and FIXED_R target geometry")
+            if reporting.research_sampling_mode == "WALK_FORWARD":
+                raise ValueError("DI ladder execution is not yet supported by walk-forward sampling")
+            enabled_layers = []
+            seen_names = set()
+            seen_entries = set()
+            if execution.di_ladder_mode == "DI_REVERSAL":
+                enabled_layers = [(0.0, "DI_REVERSAL")]
+            for number, layer in enumerate(execution.di_ladder_layers, start=1):
+                if execution.di_ladder_mode == "DI_REVERSAL":
+                    break
+                if not isinstance(layer, Mapping):
+                    raise ValueError(f"DI ladder layer {number} must be an object")
+                name = str(layer.get("name") or f"S{number}").strip()
+                if not name or name in seen_names:
+                    raise ValueError("DI ladder layer names must be non-empty and unique")
+                seen_names.add(name)
+                if not bool(layer.get("enabled", True)):
+                    continue
+                try:
+                    entry_level = float(layer["entry_level"])
+                    target_level = float(layer["target_level"])
+                    stop_level = float(layer["stop_level"])
+                except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(f"{name}: ladder entry/target/stop levels must be numeric") from exc
+                if not all(map(lambda value: value == value and abs(value) != float("inf"), (entry_level, target_level, stop_level))):
+                    raise ValueError(f"{name}: ladder levels must be finite")
+                if entry_level >= 0:
+                    raise ValueError(f"{name}: entry_level must be adverse to the initial trade (< 0)")
+                if target_level >= entry_level:
+                    raise ValueError(f"{name}: target_level must be deeper than entry_level")
+                if stop_level <= entry_level:
+                    raise ValueError(f"{name}: stop_level must be above entry_level")
+                if entry_level in seen_entries:
+                    raise ValueError("DI ladder entry levels must be unique")
+                seen_entries.add(entry_level)
+                match_mode = str(layer.get("filter_match_mode", "ALL")).upper()
+                if match_mode not in {"ALL", "ANY"}:
+                    raise ValueError(f"{name}: filter_match_mode must be ALL or ANY")
+                rules = layer.get("entry_rules", ())
+                if not isinstance(rules, (list, tuple)):
+                    raise ValueError(f"{name}: entry_rules must be a list")
+                for rule in rules:
+                    if not isinstance(rule, Mapping):
+                        raise ValueError(f"{name}: every entry rule must be an object")
+                    for required in ("indicator", "minimum", "maximum"):
+                        if required not in rule:
+                            raise ValueError(f"{name}: entry rule is missing {required}")
+                enabled_layers.append((entry_level, name))
+            if not enabled_layers:
+                raise ValueError("DI ladder execution requires at least one enabled layer")
+            ordered_entries = [value for value, _name in enabled_layers]
+            if ordered_entries != sorted(ordered_entries, reverse=True):
+                raise ValueError("DI ladder layers must be ordered from shallowest to deepest entry")
+            for key in strategy.profiles:
+                if not strategy.profiles[key].enabled:
+                    continue
+                profile = execution.profiles[key]
+                incompatible = [
+                    label
+                    for label, active in (
+                        ("partial stop", profile.partial_stop_enabled),
+                        ("partial take-profit", profile.partial_profit_enabled),
+                        ("break-even", profile.break_even_enabled),
+                        ("trailing stop", profile.trailing_enabled),
+                        ("R-step trailing", profile.r_step_trailing_enabled),
+                        ("ATR checkpoint extension", profile.atr_checkpoint_tp_extension_enabled),
+                        ("timeout", profile.timeout_enabled),
+                    )
+                    if active
+                ]
+                if incompatible:
+                    raise ValueError(
+                        f"{key}: DI ladder v1 supports only simple fixed stop/target execution; disable "
+                        + ", ".join(incompatible)
+                    )
+        if reporting.research_sampling_mode not in {
+            "PORTFOLIO", "EVERY_VIABLE_ENTRY", "WALK_FORWARD", "FIXED_INTERVAL", "EPISODE_FIRST"
+        }:
+            raise ValueError("invalid research sampling mode")
+        if reporting.research_sampling_interval_candles <= 0:
+            raise ValueError("research sampling interval must be positive")
+        if reporting.enable_trade_telemetry:
+            if reporting.telemetry_interval_minutes <= 0:
+                raise ValueError("telemetry interval must be positive")
+            if reporting.telemetry_interval_minutes % data.strategy_timeframe_minutes:
+                raise ValueError("telemetry interval must be a multiple of strategy timeframe")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _strict(cls, raw, label):
+    if not isinstance(raw, dict):
+        raise ValueError(f"{label} must be an object")
+    allowed = set(cls.__dataclass_fields__)
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise ValueError(f"Unknown {label} settings: " + ", ".join(unknown))
+    values = dict(raw)
+
+    # JSON does not preserve the semantic distinction between integer-looking
+    # numbers authored as 4 and 4.0.  Dataclasses also do not coerce runtime
+    # values from their annotations.  Normalize fields declared as int here so
+    # downstream algorithms that legitimately use range()/period counts never
+    # receive a float from a saved config.  Fractional values are rejected
+    # rather than silently truncated.
+    type_hints = get_type_hints(cls)
+    for name, annotation in type_hints.items():
+        if annotation is not int or name not in values:
+            continue
+        value = values[name]
+        if isinstance(value, bool):
+            raise ValueError(f"{label}.{name} must be an integer")
+        try:
+            numeric = float(value)
+            integral = int(numeric)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{label}.{name} must be an integer") from exc
+        if numeric != integral:
+            raise ValueError(f"{label}.{name} must be an integer")
+        values[name] = integral
+    if cls is StrategyProfileConfig and isinstance(values.get("entry_rules"), list):
+        values["entry_rules"] = tuple(values["entry_rules"])
+    if cls is ReportingConfig and isinstance(values.get("lifecycle_early_checkpoints"), list):
+        values["lifecycle_early_checkpoints"] = tuple(values["lifecycle_early_checkpoints"])
+    if cls is ExecutionConfig and isinstance(values.get("di_ladder_layers"), list):
+        values["di_ladder_layers"] = tuple(values["di_ladder_layers"])
+    if cls is FeatureConfig and isinstance(values.get("trade_flow_windows"), list):
+        values["trade_flow_windows"] = tuple(values["trade_flow_windows"])
+    return cls(**values)
+
+
+def _profiles(raw, strategy: bool):
+    cls = StrategyProfileConfig if strategy else ExecutionProfileConfig
+    if raw is None:
+        return _strategy_profiles() if strategy else _execution_profiles()
+    if not isinstance(raw, dict):
+        raise ValueError("profiles must be an object")
+    unknown = sorted(set(raw) - set(PROFILE_KEYS))
+    if unknown:
+        raise ValueError("unknown profile keys: " + ", ".join(unknown))
+    return {key: _strict(cls, raw.get(key, {}), f"profiles.{key}") for key in PROFILE_KEYS}
+
+
+def _parse_research_run_config(values: dict[str, Any]) -> ResearchRunConfig:
+    if not isinstance(values, dict):
+        raise ValueError("Data Lake configuration JSON must contain an object")
+    allowed = {"config_version", "data", "features", "strategy", "execution", "reporting"}
+    unknown = sorted(set(values) - allowed)
+    if unknown:
+        raise ValueError("Unknown Data Lake configuration sections: " + ", ".join(unknown))
+    if values.get("config_version") != CONFIG_VERSION:
+        raise ValueError("Data Lake configuration version 3 is required.")
+    sraw, eraw = dict(values.get("strategy", {})), dict(values.get("execution", {}))
+    strategy_profiles = _profiles(sraw.pop("profiles", None), True)
+    execution_profiles = _profiles(eraw.pop("profiles", None), False)
+    parsed_strategy = _strict(StrategyConfig, sraw, "strategy")
+    parsed_execution = _strict(ExecutionConfig, eraw, "execution")
+    strategy_values = {k: v for k, v in parsed_strategy.__dict__.items() if k != "profiles"}
+    execution_values = {k: v for k, v in parsed_execution.__dict__.items() if k != "profiles"}
+    result = ResearchRunConfig(
+        data=_strict(DataConfig, values.get("data", {}), "data"),
+        features=_strict(FeatureConfig, values.get("features", {}), "features"),
+        strategy=StrategyConfig(profiles=strategy_profiles, **strategy_values),
+        execution=ExecutionConfig(profiles=execution_profiles, **execution_values),
+        reporting=_strict(ReportingConfig, values.get("reporting", {}), "reporting"),
+    )
+    result.validate()
+    return result
+
+
+def default_data_lake_config() -> dict[str, Any]:
+    return ResearchRunConfig().to_dict()
+
+
+def load_data_lake_config(path: str | Path) -> ResearchRunConfig:
+    """Load only the authoritative nested v3 Data Lake contract."""

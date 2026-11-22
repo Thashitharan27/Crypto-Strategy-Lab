@@ -1,1 +1,630 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×^õé:-jZ.¶›­–)Þ³R""%W&R†VÇW'2f÷"F†R7W'&VíuëÞ­¢G§²ÚîÆ­yÒn _merged_current(loaded)
+"""Pure helpers for the current GUI configuration contract."""
+from __future__ import annotations
+
+import math
+import copy
+import json
+from pathlib import Path
+from typing import Any
+
+from crypto_strategy_lab.config import (
+    BacktestConfig,
+    DailyEntryMissedPolicy,
+    EntryMode,
+    EntryTimingMode,
+    IntrabarMissingPolicy,
+    RiskMode,
+    TiePolicy,
+)
+from crypto_strategy_lab.strategy_profiles import default_profiles, normalize_profiles, profiles_to_dict
+
+CONFIG_VERSION = 2
+
+DEFAULT_GUI_CONFIG: dict[str, Any] = {
+    "config_version": CONFIG_VERSION,
+    "market_symbol": "XRPUSDT",
+    "strategy_profile_run_mode": "COMBINED_SHARED_CAPITAL",
+    "strategy_profiles": profiles_to_dict(default_profiles()),
+    "input_csv": "C:/CryptoBots/Binance Market Data/futures/usdm/BTCUSDT_15m.csv",
+    "intrabar_csv": "C:/CryptoBots/Binance Market Data/futures/usdm/BTCUSDT_1m.csv",
+    "output_dir": "output",
+    "run_name": "",
+    "entry_mode": "WAIT_UNTIL_CLOSED",
+    "entry_timing_mode": "SIGNAL_CLOSE",
+    "ema_920_trade_plan": "PULLBACK_1R",
+    "ema_320_flip_signals": False,
+    "ema_320_exit_mode": "BOTH",
+    "ema_320_candle_confirmation_enabled": False,
+    "ema_320_candle_strong_close": True,
+    "ema_320_candle_engulfing": True,
+    "ema_320_candle_wick_rejection": True,
+    "ema_320_candle_star": True,
+    "ema_cross_cost_cycle_enabled": False,
+    "ema_cross_initial_phantom_enabled": False,
+    "ema_cross_reentry_widening_enabled": False,
+    "ema_cross_entry_confirmation_enabled": False,
+    "ema_cross_entry_confirmation_r": 1.0,
+    "fvg_confirmation_enabled": False,
+    "fvg_confirmation_minutes": 1,
+    "fvg_target_mode": "FIXED_R",
+    "ema_reversal_min_entry_ema300_atr": 0.5,
+    "ny_range_target_r": 2.0,
+    "ny_range_overshoot_policy": "DEFAULT",
+    "ny_range_max_extension_pct": 0.0,
+    "ny_range_sr_buffer_atr": 0.05,
+    "io_entry_model": "ORIGIN_REJECTION",
+    "io_context_minutes": 60,
+    "ls_equal_tolerance_atr": .15,
+    "ls_displacement_atr": 1.,
+    "ls_base_bars": 3,
+    "tc_require_live_confirmations": True,
+    "tc_min_sweep_atr": 0.1,
+    "tc_require_structure": True,
+    "tc_require_ifvg": True,
+    "tc_require_equilibrium": True,
+    "tc_displacement_atr": 0.5,
+    "tc_max_wait_bars": 30,
+    "tc_fvg_lookback": 64,
+    "tc_min_reversal_body_percent": 50.0,
+    "tc_target_r": 3.0,
+    "sp_minimum_r_enabled": False,
+    "sp_recent_swings_enabled": False,
+    "sp_require_level_reclaim": False,
+    "sp_cost_cover_enabled": False,
+    "sp_cost_cover_close_pct": 10.0,
+    "sp_level_tolerance_atr": 0.3,
+    "sp_body_atr": 0.5,
+    "sp_min_body_percent": 50.0,
+    "sp_confirmation_bars": 3,
+    "sp_hold_minutes": 1440,
+    "ls_max_wait_bars": 20,
+    "sd_swing_strength": 2,
+    "sd_stop_buffer_atr": 0.05,
+    "sd_minimum_r": 1.0,
+    "photon_confirmation_minutes": 1440,
+    "photon_retest_minutes": 60,
+    "photon_midpoint_fixed_1r": False,
+    "photon_candle_pullback": False,
+    "photon_candle_target_timeframe": "15m",
+    "photon_candle_minimum_r_enabled": False,
+    "photon_demand_pullback": False,
+    "photon_demand_entry_model": "ORIGINAL",
+    "photon_midpoint_reversal": False,
+    "photon_quarter_range": False,
+    "photon_target_4h": False,
+    "photon_flexible_entries": False,
+    "photon_zone_reversal": False,
+    "photon_daily_zone_only": False,
+    "photon_zone_model": "LEGACY",
+    "photon_range_base_bars": 3,
+    "photon_fresh_zone_only": False,
+    "photon_require_zone_bos": False,
+    "photon_require_flip": False,
+    "photon_require_sweep": False,
+    "photon_require_inducement": False,
+    "photon_require_stacking": False,
+    "photon_require_zone_value": False,
+    "photon_require_4h_alignment": False,
+    "photon_require_daily_alignment": False,
+    "photon_require_weekly_alignment": False,
+    "photon_require_15m_internal_alignment": False,
+    "photon_fixed_target_enabled": False,
+    "photon_fixed_target_r": 3,
+    "photon_legacy_entry_and_stop": False,
+    "photon_exit_on_15m_change": False,
+    "photon_hold_tp_until_15m_reversal": False,
+    "ema_reversal_target_r": 1.0,
+    "ema_reversal_min_gap_atr": 0.5,
+    "fvg_reject_ema100_in_tp": False,
+    "fvg_target_timeframe_minutes": 240,
+    "fvg_target_minimum_r": 1.5,
+    "fvg_target_no_level_policy": "REJECT_TRADE",
+    "fvg_target_buffer_atr": 0.05,
+    "fvg_context_enabled": False,
+    "fvg_context_timeframe_minutes": 240,
+    "fvg_structure_swing_strength": 2,
+    "fvg_min_clear_bars": 3,
+    "fvg_min_move_away_atr": 0.5,
+    "fib_half_swing_mode": False,
+    "fib_third_retest_entry": False,
+    "fib_ema_trend_gate": False,
+    "fib_candidate_context_selection": False,
+    "fib_candle_confirmation_enabled": False,
+    "fib_candle_strong_close": True,
+    "fib_candle_engulfing": True,
+    "fib_candle_wick_rejection": True,
+    "fib_candle_star": True,
+    "fib_first_zone_hold_entry": False,
+    "fib_stop_buffer_atr": 0.05,
+    "fib_entry_50_618_only": False,
+    "fib_target_mode": "IMPULSE_EXTREME",
+    "fib_fixed_target_r": 2.0,
+    "fib_target_buffer_atr": 0.05,
+    "fib_minimum_target_r": 2.0,
+    "entry_interval": 1,
+    "max_active_pairs": 1,
+    "tie_policy": "PESSIMISTIC",
+    "risk_mode": "ATR",
+    "atr_period": 14,
+    "atr_multiplier": 1.0,
+    "adx_period": 14,
+    "bb_period": 20,
+    "bb_stddevs": 2.0,
+    "percent_r": 0.002,
+    "fixed_r": 100.0,
+    "initial_equity": 1000.0,
+    "risk_per_leg": 0.01,
+    "maker_fee": 0.0002,
+    "taker_fee": 0.0005,
+    "use_maker_entry": False,
+    "use_maker_exit": False,
+    "slippage": 0.0005,
+    "strategy_timeframe_minutes": 15,
+    "intrabar_timeframe_minutes": 1,
+    "use_intrabar_data": True,
+    "trading_start_date": None,
+    "trading_end_date": None,
+    "max_effective_leverage_per_leg": "3.0",
+    "max_combined_effective_leverage": "5.0",
+    "intrabar_missing_policy": "WARN_AND_USE_15M",
+    "zero_cost_comparison": False,
+    "enable_di_direction_selection": True,
+    "enable_di_pressure_analysis": True,
+    "di_pressure_lookback": 3,
+    "enable_mean_reversion_analysis": True,
+    "mean_reversion_period": 20,
+    "market_structure_filter_enabled": False,
+    "enable_support_resistance_analysis": False,
+    "sr_pivot_left": 5,
+    "sr_pivot_right": 5,
+    "sr_lookback_bars": 200,
+    "sr_zone_width_atr": 0.15,
+    "sr_zone_padding_atr": 0.10,
+    "sr_zone_max_cluster_span_atr": 0.50,
+    "sr_min_rejection_atr": 0.50,
+    "sr_near_distance_atr": 0.50,
+    "enable_sr_hold_confirmation": True,
+    "sr_hold_confirmation_bars": 3,
+    "sr_hold_confirmation_atr": 0.25,
+    "sr_break_tolerance_atr": 0.25,
+    "sr_break_basis": "CLOSE",
+    "sr_filter_mode": "ANALYSIS_ONLY",
+    "sr_long_avoid_near_resistance": False,
+    "sr_long_require_near_support": False,
+    "sr_long_block_broken_support": False,
+    "sr_long_min_room_to_resistance_atr": 0.0,
+    "sr_short_avoid_near_support": False,
+    "sr_short_require_near_resistance": False,
+    "sr_short_block_broken_resistance": False,
+    "sr_short_min_room_to_support_atr": 0.0,
+    "market_regime_method": "ASSET_RETURN",
+    "structural_regime_sma_days": 200,
+    "structural_regime_slope_lookback_days": 30,
+    "structural_regime_benchmark_csv": None,
+    "bull_regime_lookback_days": 90,
+    "bull_regime_return_threshold": 0.20,
+    "enable_daily_entry_schedule": False,
+    "daily_entry_time": "00:00",
+    "daily_entry_timezone": "UTC",
+    "daily_entry_missed_policy": "SKIP_DAY",
+    "analysis_level": "STANDARD",
+    "enable_trade_telemetry": False,
+    "save_full_telemetry_csv": False,
+    "save_trade_journey_summary": False,
+    "save_trade_journey_charts": False,
+    "telemetry_interval_minutes": 15,
+    "enable_indicator_lifecycle_analysis": False,
+    "lifecycle_phases": 4,
+    "lifecycle_early_checkpoints": [15, 30, 60],
+    "lifecycle_minimum_bucket_sample": 20,
+    "create_lifecycle_charts": False,
+    "lifecycle_flat_pattern_threshold_pct": 5.0,
+    "save_feature_analysis_reports": False,
+    "save_indicator_analysis_reports": True,
+    "create_standard_charts": True,
+}
+
+
+def default_gui_config() -> dict[str, Any]:
+    return copy.deepcopy(DEFAULT_GUI_CONFIG)
+
+
+def parse_percentage(value: str | float | int) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        raise ValueError("percentage is required")
+    if text.endswith("%"):
+        return float(text[:-1].strip()) / 100.0
+    return float(text)
+
+
+def format_percentage(value: float, decimals: int = 4) -> str:
+    text = f"{value * 100:.{decimals}f}".rstrip("0").rstrip(".")
+    return f"{text}%"
+
+
+def theoretical_break_even(sl_mult: float, tp_mult: float) -> float:
+    """Display helper retained for historical report math; not a config input."""
+    winning = tp_mult - sl_mult
+    losing_abs = abs(-2 * sl_mult)
+    denom = winning + losing_abs
+    return losing_abs / denom if denom > 0 else 1.0
+
+
+_LEGACY_SR_GEOMETRY = {
+    "sr_zone_width_atr": 0.50,
+    "sr_zone_padding_atr": 0.25,
+    "sr_zone_max_cluster_span_atr": 1.00,
+}
+_CURRENT_SR_GEOMETRY = {
+    "sr_zone_width_atr": 0.15,
+    "sr_zone_padding_atr": 0.10,
+    "sr_zone_max_cluster_span_atr": 0.50,
+}
+
+
+def _migrate_legacy_sr_geometry(values: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade only the exact pre-v6 GUI S/R geometry defaults.
+
+    Deliberate custom values are preserved. This migration is intentionally
+    bounded to GUI compatibility configs; native v3 research configs remain
+    explicit and reproducible.
+    """
+    migrated = dict(values)
+    try:
+        legacy = all(
+            key in migrated and float(migrated[key]) == expected
+            for key, expected in _LEGACY_SR_GEOMETRY.items()
+        )
+    except (TypeError, ValueError):
+        legacy = False
+    if legacy:
+        migrated.update(_CURRENT_SR_GEOMETRY)
+    return migrated
+
+
+def _merged_current(values: dict[str, Any]) -> dict[str, Any]:
+    values = _migrate_legacy_sr_geometry(values)
+    unknown = sorted(set(values) - set(DEFAULT_GUI_CONFIG))
+    if unknown:
+        raise ValueError(f"Unknown/retired configuration settings: {', '.join(unknown)}")
+    merged = {**default_gui_config(), **values}
+    if int(merged.get("config_version", -1)) != CONFIG_VERSION:
+        raise ValueError(f"Configuration version {CONFIG_VERSION} is required. Recreate the configuration in the current GUI.")
+    merged["strategy_profiles"] = profiles_to_dict(normalize_profiles(merged["strategy_profiles"]))
+    return merged
+
+
+def validate_config_values(values: dict[str, Any], require_paths: bool = True) -> list[str]:
+    try:
+        values = _merged_current(values)
+    except (TypeError, ValueError) as exc:
+        return [str(exc)]
+    errors: list[str] = []
+    if require_paths:
+        strategy_path = values.get("input_csv")
+        if not Path(strategy_path or "").is_file():
+            errors.append("Strategy CSV must exist.")
+        intrabar_path = values.get("intrabar_csv")
+        if values.get("use_intrabar_data") and intrabar_path and not Path(intrabar_path).is_file():
+            errors.append("Intrabar CSV must exist when enabled.")
+        if not str(values.get("output_dir", "")).strip():
+            errors.append("Output folder is required.")
+    positive = (
+        ("initial_equity", "Starting equity"), ("risk_per_leg", "Risk per trade"),
+        ("atr_period", "ATR period"), ("atr_multiplier", "ATR multiplier"),
+        ("adx_period", "ADX period"), ("bb_period", "BB period"), ("bb_stddevs", "BB standard deviations"),
+        ("percent_r", "Percentage R"), ("fixed_r", "Fixed R"),
+        ("strategy_timeframe_minutes", "Strategy timeframe"), ("intrabar_timeframe_minutes", "Intrabar timeframe"),
+        ("entry_interval", "Entry interval"), ("max_active_pairs", "Maximum active pairs"),
+    )
+    for key, label in positive:
+        try:
+            if float(values[key]) <= 0:
+                errors.append(f"{label} must be > 0.")
+        except (TypeError, ValueError, KeyError):
+            errors.append(f"{label} must be numeric.")
+    try:
+        if float(values["risk_per_leg"]) >= 1:
+            errors.append("Risk per trade must be < 100%.")
+    except (TypeError, ValueError):
+        pass
+    if values["entry_mode"] not in (EntryMode.WAIT_UNTIL_CLOSED.value, EntryMode.EVERY_N_CANDLES.value):
+        errors.append("Invalid entry mode.")
+    if values["entry_timing_mode"] not in (EntryTimingMode.SIGNAL_CLOSE.value, EntryTimingMode.NEXT_CANDLE_OPEN.value):
+        errors.append("Invalid entry timing mode.")
+    if values["ema_cross_entry_confirmation_enabled"]:
+        try:
+            if float(values["ema_cross_entry_confirmation_r"]) <= 0:
+                errors.append("EMA cross entry confirmation R must be > 0.")
+        except (TypeError, ValueError, KeyError):
+            errors.append("EMA cross entry confirmation R must be numeric.")
+    try:
+        swing_strength = int(values["fvg_structure_swing_strength"])
+        if swing_strength < 1 or swing_strength > 50:
+            errors.append("FVG structure swing strength must be between 1 and 50.")
+    except (TypeError, ValueError):
+        errors.append("FVG structure swing strength must be an integer.")
+    try:
+        clear = float(values.get("fvg_min_clear_bars", 3))
+        if not math.isfinite(clear) or not clear.is_integer() or not 0 <= clear <= 10000:
+            errors.append("FVG minimum clear candles must be an integer between 0 and 10000.")
+        away = float(values.get("fvg_min_move_away_atr", 0.5))
+        if not math.isfinite(away) or away < 0:
+            errors.append("FVG minimum move-away ATR must be finite and nonnegative.")
+    except (TypeError, ValueError):
+        errors.append("FVG separation settings must be numeric.")
+    if values.get("fvg_context_enabled", False):
+        try:
+            context = int(values["fvg_context_timeframe_minutes"])
+            strategy = int(values["strategy_timeframe_minutes"])
+            if context <= strategy:
+                errors.append("FVG context timeframe must be larger than strategy timeframe.")
+            elif context % strategy:
+                errors.append("FVG context timeframe must be an exact multiple of strategy timeframe.")
+        except (TypeError, ValueError, KeyError):
+            errors.append("FVG context timeframe must be a whole number.")
+    try:
+        from crypto_strategy_lab.fvg_htf_targets import validate_target_settings
+        validate_target_settings(values["fvg_target_mode"], int(values["fvg_target_timeframe_minutes"]),
+                                 float(values["fvg_target_minimum_r"]), values["fvg_target_no_level_policy"],
+                                 int(values["strategy_timeframe_minutes"]))
+        buffer = float(values["fvg_target_buffer_atr"])
+        if not math.isfinite(buffer) or buffer < 0:
+            raise ValueError("FVG target buffer must be finite and nonnegative")
+    except (TypeError, ValueError) as exc:
+        errors.append(str(exc))
+    if values["fvg_confirmation_enabled"]:
+        try:
+            confirm = int(values["fvg_confirmation_minutes"])
+            strategy = int(values["strategy_timeframe_minutes"])
+            intrabar = int(values["intrabar_timeframe_minutes"])
+            if not values["use_intrabar_data"]:
+                errors.append("FVG confirmation requires intrabar data.")
+            if confirm <= 0 or confirm >= strategy:
+                errors.append("FVG confirmation timeframe must be positive and smaller than strategy timeframe.")
+            elif confirm % intrabar:
+                errors.append("FVG confirmation timeframe must be an exact multiple of intrabar timeframe.")
+        except (TypeError, ValueError):
+            errors.append("FVG confirmation timeframe must be a whole number.")
+    if values["ema_920_trade_plan"] not in (
+        "PULLBACK_1R", "EMA_20_100_CROSS", "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH"
+    ):
+        errors.append("Invalid EMA 9/20 trade plan.")
+    if values.get("ema_320_exit_mode", "BOTH") not in ("BOTH", "EMA_ONLY", "FIXED_TP_ONLY"):
+        errors.append("Invalid EMA 320 exit mode.")
+    if str(values.get("fib_target_mode", "")).upper() not in ("IMPULSE_EXTREME", "FIXED_R"):
+        errors.append("Invalid Fib target mode.")
+    try:
+        if float(values["fib_fixed_target_r"]) <= 0:
+            errors.append("Fib fixed target R must be > 0.")
+    except (TypeError, ValueError, KeyError):
+        errors.append("Fib fixed target R must be numeric.")
+    if values["risk_mode"] not in [e.value for e in RiskMode]:
+        errors.append("Invalid risk mode.")
+    if values["tie_policy"] not in (TiePolicy.PESSIMISTIC.value, TiePolicy.OPTIMISTIC.value):
+        errors.append("Invalid tie policy.")
+    if values["intrabar_missing_policy"] not in [e.value for e in IntrabarMissingPolicy]:
+        errors.append("Invalid intrabar missing-data policy.")
+    if values["daily_entry_missed_policy"] not in [e.value for e in DailyEntryMissedPolicy]:
+        errors.append("Invalid daily entry missed policy.")
+    for key, label in (("maker_fee", "Maker fee"), ("taker_fee", "Taker fee"), ("slippage", "Slippage")):
+        try:
+            if float(values[key]) < 0:
+                errors.append(f"{label} must be >= 0.")
+        except (TypeError, ValueError):
+            errors.append(f"{label} must be numeric.")
+    try:
+        strategy = int(values["strategy_timeframe_minutes"]); intrabar = int(values["intrabar_timeframe_minutes"])
+        if values["use_intrabar_data"] and intrabar >= strategy:
+            errors.append("Intrabar timeframe must be smaller than strategy timeframe.")
+    except (TypeError, ValueError):
+        pass
+    if values["strategy_profile_run_mode"] not in ("ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"):
+        errors.append("Invalid Strategy Profile test mode.")
+    if values["market_regime_method"] not in ("ASSET_RETURN", "BTC_STRUCTURAL", "ASSET_STRUCTURAL"):
+        errors.append("Invalid market regime method.")
+    if values["sr_filter_mode"] not in ("ANALYSIS_ONLY", "APPLY_ENTRY_RULES"):
+        errors.append("Invalid support/resistance usage mode.")
+    for key, label in (
+        ("sr_zone_width_atr", "S/R zone merge gap"),
+        ("sr_zone_padding_atr", "S/R minimum zone width"),
+        ("sr_zone_max_cluster_span_atr", "S/R maximum zone width"),
+        ("sr_min_rejection_atr", "S/R minimum pivot rejection"),
+        ("sr_near_distance_atr", "S/R near-zone distance"),
+    ):
+        try:
+            if float(values[key]) < 0:
+                errors.append(f"{label} must be >= 0.")
+        except (TypeError, ValueError, KeyError):
+            errors.append(f"{label} must be numeric.")
+    if str(values["sr_break_basis"]).upper() not in ("CLOSE", "WICK"):
+        errors.append("Invalid support/resistance break basis.")
+    try:
+        if not 1 <= int(values["di_pressure_lookback"]) <= 100:
+            errors.append("DI pressure lookback must be between 1 and 100.")
+    except (TypeError, ValueError):
+        errors.append("DI pressure lookback must be a whole number.")
+    try:
+        if int(values["mean_reversion_period"]) <= 0:
+            errors.append("Mean reversion period must be greater than zero.")
+    except (TypeError, ValueError):
+        errors.append("Mean reversion period must be a whole number.")
+    return errors
+
+
+def build_backtest_config(values: dict[str, Any], require_paths: bool = True) -> BacktestConfig:
+    merged = _merged_current(values)
+    errors = validate_config_values(merged, require_paths=require_paths)
+    if errors:
+        raise ValueError("\n".join(errors))
+    return BacktestConfig(
+        input_csv=Path(merged["input_csv"]),
+        intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") else None,
+        output_dir=Path(merged["output_dir"]),
+        strategy_profile_run_mode=str(merged["strategy_profile_run_mode"]),
+        strategy_profiles=merged["strategy_profiles"],
+        entry_mode=EntryMode(merged["entry_mode"]),
+        entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]),
+        ema_920_trade_plan=str(merged["ema_920_trade_plan"]),
+        ema_320_flip_signals=bool(merged["ema_320_flip_signals"]),
+        ema_320_exit_mode=str(merged["ema_320_exit_mode"]),
+        ema_320_candle_confirmation_enabled=bool(merged["ema_320_candle_confirmation_enabled"]),
+        ema_320_candle_strong_close=bool(merged["ema_320_candle_strong_close"]),
+        ema_320_candle_engulfing=bool(merged["ema_320_candle_engulfing"]),
+        ema_320_candle_wick_rejection=bool(merged["ema_320_candle_wick_rejection"]),
+        ema_320_candle_star=bool(merged["ema_320_candle_star"]),
+        ema_cross_cost_cycle_enabled=bool(merged["ema_cross_cost_cycle_enabled"]),
+        ema_cross_initial_phantom_enabled=bool(merged["ema_cross_initial_phantom_enabled"]),
+        ema_cross_reentry_widening_enabled=bool(merged["ema_cross_reentry_widening_enabled"]),
+        ema_cross_entry_confirmation_enabled=bool(
+            merged["ema_cross_entry_confirmation_enabled"]
+        ),
+        ema_cross_entry_confirmation_r=float(
+            merged["ema_cross_entry_confirmation_r"]
+        ),
+        fvg_confirmation_enabled=bool(merged["fvg_confirmation_enabled"]),
+        fvg_confirmation_minutes=int(merged["fvg_confirmation_minutes"]),
+        fvg_target_mode=str(merged["fvg_target_mode"]),
+        ema_reversal_min_entry_ema300_atr=float(merged["ema_reversal_min_entry_ema300_atr"]),
+        ny_range_target_r=float(merged["ny_range_target_r"]),
+        ny_range_overshoot_policy=str(merged["ny_range_overshoot_policy"]),
+        ny_range_max_extension_pct=float(merged["ny_range_max_extension_pct"]),
+        ny_range_sr_buffer_atr=float(merged["ny_range_sr_buffer_atr"]),
+        io_entry_model=str(merged["io_entry_model"]),
+        io_context_minutes=int(merged["io_context_minutes"]),
+        ls_equal_tolerance_atr=float(merged["ls_equal_tolerance_atr"]),
+        ls_displacement_atr=float(merged["ls_displacement_atr"]),
+        ls_base_bars=int(merged["ls_base_bars"]),
+        tc_require_live_confirmations=bool(merged["tc_require_live_confirmations"]),
+        tc_min_sweep_atr=float(merged["tc_min_sweep_atr"]),
+        tc_require_structure=bool(merged["tc_require_structure"]),
+        tc_require_ifvg=bool(merged["tc_require_ifvg"]),
+        tc_require_equilibrium=bool(merged["tc_require_equilibrium"]),
+        tc_displacement_atr=float(merged["tc_displacement_atr"]),
+        tc_max_wait_bars=int(merged["tc_max_wait_bars"]),
+        tc_fvg_lookback=int(merged["tc_fvg_lookback"]),
+        tc_min_reversal_body_percent=float(merged["tc_min_reversal_body_percent"]),
+        tc_target_r=float(merged["tc_target_r"]),
+        sp_minimum_r_enabled=bool(merged["sp_minimum_r_enabled"]),
+        sp_recent_swings_enabled=bool(merged["sp_recent_swings_enabled"]),
+        sp_require_level_reclaim=bool(merged["sp_require_level_reclaim"]),
+        sp_cost_cover_enabled=bool(merged["sp_cost_cover_enabled"]),
+        sp_cost_cover_close_pct=float(merged["sp_cost_cover_close_pct"]),
+        sp_level_tolerance_atr=float(merged["sp_level_tolerance_atr"]),
+        sp_body_atr=float(merged["sp_body_atr"]),
+        sp_min_body_percent=float(merged["sp_min_body_percent"]),
+        sp_confirmation_bars=int(merged["sp_confirmation_bars"]),
+        sp_hold_minutes=int(merged["sp_hold_minutes"]),
+        ls_max_wait_bars=int(merged["ls_max_wait_bars"]),
+        sd_swing_strength=int(merged["sd_swing_strength"]),
+        sd_stop_buffer_atr=float(merged["sd_stop_buffer_atr"]),
+        sd_minimum_r=float(merged["sd_minimum_r"]),
+        photon_confirmation_minutes=int(merged["photon_confirmation_minutes"]),
+        photon_retest_minutes=int(merged["photon_retest_minutes"]),
+        photon_midpoint_fixed_1r=bool(merged["photon_midpoint_fixed_1r"]),
+        photon_candle_pullback=bool(merged["photon_candle_pullback"]),
+        photon_candle_target_timeframe=str(merged["photon_candle_target_timeframe"]),
+        photon_candle_minimum_r_enabled=bool(merged["photon_candle_minimum_r_enabled"]),
+        photon_demand_pullback=bool(merged["photon_demand_pullback"]),
+        photon_demand_entry_model=str(merged["photon_demand_entry_model"]),
+        photon_midpoint_reversal=bool(merged["photon_midpoint_reversal"]),
+        photon_quarter_range=bool(merged["photon_quarter_range"]),
+        photon_target_4h=bool(merged["photon_target_4h"]),
+        photon_flexible_entries=bool(merged["photon_flexible_entries"]),
+        photon_zone_reversal=bool(merged["photon_zone_reversal"]),
+        photon_daily_zone_only=bool(merged["photon_daily_zone_only"]),
+        photon_zone_model=str(merged["photon_zone_model"]),
+        photon_range_base_bars=int(merged["photon_range_base_bars"]),
+        photon_fresh_zone_only=bool(merged["photon_fresh_zone_only"]),
+        photon_require_zone_bos=bool(merged["photon_require_zone_bos"]),
+        photon_require_flip=bool(merged["photon_require_flip"]),
+        photon_require_sweep=bool(merged["photon_require_sweep"]),
+        photon_require_inducement=bool(merged["photon_require_inducement"]),
+        photon_require_stacking=bool(merged["photon_require_stacking"]),
+        photon_require_zone_value=bool(merged["photon_require_zone_value"]),
+        photon_require_4h_alignment=bool(merged["photon_require_4h_alignment"]),
+        photon_require_daily_alignment=bool(merged["photon_require_daily_alignment"]),
+        photon_require_weekly_alignment=bool(merged["photon_require_weekly_alignment"]),
+        photon_require_15m_internal_alignment=bool(merged["photon_require_15m_internal_alignment"]),
+        photon_fixed_target_enabled=bool(merged["photon_fixed_target_enabled"]),
+        photon_fixed_target_r=float(merged["photon_fixed_target_r"]),
+        photon_legacy_entry_and_stop=bool(merged["photon_legacy_entry_and_stop"]),
+        photon_exit_on_15m_change=bool(merged["photon_exit_on_15m_change"]),
+        photon_hold_tp_until_15m_reversal=bool(merged["photon_hold_tp_until_15m_reversal"]),
+        ema_reversal_target_r=float(merged["ema_reversal_target_r"]),
+        ema_reversal_min_gap_atr=float(merged["ema_reversal_min_gap_atr"]),
+        fvg_reject_ema100_in_tp=bool(merged["fvg_reject_ema100_in_tp"]),
+        fvg_target_timeframe_minutes=int(merged["fvg_target_timeframe_minutes"]),
+        fvg_target_minimum_r=float(merged["fvg_target_minimum_r"]),
+        fvg_target_no_level_policy=str(merged["fvg_target_no_level_policy"]),
+        fvg_target_buffer_atr=float(merged["fvg_target_buffer_atr"]),
+        fvg_context_enabled=bool(merged["fvg_context_enabled"]),
+        fvg_context_timeframe_minutes=int(merged["fvg_context_timeframe_minutes"]),
+        fvg_structure_swing_strength=int(merged["fvg_structure_swing_strength"]),
+        fvg_min_clear_bars=int(merged["fvg_min_clear_bars"]),
+        fvg_min_move_away_atr=float(merged["fvg_min_move_away_atr"]),
+        fib_half_swing_mode=bool(merged["fib_half_swing_mode"]),
+        fib_third_retest_entry=bool(merged["fib_third_retest_entry"]),
+        fib_ema_trend_gate=bool(merged["fib_ema_trend_gate"]),
+        fib_candidate_context_selection=bool(merged["fib_candidate_context_selection"]),
+        fib_candle_confirmation_enabled=bool(merged["fib_candle_confirmation_enabled"]),
+        fib_candle_strong_close=bool(merged["fib_candle_strong_close"]),
+        fib_candle_engulfing=bool(merged["fib_candle_engulfing"]),
+        fib_candle_wick_rejection=bool(merged["fib_candle_wick_rejection"]),
+        fib_candle_star=bool(merged["fib_candle_star"]),
+        fib_first_zone_hold_entry=bool(merged["fib_first_zone_hold_entry"]),
+        fib_stop_buffer_atr=float(merged["fib_stop_buffer_atr"]),
+        fib_entry_50_618_only=bool(merged["fib_entry_50_618_only"]),
+        fib_target_mode=str(merged["fib_target_mode"]).upper(),
+        fib_fixed_target_r=float(merged["fib_fixed_target_r"]),
+        fib_target_buffer_atr=float(merged["fib_target_buffer_atr"]),
+        fib_minimum_target_r=float(merged["fib_minimum_target_r"]),
+        entry_interval=int(merged["entry_interval"]),
+        enable_di_direction_selection=bool(merged["enable_di_direction_selection"]),
+        enable_di_pressure_analysis=bool(merged["enable_di_pressure_analysis"]),
+        di_pressure_lookback=int(merged["di_pressure_lookback"]),
+        enable_mean_reversion_analysis=bool(merged["enable_mean_reversion_analysis"]),
+        market_structure_filter_enabled=bool(merged["market_structure_filter_enabled"]),
+        mean_reversion_period=int(merged["mean_reversion_period"]),
+        enable_support_resistance_analysis=bool(merged["enable_support_resistance_analysis"]),
+        sr_pivot_left=int(merged["sr_pivot_left"]), sr_pivot_right=int(merged["sr_pivot_right"]),
+        sr_lookback_bars=int(merged["sr_lookback_bars"]), sr_zone_width_atr=float(merged["sr_zone_width_atr"]),
+        sr_zone_padding_atr=float(merged["sr_zone_padding_atr"]),
+        sr_zone_max_cluster_span_atr=float(merged["sr_zone_max_cluster_span_atr"]),
+        sr_min_rejection_atr=float(merged["sr_min_rejection_atr"]),
+        sr_near_distance_atr=float(merged["sr_near_distance_atr"]),
+        enable_sr_hold_confirmation=bool(merged["enable_sr_hold_confirmation"]),
+        sr_hold_confirmation_bars=int(merged["sr_hold_confirmation_bars"]),
+        sr_hold_confirmation_atr=float(merged["sr_hold_confirmation_atr"]),
+        sr_break_tolerance_atr=float(merged["sr_break_tolerance_atr"]), sr_break_basis=str(merged["sr_break_basis"]).upper(),
+        sr_filter_mode=str(merged["sr_filter_mode"]),
+        sr_long_avoid_near_resistance=bool(merged["sr_long_avoid_near_resistance"]),
+        sr_long_require_near_support=bool(merged["sr_long_require_near_support"]),
+        sr_long_block_broken_support=bool(merged["sr_long_block_broken_support"]),
+        sr_long_min_room_to_resistance_atr=float(merged["sr_long_min_room_to_resistance_atr"]),
+        sr_short_avoid_near_support=bool(merged["sr_short_avoid_near_support"]),
+        sr_short_require_near_resistance=bool(merged["sr_short_require_near_resistance"]),
+        sr_short_block_broken_resistance=bool(merged["sr_short_block_broken_resistance"]),
+        sr_short_min_room_to_support_atr=float(merged["sr_short_min_room_to_support_atr"]),
+        market_regime_method=str(merged["market_regime_method"]),
+        structural_regime_sma_days=int(merged["structural_regime_sma_days"]),
+        structural_regime_slope_lookback_days=int(merged["structural_regime_slope_lookback_days"]),
+        structural_regime_benchmark_csv=Path(merged["structural_regime_benchmark_csv"]) if merged.get("structural_regime_benchmark_csv") else None,
+        bull_regime_lookback_days=int(merged["bull_regime_lookback_days"]),
+        bull_regime_return_threshold=float(merged["bull_regime_return_threshold"]),
+        enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]),
+        daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]),
+        daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]),
+        max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),
+        risk_mode=RiskMode(merged["risk_mode"]), atr_period=int(merged["atr_period"]), atr_multiplier=float(merged["atr_multiplier"]),
+        adx_period=int(merged["adx_period"]), bb_period=int(merged["bb_period"]), bb_stddevs=float(merged["bb_stddevs"]),
+        percent_r=float(merged["percent_r"]), fixed_r=float(merged["fixed_r"]), initial_equity=float(merged["initial_equity"]),
+        risk_per_leg=float(merged["risk_per_leg"]), maker_fee=float(merged["maker_fee"]), taker_fee=float(merged["taker_fee"]),
+        use_maker_entry=bool(merged["use_maker_entry"]), use_maker_exit=bool(merged["use_maker_exit"]), slippage=float(merged["slippage"]),
+        strategy_timeframe_minutes=int(merged["strategy_timeframe_minutes"]), intrabar_timeframe_minutes=int(merged["intrabar_timeframe_minutes"]),
+        use_intrabar_data=bool(merged["use_intrabar_data"]), trading_start_date=merged.get("trading_start_date"), trading_end_date=merged.get("trading_end_date"),
+        max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
+        max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
